@@ -1,0 +1,66 @@
+system:
+  n_atoms: 100000
+  mass: 26.9815385
+  box: 121.5
+  temperature: 600.0
+  seed: 42
+
+potential:
+  kind: eam/alloy
+  params:
+    file: examples/potentials/eam_alloy/AlCu.eam.alloy
+    elements: [Al, Cu]
+
+run:
+  dt: 0.001
+  n_steps: 2000
+  thermo_every: 20
+  cutoff: 6.5
+  device: cpu
+
+ensemble:
+  kind: nvt
+  thermostat:
+    kind: berendsen
+    params:
+      t_target: 600.0
+      tau: 0.100
+      every: 1
+      max_scale_step: 0.10
+
+td:
+  cell_size: 4.0
+  zones_total: 32
+  zone_cells_w: 1
+  zone_cells_s: 2
+  traversal: snake
+
+  fast_sync: false
+  strict_fast_sync: false
+  startup_mode: scatter_zones
+  warmup_steps: 2
+  warmup_compute: true
+
+  buffer_k: 1.2
+  use_verlet: true
+  verlet_k_steps: 20
+  skin_from_buffer: true
+
+  formal_core: true
+  batch_size: 4
+  overlap_mode: table_support
+  debug_invariants: false
+  strict_min_zone_width: false
+  enable_step_id: true
+  max_step_lag: 1
+  table_max_age: 1
+  max_pending_delta_atoms: 200000
+  require_local_deps: true
+  require_table_deps: true
+  require_owner_deps: false
+  require_owner_ver: true
+  enable_req_holder: true
+  holder_gossip: true
+  chaos_mode: false
+  chaos_seed: 12345
+  chaos_delay_prob: 0.0

@@ -1,0 +1,54 @@
+system:
+  n_atoms: 256
+  mass: 1.0
+  box: 30.0
+  temperature: 1.0
+  seed: 11
+
+potential:
+  kind: lj
+  params:
+    epsilon: 1.0
+    sigma: 1.0
+
+run:
+  dt: 0.005
+  n_steps: 400
+  thermo_every: 40
+  cutoff: 2.5
+
+td:
+  cell_size: 2.5
+  zones_total: 8
+  zone_cells_w: 1
+  zone_cells_s: 1
+  traversal: snake
+
+  fast_sync: true
+  strict_fast_sync: true
+  startup_mode: scatter_zones
+  warmup_steps: 2
+  warmup_compute: true
+
+  buffer_k: 1.2
+  use_verlet: true
+  verlet_k_steps: 25
+  skin_from_buffer: true
+
+  formal_core: true
+  batch_size: 4
+  overlap_mode: table_support
+  debug_invariants: false
+  enable_step_id: true
+  max_step_lag: 1
+  table_max_age: 1
+  max_pending_delta_atoms: 200000
+  require_local_deps: true
+  require_table_deps: true
+  require_owner_deps: false
+  require_owner_ver: true
+  enable_req_holder: true
+  holder_gossip: true
+  chaos_mode: false
+  chaos_seed: 12345
+  chaos_delay_prob: 0.0

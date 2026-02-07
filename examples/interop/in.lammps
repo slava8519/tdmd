@@ -1,0 +1,11 @@
+units lj
+atom_style atomic
+boundary p p p
+read_data data.lammps
+
+pair_style lj/cut 2.50000000
+pair_coeff * * 1.00000000 1.00000000
+timestep 0.00500000
+neighbor 2.0 bin
+dump 1 all custom 10 traj.lammpstrj id type x y z vx vy vz
+run 20

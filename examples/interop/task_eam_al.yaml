@@ -1,0 +1,26 @@
+task_version: 1
+units: metal
+box:
+  x: 10.0
+  y: 10.0
+  z: 10.0
+  pbc: [true, true, true]
+atoms:
+  - id: 1
+    type: 1
+    mass: 26.9815386
+    r: [1.0, 1.0, 1.0]
+    v: [0.0, 0.0, 0.0]
+  - id: 2
+    type: 1
+    mass: 26.9815386
+    r: [2.0, 1.0, 1.0]
+    v: [0.0, 0.0, 0.0]
+potential:
+  kind: eam/alloy
+  params:
+    file: examples/interop/eam_al_ni_demo.setfl
+    elements: [Al]
+cutoff: 5.0
+dt: 0.001
+steps: 5

@@ -1,0 +1,46 @@
+{
+  "envelope_version": 1,
+  "description": "Long-run drift envelope baseline for cfg_system async verification (steps=300, every=10).",
+  "rows": [
+    {
+      "case": "cfg_system",
+      "zones_total": 4,
+      "use_verlet": false,
+      "verlet_k_steps": 10,
+      "chaos_mode": false,
+      "chaos_delay_prob": 0.0,
+      "max": {
+        "final_dr": 2.3,
+        "final_dv": 0.85,
+        "final_dE": 160.0,
+        "final_dT": 0.42,
+        "final_dP": 0.0002,
+        "rms_dr": 45.0,
+        "rms_dv": 0.3,
+        "rms_dE": 85.0,
+        "rms_dT": 0.14,
+        "rms_dP": 0.00006
+      }
+    },
+    {
+      "case": "cfg_system",
+      "zones_total": 8,
+      "use_verlet": false,
+      "verlet_k_steps": 10,
+      "chaos_mode": false,
+      "chaos_delay_prob": 0.0,
+      "max": {
+        "final_dr": 88.0,
+        "final_dv": 0.58,
+        "final_dE": 230.0,
+        "final_dT": 0.66,
+        "final_dP": 0.00033,
+        "rms_dr": 64.0,
+        "rms_dv": 0.4,
+        "rms_dE": 125.0,
+        "rms_dT": 0.25,
+        "rms_dP": 0.00011
+      }
+    }
+  ]
+}

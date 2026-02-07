@@ -1,0 +1,55 @@
+profile_version: 1
+name: smoke_local_ci
+description: Local CI profile for cluster-risk v2 lanes; allows deterministic simulated execution when MPI runner is unavailable.
+runtime:
+  config: examples/td_1d_morse_static_rr_smoke4.yaml
+  mpirun: ""
+  timeout_sec: 180
+  retries: 2
+  strict_invariants: true
+  strict_zone_width: true
+  overlap_list: [0, 1]
+  ranks_default: [2, 4]
+  ranks_per_node: 2
+  allow_simulated_cluster: true
+  prefer_simulated: true
+  stability_steps: 80
+  stability_thermo_every: 1
+  env:
+    OMP_NUM_THREADS: "1"
+scaling:
+  strong_ranks: [2, 4]
+  weak_ranks: [2, 4]
+  overlap: 1
+  cuda_aware_mpi: false
+  min_speedup: 0.40
+  min_efficiency: 0.15
+  max_weak_elapsed_ratio: 2.50
+stability:
+  ranks: [2, 4]
+  overlap: 1
+  cuda_aware_mpi: false
+  max_hG: 0
+  max_hV: 0
+  max_violW: 0
+  max_lagV: 0
+  min_diag_samples: 1
+transport_matrix:
+  ranks: [2, 4]
+  profiles:
+    - name: host_blocking
+      overlap: 0
+      cuda_aware_mpi: false
+      fabric: host_staging
+    - name: host_overlap
+      overlap: 1
+      cuda_aware_mpi: false
+      fabric: host_staging
+    - name: cudaaware_overlap
+      overlap: 1
+      cuda_aware_mpi: true
+      fabric: cuda_aware
+metadata:
+  owner: verifylab
+  intent: smoke
+  scale_envelope_file: golden/cluster_scale_envelope_v1.json

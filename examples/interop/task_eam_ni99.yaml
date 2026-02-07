@@ -1,0 +1,26 @@
+task_version: 1
+units: metal
+box:
+  x: 12.0
+  y: 12.0
+  z: 12.0
+  pbc: [true, true, true]
+atoms:
+  - id: 1
+    type: 1
+    mass: 58.6934
+    r: [1.0, 1.0, 1.0]
+    v: [0.0, 0.0, 0.0]
+  - id: 2
+    type: 1
+    mass: 58.6934
+    r: [2.4, 1.0, 1.0]
+    v: [0.0, 0.0, 0.0]
+potential:
+  kind: eam/alloy
+  params:
+    file: examples/potentials/eam_alloy/Ni99.eam.alloy
+    elements: [Ni]
+cutoff: 5.8
+dt: 0.001
+steps: 5

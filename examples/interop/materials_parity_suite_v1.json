@@ -1,0 +1,116 @@
+{
+  "suite_version": 1,
+  "description": "Materials parity suite for synthetic EAM/alloy fixture (LAMMPS-compatible reference values).",
+  "thresholds": {
+    "force_abs": 1e-10,
+    "energy_abs": 1e-10,
+    "virial_abs": 1e-10,
+    "temp_abs": 1e-10,
+    "press_abs": 1e-10,
+    "traj_r_abs": 1e-10,
+    "traj_v_abs": 1e-10,
+    "verify_abs": 1e-10
+  },
+  "cases": [
+    {
+      "name": "eam_al_serial_td_sync",
+      "task": "examples/interop/task_eam_al.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "expected": {
+        "initial": {
+          "forces": [
+            [-3.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0]
+          ],
+          "pe": 3.0,
+          "virial": 3.0,
+          "T": 0.0,
+          "P": 0.001
+        },
+        "serial_final": {
+          "positions": [
+            [0.9999986101608007, 1.0, 1.0],
+            [2.0000013898391993, 1.0, 1.0]
+          ],
+          "velocities": [
+            [-0.0005559356796650581, 0.0, 0.0],
+            [0.0005559356796650581, 0.0, 0.0]
+          ],
+          "E": 2.999999999999999,
+          "KE": 8.339035194975871e-06,
+          "PE": 2.9999916609648043,
+          "T": 2.7796783983252903e-06,
+          "P": 0.0010000083390351952
+        },
+        "sync_verify": {
+          "max_dr": 0.0,
+          "max_dv": 0.0,
+          "max_dE": 0.0,
+          "max_dT": 0.0,
+          "max_dP": 0.0,
+          "final_dr": 0.0,
+          "final_dv": 0.0,
+          "final_dE": 0.0,
+          "final_dT": 0.0,
+          "final_dP": 0.0,
+          "rms_dr": 0.0,
+          "rms_dv": 0.0,
+          "rms_dE": 0.0,
+          "rms_dT": 0.0,
+          "rms_dP": 0.0
+        }
+      }
+    },
+    {
+      "name": "eam_alloy_serial_td_sync",
+      "task": "examples/interop/task_eam_alloy.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "expected": {
+        "initial": {
+          "forces": [
+            [-3.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0]
+          ],
+          "pe": 3.0,
+          "virial": 3.0,
+          "T": 0.0,
+          "P": 0.001
+        },
+        "serial_final": {
+          "positions": [
+            [0.9999986101608007, 1.0, 1.0],
+            [2.000000638913404, 1.0, 1.0]
+          ],
+          "velocities": [
+            [-0.0005559356796650581, 0.0, 0.0],
+            [0.0002555653616931376, 0.0, 0.0]
+          ],
+          "E": 3.0000000000000004,
+          "KE": 6.086257810186468e-06,
+          "PE": 2.9999939137421903,
+          "T": 2.0287526033954895e-06,
+          "P": 0.00100000608625781
+        },
+        "sync_verify": {
+          "max_dr": 0.0,
+          "max_dv": 0.0,
+          "max_dE": 0.0,
+          "max_dT": 0.0,
+          "max_dP": 0.0,
+          "final_dr": 0.0,
+          "final_dv": 0.0,
+          "final_dE": 0.0,
+          "final_dT": 0.0,
+          "final_dP": 0.0,
+          "rms_dr": 0.0,
+          "rms_dv": 0.0,
+          "rms_dE": 0.0,
+          "rms_dT": 0.0,
+          "rms_dP": 0.0
+        }
+      }
+    }
+  ]
+}

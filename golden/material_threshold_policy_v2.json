@@ -1,0 +1,43 @@
+{
+  "policy_version": 2,
+  "fixture": "examples/interop/materials_parity_suite_v2.json",
+  "suite_version": 2,
+  "generated_utc": "2026-02-06T14:06:50Z",
+  "scales": {
+    "eos": 3.9000000000000004,
+    "thermo": 3.928412212598552,
+    "transport": 2.0000013898391993,
+    "verify": 1.0
+  },
+  "relative_factors": {
+    "eos": 1e-12,
+    "thermo": 1e-12,
+    "transport": 1e-12,
+    "verify": 1e-12
+  },
+  "floor": 1e-10,
+  "thresholds": {
+    "force_abs": 1e-10,
+    "energy_abs": 1e-10,
+    "virial_abs": 1e-10,
+    "temp_abs": 1e-10,
+    "press_abs": 1e-10,
+    "traj_r_abs": 1e-10,
+    "traj_v_abs": 1e-10,
+    "verify_abs": 1e-10,
+    "eos_energy_abs": 1e-10,
+    "eos_virial_abs": 1e-10,
+    "eos_press_abs": 1e-10,
+    "thermo_energy_abs": 1e-10,
+    "thermo_temp_abs": 1e-10,
+    "thermo_press_abs": 1e-10,
+    "transport_r_abs": 1e-10,
+    "transport_v_abs": 1e-10,
+    "transport_verify_abs": 1e-10
+  },
+  "notes": [
+    "CPU path is reference semantics.",
+    "Thresholds are derived from fixture value scale with absolute floor.",
+    "Transport and verify classes are intentionally conservative in v2 smoke."
+  ]
+}

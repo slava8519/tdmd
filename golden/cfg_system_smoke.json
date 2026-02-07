@@ -1,0 +1,19 @@
+{
+  "preset": "smoke",
+  "rows": [
+    {
+      "case": "cfg_system",
+      "zones_total": 4,
+      "use_verlet": false,
+      "verlet_k_steps": 10,
+      "chaos_mode": false,
+      "chaos_delay_prob": 0.0,
+      "max_dr": 107.21135480406984,
+      "max_dv": 1.2916389121838907,
+      "max_dE": 174.14002194456407,
+      "max_dT": 0.24273879873550186,
+      "max_dP": 4.787743522013943e-05,
+      "ok": false
+    }
+  ]
+}

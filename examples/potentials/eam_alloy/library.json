@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "lammps_stable": {
+      "project": "LAMMPS",
+      "branch": "stable",
+      "branch_head_sha": "9f06a79b033159c606ca880ee63f0ec82b37dc3a",
+      "tree_url": "https://github.com/lammps/lammps/tree/stable/potentials",
+      "readme_url": "https://raw.githubusercontent.com/lammps/lammps/stable/potentials/README"
+    },
+    "nist_ipr": {
+      "project": "NIST Interatomic Potentials Repository",
+      "base_url": "https://www.ctcms.nist.gov/potentials/",
+      "systems_root": "https://www.ctcms.nist.gov/potentials/testing/system/"
+    }
+  },
+  "potentials": [
+    {
+      "file": "examples/potentials/eam_alloy/AlCu.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Al", "Cu"],
+      "citation": "Cai and Ye, Phys Rev B, 54, 8398-8410 (1996)",
+      "source_id": "lammps_stable",
+      "source_url": "https://raw.githubusercontent.com/lammps/lammps/stable/potentials/AlCu.eam.alloy",
+      "sha256": "6e551398314325da7211c7965771667a1e7637345c943ccaf8e78820ab6b8f5c"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/Al_zhou.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Al"],
+      "citation": "Zhou et al, Acta Mater, 49, 4005 (2001)",
+      "source_id": "lammps_stable",
+      "source_url": "https://raw.githubusercontent.com/lammps/lammps/stable/potentials/Al_zhou.eam.alloy",
+      "sha256": "07d9aeb498075e34fbf14bdb2ba03b4b214b5382a0c27617bda7fd1bea8b18bc"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/Cu_mishin1.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Cu"],
+      "citation": "Mishin, Phys Rev B, 63, 224106 (2001)",
+      "source_id": "lammps_stable",
+      "source_url": "https://raw.githubusercontent.com/lammps/lammps/stable/potentials/Cu_mishin1.eam.alloy",
+      "sha256": "213fbe42fa3df6dfc12138426db23659ff16e46feefe7f5fb7c34fb769911d41"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/Cu_zhou.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Cu"],
+      "citation": "Zhou et al, Acta Mater, 49, 4005 (2001)",
+      "source_id": "lammps_stable",
+      "source_url": "https://raw.githubusercontent.com/lammps/lammps/stable/potentials/Cu_zhou.eam.alloy",
+      "sha256": "7c4f7e498f8399612bd919ea6138921f82b54a02411ce0c04206a046978c6a5f"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/CuNi.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Ni", "Cu"],
+      "citation": "Onat and Durukanoglu, J Phys Cond Matt, 26, 035404 (2014)",
+      "source_id": "lammps_stable",
+      "source_url": "https://raw.githubusercontent.com/lammps/lammps/stable/potentials/CuNi.eam.alloy",
+      "sha256": "6147066a4d27379a5e48b565a43da19ed4e8c98bb6c3dd5e84517b31df881fd3"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/Fe_Mishin2006.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Fe"],
+      "citation": "Chamati et al, Phys Rev B, 74, 144116 (2006)",
+      "source_id": "nist_ipr",
+      "source_url": "https://www.ctcms.nist.gov/potentials/Download/2006--Chamati-H-Papanicolaou-N-I-Mishin-Y-Papaconstantopoulos-D-A--Fe/2/Fe_Mishin2006.eam.alloy",
+      "sha256": "7e5ab22f1539347958e8d79edd81cb387f4e2d37744852aecbf7badf5bc048ac"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/Ni99.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Ni"],
+      "citation": "Mishin et al, Phys Rev B, 59, 3393 (1999)",
+      "source_id": "nist_ipr",
+      "source_url": "https://www.ctcms.nist.gov/potentials/Download/1999--Mishin-Y-Farkas-D-Mehl-M-J-Papaconstantopoulos-D-A--Ni/2/Ni99.eam.alloy",
+      "sha256": "fb84d3dc0ed9d68136ee3eaa638e3dd178f3057e7de549fe0029069e749a9876"
+    },
+    {
+      "file": "examples/potentials/eam_alloy/Ti_Zhou04.eam.alloy",
+      "format": "eam/alloy",
+      "elements": ["Ti"],
+      "citation": "Zhou et al, Phys Rev B, 69, 144113 (2004)",
+      "source_id": "nist_ipr",
+      "source_url": "https://www.ctcms.nist.gov/potentials/Download/2004--Zhou-X-W-Johnson-R-A-Wadley-H-N-G--Ti/4/Ti_Zhou04.eam.alloy",
+      "sha256": "497027739eac0c178dd1347e29ba963487106285c93a3cdbd993844b0af8c32f"
+    }
+  ]
+}

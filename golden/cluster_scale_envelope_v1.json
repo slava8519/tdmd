@@ -1,0 +1,28 @@
+{
+  "envelope_version": 1,
+  "description": "Cluster scaling envelope baseline for v2 smoke lanes.",
+  "rows": [
+    {
+      "mode": "strong",
+      "ranks": 2,
+      "min_speedup": 0.95,
+      "min_efficiency": 0.95
+    },
+    {
+      "mode": "strong",
+      "ranks": 4,
+      "min_speedup": 0.40,
+      "min_efficiency": 0.15
+    },
+    {
+      "mode": "weak",
+      "ranks": 2,
+      "max_weak_elapsed_ratio": 1.20
+    },
+    {
+      "mode": "weak",
+      "ranks": 4,
+      "max_weak_elapsed_ratio": 2.50
+    }
+  ]
+}

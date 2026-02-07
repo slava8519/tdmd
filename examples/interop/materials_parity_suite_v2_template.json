@@ -1,0 +1,73 @@
+{
+  "suite_version": 2,
+  "description": "Materials parity suite v2 for metals/alloys across broader thermodynamic states.",
+  "thresholds": {
+    "force_abs": 1e-10,
+    "energy_abs": 1e-10,
+    "virial_abs": 1e-10,
+    "temp_abs": 1e-10,
+    "press_abs": 1e-10,
+    "traj_r_abs": 1e-10,
+    "traj_v_abs": 1e-10,
+    "verify_abs": 1e-10
+  },
+  "property_thresholds": {
+    "eos_energy_abs": 1e-10,
+    "eos_virial_abs": 1e-10,
+    "eos_press_abs": 1e-10,
+    "thermo_energy_abs": 1e-10,
+    "thermo_temp_abs": 1e-10,
+    "thermo_press_abs": 1e-10,
+    "transport_r_abs": 1e-10,
+    "transport_v_abs": 1e-10,
+    "transport_verify_abs": 1e-10
+  },
+  "cases": [
+    {
+      "name": "eam_al_t300_base",
+      "task": "examples/interop/task_eam_al.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "state": {"temperature_k": 300, "density": "base", "composition": "Al"}
+    },
+    {
+      "name": "eam_al_t600_base",
+      "task": "examples/interop/task_eam_al_t600.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "state": {"temperature_k": 600, "density": "base", "composition": "Al"}
+    },
+    {
+      "name": "eam_al_t600_dense",
+      "task": "examples/interop/task_eam_al_dense_t600.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "state": {"temperature_k": 600, "density": "dense", "composition": "Al"}
+    },
+    {
+      "name": "eam_alloy_t300_base",
+      "task": "examples/interop/task_eam_alloy.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "state": {"temperature_k": 300, "density": "base", "composition": "Al-Ni"}
+    },
+    {
+      "name": "eam_alloy_t900_base",
+      "task": "examples/interop/task_eam_alloy_t900.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "state": {"temperature_k": 900, "density": "base", "composition": "Al-Ni"}
+    },
+    {
+      "name": "eam_alloy_t900_dense",
+      "task": "examples/interop/task_eam_alloy_dense_t900.yaml",
+      "steps": 5,
+      "zones_total": 1,
+      "state": {"temperature_k": 900, "density": "dense", "composition": "Al-Ni"}
+    }
+  ],
+  "provenance": {
+    "generated_from_template": "examples/interop/materials_parity_suite_v2_template.json",
+    "notes": "Expected values are generated with scripts/generate_materials_parity_fixture.py on CPU reference path."
+  }
+}

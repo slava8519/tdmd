@@ -1,0 +1,55 @@
+profile_version: 1
+name: cluster_real_template
+description: Template profile for hardware cluster strict runs (no simulated fallback).
+runtime:
+  config: examples/td_1d_morse_static_rr_smoke4.yaml
+  mpirun: ""
+  timeout_sec: 300
+  retries: 2
+  strict_invariants: true
+  strict_zone_width: true
+  overlap_list: [0, 1]
+  ranks_default: [2, 4]
+  ranks_per_node: 4
+  allow_simulated_cluster: false
+  prefer_simulated: false
+  stability_steps: 200
+  stability_thermo_every: 1
+  env:
+    OMP_NUM_THREADS: "1"
+scaling:
+  strong_ranks: [2, 4, 8]
+  weak_ranks: [2, 4, 8]
+  overlap: 1
+  cuda_aware_mpi: true
+  min_speedup: 1.20
+  min_efficiency: 0.30
+  max_weak_elapsed_ratio: 1.50
+stability:
+  ranks: [2, 4, 8]
+  overlap: 1
+  cuda_aware_mpi: true
+  max_hG: 0
+  max_hV: 0
+  max_violW: 0
+  max_lagV: 0
+  min_diag_samples: 3
+transport_matrix:
+  ranks: [2, 4, 8]
+  profiles:
+    - name: host_blocking
+      overlap: 0
+      cuda_aware_mpi: false
+      fabric: host_staging
+    - name: host_overlap
+      overlap: 1
+      cuda_aware_mpi: false
+      fabric: host_staging
+    - name: cudaaware_overlap
+      overlap: 1
+      cuda_aware_mpi: true
+      fabric: cuda_aware
+metadata:
+  owner: verifylab
+  intent: hardware_strict
+  scale_envelope_file: golden/cluster_scale_envelope_v1.json

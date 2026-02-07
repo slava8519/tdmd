@@ -1,0 +1,26 @@
+task_version: 1
+units: metal
+box:
+  x: 12.0
+  y: 12.0
+  z: 12.0
+  pbc: [true, true, true]
+atoms:
+  - id: 1
+    type: 1
+    mass: 55.845
+    r: [1.0, 1.0, 1.0]
+    v: [0.0, 0.0, 0.0]
+  - id: 2
+    type: 1
+    mass: 55.845
+    r: [2.5, 1.0, 1.0]
+    v: [0.0, 0.0, 0.0]
+potential:
+  kind: eam/alloy
+  params:
+    file: examples/potentials/eam_alloy/Fe_Mishin2006.eam.alloy
+    elements: [Fe]
+cutoff: 5.5
+dt: 0.001
+steps: 5
