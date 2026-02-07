@@ -341,7 +341,6 @@ QUALITY GATES:
 
 DELIVERABLES PER PR:
   - Код + тесты + обновлённые docs,
-  - краткий changelog в README (секция “vX.Y changes”),
+  - обновлённые release notes в `RELEASE_NOTES.md` (README не является changelog),
   - пример YAML в examples/ для новой функциональности.
 ```
-

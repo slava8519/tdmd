@@ -19,6 +19,7 @@ TDMD-TD implements a strict **Time Decomposition (TD)** molecular dynamics metho
 - Current governance reference for mode guarantees and strict gates: `docs/MODE_CONTRACTS.md`.
 - Universal visualization/analysis contract (`PR-VZ01..PR-VZ08`) is implemented.
   Ongoing work is maintenance/refinement under `docs/VISUALIZATION.md`.
+- Versioning policy: Git tags/GitHub releases + `RELEASE_NOTES.md` (keep `README.md` current-state).
 
 ## Global Rules (apply to all agents)
 

@@ -18,6 +18,7 @@ Current status:
 - Universal visualization/analysis track (Phase G, PR-VZ01..PR-VZ08) is implemented.
 - Active cycle: GPU portability via Kokkos (Phase H, PR-K01..PR-K10, see `docs/PORTABILITY_KOKKOS_PLAN.md`).
 - Work mode: portability implementation in strict PR order without TD semantic drift.
+- Versioning: changelog lives in `RELEASE_NOTES.md` (keep `README.md` current-state).
 
 Rules:
 - Do not change TD automaton semantics (F/D/P/W/S).

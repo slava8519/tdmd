@@ -1,9 +1,15 @@
-.PHONY: test
+.PHONY: test verify-smoke
+
+PY ?= .venv/bin/python
+ifeq ($(wildcard $(PY)),)
+  PY = python3
+endif
+
 test:
-	python -m pytest -q
+	$(PY) -m pytest -q
 
 
 verify-smoke:
-	python -m pytest -q
-	python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
-	python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict
+	$(PY) -m pytest -q
+	$(PY) scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
+	$(PY) scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict

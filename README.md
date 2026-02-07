@@ -23,22 +23,52 @@ Requirements:
 
 Setup:
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 Optional GPU (current implementation is CUDA-first via CuPy):
 - install a CuPy build matching your CUDA version, then use `--device cuda` (falls back to CPU if unavailable).
 
+All commands below assume `source .venv/bin/activate`.
+
+## Quickstart
+
+CPU only (serial), 5 commands:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m tdmd.main run examples/td_1d_morse.yaml --mode serial --device cpu
+```
+
+MPI (TD-MPI), 2 and 4 ranks:
+```bash
+mpirun -np 2 python -m tdmd.main run examples/td_1d_morse_static_rr.yaml --mode td_full_mpi --device cpu
+mpirun -np 4 python -m tdmd.main run examples/td_1d_morse_static_rr_smoke4.yaml --mode td_full_mpi --device cpu
+```
+
+GPU (CUDA today; AMD support is planned via Kokkos, see `docs/PORTABILITY_KOKKOS_PLAN.md`):
+```bash
+# Prereq: install a CuPy build matching your CUDA version (example for CUDA 12.x):
+# python -m pip install cupy-cuda12x
+python -m tdmd.main run examples/td_1d_morse.yaml --mode td_local --device cuda
+```
+
+Notes:
+- If `--device cuda` is requested but unavailable, TDMD falls back to CPU with a warning.
+- Hardware-strict GPU verification must treat CPU fallback as failure (see `docs/VERIFYLAB_GPU.md`).
+
 ## Quick Checks (Strict)
 
 Recommended local gates (CI-grade):
 ```bash
-python -m pytest -q
-python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
-python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
+.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict
 ```
 
 Make targets:

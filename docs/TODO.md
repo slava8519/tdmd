@@ -11,12 +11,12 @@
 - [ ] GPU changes are refinement only: CPU path remains formal reference.
 - [ ] Do not mark task complete if verification is non-strict only.
 - [ ] Minimum quality gates for completion:
-  - [ ] `python -m pytest -q`
-  - [ ] `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict`
-  - [ ] `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict`
-  - [ ] if PR touches ensemble behavior: `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset nvt_smoke --strict`
-  - [ ] if PR touches ensemble behavior: `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset npt_smoke --strict`
-  - [ ] if PR touches GPU: `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke --strict`
+  - [ ] `.venv/bin/python -m pytest -q`
+  - [ ] `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict`
+  - [ ] `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict`
+  - [ ] if PR touches ensemble behavior: `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset nvt_smoke --strict`
+  - [ ] if PR touches ensemble behavior: `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset npt_smoke --strict`
+  - [ ] if PR touches GPU: `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke --strict`
   - [ ] if PR touches portability-track GPU backend policy: keep hardware-strict no-fallback rule active (`require_effective_gpu` / compatibility alias policy).
 - [ ] Required docs updates when behavior changes:
   - [ ] `docs/SPEC_TD_AUTOMATON.md`
