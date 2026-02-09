@@ -1,4 +1,35 @@
-# Release Notes
+## 4.5.4
+- Added docs/CONTRACTS.md with hard do-not-break rules for Codex cycles.
+- Added regression tripwire tests for W<=1 enforcement and A4b tie-break presence.
+
+## 4.5.3
+- Added PR-0 golden SoA data contract (docs/PR0_DATA_CONTRACT.md) and tdmd/zone_views.py builders.
+- Added unit test for zone view contiguity/dtypes.
+
+## 4.5.1
+- Added docs/GPU_BACKEND_API.md: strict contract for GPU compute backend integration.
+
+## 4.5.0
+- Docs/structure cleanup + GPU planning docs.
+- Unified versioning via root VERSION file.
+- Added GPU Backend Engineer agent + CODEX GPU master prompt.
+
+## 4.4.8
+- VerifyLab mpi_overlap summary: Pareto frontier (speedup vs wfgC_rate) + suggested operating points under cycle-rate budgets.
+
+## 4.4.7
+- Normalized WFG metrics exported: wfgC_rate and wfgC_per_100_steps (mpi_overlap CSV + verifylab summary).
+
+## 4.4.6
+- Scientific WFG diagnostics summary: reports max(wfgC), max(wfgO), cycle_rate and ranks where worst contention observed.
+
+## 4.4.5
+- VerifyLab summary emits non-fatal warning if transient local WFG cycles are observed in mpi_overlap mode.
+
+## 4.4.4
+- Export WFG diagnostics (wfgS/wfgC/wfgO) into MPI overlap bench CSV and verifylab summary.
+
+## 4.4.2\n- A4b runtime cycle-breaking via priority scheduling (step_id, owner_rank, zone_id).\n- progress_epoch instrumentation for liveness.\n- chaos no-stall liveness test (single-rank).\n\n# Release Notes
 
 This file is the project changelog. `README.md` documents the project **as it is today**.
 

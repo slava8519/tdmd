@@ -1,3 +1,11 @@
+## GPU Cycle (PR-0) — Backend Abstraction (v4.5.0)
+- [ ] Add `tdmd/backends/base.py` ZoneComputeBackend.
+- [ ] Add `tdmd/backends/cpu.py` CPUBackend.
+- [ ] Wire td_local + td_full_mpi compute path through backend.
+- [ ] Add backend equivalence tests.
+- [ ] Keep `pytest -q` green.
+
+
 # Task Board (Unified CPU + GPU, PR-sized)
 
 > Orchestrator maintains this file.

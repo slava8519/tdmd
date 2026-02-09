@@ -169,3 +169,19 @@ A task is complete only if:
   - produced artifacts include schema/version metadata,
 - docs are updated appropriately,
 - no invariant regressions (e.g., `hG3/hV3/tG3`) are introduced.
+
+
+
+## Agent GPU Backend Engineer
+Mission: implement GPU acceleration as a compute-backend refinement.
+
+Constraints:
+- MUST NOT change TD automaton semantics, deps rules, or liveness policy.
+- MUST keep `W<=1` formal core intact.
+- MUST keep verify v2 green.
+
+Deliverables:
+- Backend interface + CPUBackend.
+- Feature-gated GPUBackend (default OFF).
+- Minimal GPU correctness test.
+- Verifylab integration for GPU benchmarks.

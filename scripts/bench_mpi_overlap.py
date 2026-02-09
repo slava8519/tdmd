@@ -176,7 +176,10 @@ def _iter_rows(
             hV_max, hV_samples = _diag_max(text, "hV")
             violW_max, violW_samples = _diag_max(text, "violW")
             lagV_max, lagV_samples = _diag_max(text, "lagV")
-            diag_samples = min(hG_samples, hV_samples, violW_samples, lagV_samples)
+            wfgC_max, wfgC_samples = _diag_max(text, "wfgC")
+            wfgO_max, wfgO_samples = _diag_max(text, "wfgO")
+            wfgS_max, wfgS_samples = _diag_max(text, "wfgS")
+            diag_samples = min(hG_samples, hV_samples, violW_samples, lagV_samples, wfgC_samples, wfgO_samples, wfgS_samples)
             inv_ok = bool((hG_max == 0) and (hV_max == 0) and (violW_max == 0) and (lagV_max == 0))
             parse_ok = bool(diag_samples > 0)
             strict_ok = bool((not strict_invariants) or (inv_ok and parse_ok))
@@ -191,6 +194,11 @@ def _iter_rows(
                     "violW_max": int(violW_max),
                     "lagV_max": int(lagV_max),
                     "diag_samples": int(diag_samples),
+                    "wfgC_max": int(wfgC_max),
+                    "wfgO_max": int(wfgO_max),
+                    "wfgS_max": int(wfgS_max),
+                    "wfgC_rate": float(wfgC_max) / float(wfgS_max) if int(wfgS_max) > 0 else 0.0,
+                    "wfgC_per_100_steps": 100.0 * float(wfgC_max) / float(steps) if int(steps) > 0 else 0.0,
                     "invariants_ok": int(inv_ok),
                     "strict_invariants_ok": int(strict_ok),
                     "attempts": int(attempts),
@@ -221,6 +229,11 @@ def _write_outputs(*, args, rows: list[dict[str, int | float]], cfg_path: Path, 
                 "violW_max",
                 "lagV_max",
                 "diag_samples",
+                "wfgC_max",
+                "wfgO_max",
+                "wfgS_max",
+                "wfgC_rate",
+                "wfgC_per_100_steps",
                 "invariants_ok",
                 "strict_invariants_ok",
                 "attempts",
@@ -243,6 +256,11 @@ def _write_outputs(*, args, rows: list[dict[str, int | float]], cfg_path: Path, 
                     int(r["violW_max"]),
                     int(r["lagV_max"]),
                     int(r["diag_samples"]),
+                    int(r.get("wfgC_max", 0)),
+                    int(r.get("wfgO_max", 0)),
+                    int(r.get("wfgS_max", 0)),
+                    f"{float(r.get('wfgC_rate', 0.0)):.6f}",
+                    f"{float(r.get('wfgC_per_100_steps', 0.0)):.6f}",
                     int(r["invariants_ok"]),
                     int(r["strict_invariants_ok"]),
                     int(r["attempts"]),

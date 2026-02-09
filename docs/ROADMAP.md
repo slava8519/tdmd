@@ -73,3 +73,7 @@
   - DoD: NVIDIA/AMD hardware-strict lanes reject fallback and publish backend evidence.
 - PR-K10 Final consolidation and ops handoff.
   - DoD: docs/prompts/gates are internally consistent and auditable.
+
+
+## GPU
+See `docs/ROADMAP_GPU.md` and `docs/PR_PLAN_GPU.md`.

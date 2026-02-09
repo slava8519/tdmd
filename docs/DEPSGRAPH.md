@@ -28,3 +28,10 @@ No part of the dependency definition assumes ring adjacency or prev/next ranks.
 Static ownership mode: each zone is owned by `owner_rank(zid)=zid % P`.
 No REC_ZONE pipeline transfers are performed; only HALO and MIGRATION deltas
 are routed to the owner/holder.
+
+
+## Liveness assumptions
+See `docs/LIVENESS.md` for A1–A4 and liveness lemmas (deadlock avoidance / progress).
+
+
+See `docs/WFG_DIAGNOSTICS.md` for local sampled WFG diagnostics.
