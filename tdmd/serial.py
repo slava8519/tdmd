@@ -9,6 +9,7 @@ from .forces_gpu import (
     supports_pair_gpu,
 )
 from .ensembles import apply_ensemble_step, build_ensemble_spec
+from .atoms import normalize_atom_types, normalize_mass
 from .observer import emit_observer, observer_accepts_box
 from .potentials import EAMAlloyPotential
 
@@ -23,25 +24,18 @@ def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box
     """Эталонный последовательный MD (Velocity-Verlet), силы через cell-list по всем атомам."""
     ids = np.arange(r.shape[0], dtype=np.int32)
     rc = cutoff  # для serial достаточно cutoff cell size
-    if np.isscalar(mass):
-        m = float(mass)
-        if m <= 0.0:
-            raise ValueError("mass must be positive")
+
+    mass_scalar, mass_arr, inv_mass_scalar = normalize_mass(mass, n_atoms=r.shape[0])
+    if mass_arr is None:
+        m = float(mass_scalar)
         masses = None
-        inv_m = 1.0 / m
+        inv_m = float(inv_mass_scalar)
     else:
-        masses = np.asarray(mass, dtype=float)
-        if masses.ndim != 1 or masses.shape[0] != r.shape[0]:
-            raise ValueError("mass array must have shape (N,)")
-        if np.any(masses <= 0.0):
-            raise ValueError("all masses must be positive")
+        m = None
+        masses = mass_arr
         inv_m = None
-    if atom_types is None:
-        atom_types = np.ones(r.shape[0], dtype=np.int32)
-    else:
-        atom_types = np.asarray(atom_types, dtype=np.int32)
-        if atom_types.ndim != 1 or atom_types.shape[0] != r.shape[0]:
-            raise ValueError("atom_types must have shape (N,)")
+
+    atom_types = normalize_atom_types(atom_types, n_atoms=r.shape[0])
     backend = resolve_backend(device)
     use_gpu_pair = (backend.device == "cuda") and supports_pair_gpu(potential)
     ensemble = build_ensemble_spec(

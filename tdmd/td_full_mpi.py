@@ -24,6 +24,7 @@ from .output import OutputSpec, make_output_bundle
 from .td_trace import TDTraceLogger, format_invariant_flags
 from .backend import cuda_device_for_local_rank, local_rank_from_env, resolve_backend
 from .ensembles import apply_ensemble_step, build_ensemble_spec
+from .atoms import normalize_atom_types
 
 @dataclass
 class TDStats:
@@ -247,12 +248,7 @@ def run_td_full_mpi_1d(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarr
     if rank == 0 and bool(cuda_aware_mpi) and not cuda_aware_active:
         print("[backend] cuda_aware_mpi requested but inactive (requires CUDA backend); using host-staging", flush=True)
 
-    if atom_types is None:
-        atom_types = np.ones(r.shape[0], dtype=np.int32)
-    else:
-        atom_types = np.asarray(atom_types, dtype=np.int32)
-        if atom_types.ndim != 1 or atom_types.shape[0] != r.shape[0]:
-            raise ValueError("atom_types must have shape (N,)")
+    atom_types = normalize_atom_types(atom_types, n_atoms=r.shape[0])
 
     trace = None
     if trace_enabled:
