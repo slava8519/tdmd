@@ -12,6 +12,7 @@ from .forces_cells import forces_on_targets_zonecells, forces_on_targets_celllis
 from .celllist import build_cell_list
 from .backend import resolve_backend
 from .ensembles import apply_ensemble_step, build_ensemble_spec
+from .force_dispatch import try_gpu_forces_on_targets
 from .forces_gpu import (
     forces_on_targets_celllist_backend,
     forces_on_targets_pair_backend,
@@ -19,7 +20,6 @@ from .forces_gpu import (
 )
 from .atoms import normalize_atom_types, normalize_mass
 from .observer import emit_observer, observer_accepts_box
-from .potentials import EAMAlloyPotential
 
 def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box: float, potential,
                  dt: float, cutoff: float, n_steps: int,
@@ -76,6 +76,7 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
         emit_observer(observer, accepts_box=accepts_box, step=step, r=r, v=v, box=float(box))
 
     many_body = hasattr(potential, "forces_energy_virial")
+    rc_full = max(float(cutoff), 1e-12)
 
     def _apply_ensemble(step: int, *, atom_box: float) -> tuple[float, float]:
         new_box, _lam_t, lam_b = apply_ensemble_step(
@@ -119,52 +120,26 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
             raise ValueError("NPT scaling violated zone width >= cutoff in td_local 3D layout")
 
     def _forces_full(rr: np.ndarray) -> np.ndarray:
-        if use_gpu_pair:
+        if backend.device == "cuda":
             ids_all = np.arange(rr.shape[0], dtype=np.int32)
-            if isinstance(potential, EAMAlloyPotential):
-                f_gpu = forces_on_targets_pair_backend(
-                    r=rr,
-                    box=box,
-                    cutoff=cutoff,
-                    potential=potential,
-                    target_ids=ids_all,
-                    candidate_ids=ids_all,
-                    atom_types=atom_types,
-                    backend=backend,
-                )
-                if f_gpu is not None:
-                    return np.asarray(f_gpu, dtype=float)
-            else:
-                f_gpu = forces_on_targets_celllist_backend(
-                    r=rr,
-                    box=box,
-                    cutoff=cutoff,
-                    rc=max(cutoff, 1e-12),
-                    potential=potential,
-                    target_ids=ids_all,
-                    candidate_ids=ids_all,
-                    atom_types=atom_types,
-                    backend=backend,
-                )
-                if f_gpu is not None:
-                    return np.asarray(f_gpu, dtype=float)
-            f_gpu2 = forces_on_targets_pair_backend(
+            f_gpu = try_gpu_forces_on_targets(
                 r=rr,
                 box=box,
                 cutoff=cutoff,
+                rc=rc_full,
                 potential=potential,
                 target_ids=ids_all,
                 candidate_ids=ids_all,
                 atom_types=atom_types,
                 backend=backend,
             )
-            if f_gpu2 is not None:
-                return np.asarray(f_gpu2, dtype=float)
+            if f_gpu is not None:
+                return f_gpu
         if many_body:
             f_all, _pe, _w = potential.forces_energy_virial(rr, box, cutoff, atom_types)
             return np.asarray(f_all, dtype=float)
         ids_all = np.arange(rr.shape[0], dtype=np.int32)
-        cell = build_cell_list(rr, ids_all, box, rc=max(cutoff, 1e-12))
+        cell = build_cell_list(rr, ids_all, box, rc=rc_full)
         return forces_on_targets_celllist_compact(
             rr, box, potential, cutoff, ids_all, cell, atom_types=atom_types
         )
