@@ -2,6 +2,7 @@ from __future__ import annotations
 import csv
 import os
 import time
+import warnings
 from typing import Optional
 
 from .zones import ZoneType
@@ -68,5 +69,8 @@ class TDTraceLogger:
         try:
             if self._f is not None:
                 self._f.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                f"TDTraceLogger.close() failed for {self.path!r}: {exc!r}",
+                RuntimeWarning,
+            )
