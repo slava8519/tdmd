@@ -3,15 +3,10 @@ from typing import Union
 import numpy as np
 from .celllist import forces_on_targets_celllist
 from .backend import resolve_backend
-from .forces_gpu import (
-    forces_on_targets_celllist_backend,
-    forces_on_targets_pair_backend,
-    supports_pair_gpu,
-)
+from .force_dispatch import try_gpu_forces_on_targets
 from .ensembles import apply_ensemble_step, build_ensemble_spec
 from .atoms import normalize_atom_types, normalize_mass
 from .observer import emit_observer, observer_accepts_box
-from .potentials import EAMAlloyPotential
 
 def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box: float, potential,
                dt: float, cutoff: float, n_steps: int, thermo_every: int = 0,
@@ -37,7 +32,6 @@ def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box
 
     atom_types = normalize_atom_types(atom_types, n_atoms=r.shape[0])
     backend = resolve_backend(device)
-    use_gpu_pair = (backend.device == "cuda") and supports_pair_gpu(potential)
     ensemble = build_ensemble_spec(
         kind=ensemble_kind,
         thermostat=thermostat,
@@ -52,46 +46,19 @@ def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box
         emit_observer(observer, accepts_box=accepts_box, step=step, r=r, v=v, box=float(box))
 
     def _forces(rr: np.ndarray) -> np.ndarray:
-        if use_gpu_pair:
-            if isinstance(potential, EAMAlloyPotential):
-                f_gpu2 = forces_on_targets_pair_backend(
-                    r=rr,
-                    box=box,
-                    cutoff=cutoff,
-                    potential=potential,
-                    target_ids=ids,
-                    candidate_ids=ids,
-                    atom_types=atom_types,
-                    backend=backend,
-                )
-                if f_gpu2 is not None:
-                    return np.asarray(f_gpu2, dtype=float)
-            else:
-                f_gpu = forces_on_targets_celllist_backend(
-                    r=rr,
-                    box=box,
-                    cutoff=cutoff,
-                    rc=rc,
-                    potential=potential,
-                    target_ids=ids,
-                    candidate_ids=ids,
-                    atom_types=atom_types,
-                    backend=backend,
-                )
-                if f_gpu is not None:
-                    return np.asarray(f_gpu, dtype=float)
-                f_gpu2 = forces_on_targets_pair_backend(
-                    r=rr,
-                    box=box,
-                    cutoff=cutoff,
-                    potential=potential,
-                    target_ids=ids,
-                    candidate_ids=ids,
-                    atom_types=atom_types,
-                    backend=backend,
-                )
-                if f_gpu2 is not None:
-                    return np.asarray(f_gpu2, dtype=float)
+        f_gpu = try_gpu_forces_on_targets(
+            r=rr,
+            box=box,
+            cutoff=cutoff,
+            rc=rc,
+            potential=potential,
+            target_ids=ids,
+            candidate_ids=ids,
+            atom_types=atom_types,
+            backend=backend,
+        )
+        if f_gpu is not None:
+            return f_gpu
         if hasattr(potential, "forces_energy_virial"):
             f, _pe, _w = potential.forces_energy_virial(rr, box, cutoff, atom_types)
             return np.asarray(f, dtype=float)
