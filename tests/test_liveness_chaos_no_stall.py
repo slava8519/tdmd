@@ -32,7 +32,11 @@ def test_liveness_chaos_no_stall_cfg_system(tmp_path):
         steps=40,
         observer_every=10,
         # very loose tol: this is a liveness test, not an equivalence test
-        tol_dr=1e9, tol_dv=1e9, tol_dE=1e9, tol_dT=1e9, tol_dP=1e9,
+        tol_dr=1e9,
+        tol_dv=1e9,
+        tol_dE=1e9,
+        tol_dT=1e9,
+        tol_dP=1e9,
         decomposition=str(getattr(cfg.td, "decomposition", "1d")),
         zones_nx=int(getattr(cfg.td, "zones_nx", 1)),
         zones_ny=int(getattr(cfg.td, "zones_ny", 1)),

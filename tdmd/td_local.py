@@ -1,44 +1,72 @@
 from __future__ import annotations
+
 from typing import Optional, Union
+
 import numpy as np
 
-from .zones import (
-    ZoneType, ZoneLayout1DCells, assign_atoms_to_zones, compute_zone_buffer_skin, zones_overlapping_range_pbc,
-    ZoneLayout3DBlocks, assign_atoms_to_zones_3d, zones_overlapping_aabb_pbc,
-)
-from .integrator import vv_update_positions, vv_finish_velocities
-from .zone_bins_localz import PersistentZoneLocalZBinsCache
-from .forces_cells import forces_on_targets_zonecells, forces_on_targets_celllist_compact
-from .celllist import build_cell_list
+from .atoms import normalize_atom_types, normalize_mass
 from .backend import resolve_backend
+from .celllist import build_cell_list
 from .ensembles import apply_ensemble_step, build_ensemble_spec
 from .force_dispatch import try_gpu_forces_on_targets
+from .forces_cells import forces_on_targets_celllist_compact, forces_on_targets_zonecells
 from .forces_gpu import (
     forces_on_targets_celllist_backend,
     forces_on_targets_pair_backend,
     supports_pair_gpu,
 )
-from .atoms import normalize_atom_types, normalize_mass
+from .integrator import vv_finish_velocities, vv_update_positions
 from .observer import emit_observer, observer_accepts_box
+from .zone_bins_localz import PersistentZoneLocalZBinsCache
+from .zones import (
+    ZoneLayout1DCells,
+    ZoneLayout3DBlocks,
+    ZoneType,
+    assign_atoms_to_zones,
+    assign_atoms_to_zones_3d,
+    compute_zone_buffer_skin,
+    zones_overlapping_aabb_pbc,
+    zones_overlapping_range_pbc,
+)
 
-def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box: float, potential,
-                 dt: float, cutoff: float, n_steps: int,
-                 observer=None, observer_every: int = 0,
-                 trace=None,
-                 atom_types: np.ndarray | None = None,
-                 chaos_mode: bool = False, chaos_seed: int = 12345, chaos_delay_prob: float = 0.0,
-                 cell_size: float = 1.0, zones_total: int = 1, zone_cells_w: int = 1, zone_cells_s: int = 1, zone_cells_pattern=None,
-                 traversal: str = "forward",
-                 buffer_k: float = 1.2, skin_from_buffer: bool = True,
-                 use_verlet: bool = True, verlet_k_steps: int = 20,
-                 decomposition: str = "1d",
-                 sync_mode: bool = False,
-                 zones_nx: int = 1, zones_ny: int = 1, zones_nz: int = 1,
-                 strict_min_zone_width: bool = False,
-                 ensemble_kind: str = "nve",
-                 thermostat: object | None = None,
-                 barostat: object | None = None,
-                 device: str = "cpu"):
+
+def run_td_local(
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    box: float,
+    potential,
+    dt: float,
+    cutoff: float,
+    n_steps: int,
+    observer=None,
+    observer_every: int = 0,
+    trace=None,
+    atom_types: np.ndarray | None = None,
+    chaos_mode: bool = False,
+    chaos_seed: int = 12345,
+    chaos_delay_prob: float = 0.0,
+    cell_size: float = 1.0,
+    zones_total: int = 1,
+    zone_cells_w: int = 1,
+    zone_cells_s: int = 1,
+    zone_cells_pattern=None,
+    traversal: str = "forward",
+    buffer_k: float = 1.2,
+    skin_from_buffer: bool = True,
+    use_verlet: bool = True,
+    verlet_k_steps: int = 20,
+    decomposition: str = "1d",
+    sync_mode: bool = False,
+    zones_nx: int = 1,
+    zones_ny: int = 1,
+    zones_nz: int = 1,
+    strict_min_zone_width: bool = False,
+    ensemble_kind: str = "nve",
+    thermostat: object | None = None,
+    barostat: object | None = None,
+    device: str = "cpu",
+):
     """TD-local (single-process) reference implementation.
 
     decomposition:
@@ -166,10 +194,10 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
             ids_all = np.arange(r.shape[0], dtype=np.int32)
             if observer is not None and observer_every:
                 _emit_observer(0)
-            for step in range(1, n_steps+1):
+            for step in range(1, n_steps + 1):
                 f0 = _forces_full(r)
                 v_half = v + 0.5 * dt * _accel(f0, ids_all)
-                r[:] = (r + dt*v_half) % box
+                r[:] = (r + dt * v_half) % box
                 f1 = _forces_full(r)
                 v[:] = v_half + 0.5 * dt * _accel(f1, ids_all)
                 box, _lam_b = _apply_ensemble(step, atom_box=box)
@@ -178,20 +206,24 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
             return
 
         layout = ZoneLayout1DCells(
-            box=box, cell_size=cell_size, zones_total=zones_total,
-            pattern_cells=zone_cells_pattern, zone_cells_w=zone_cells_w, zone_cells_s=zone_cells_s,
+            box=box,
+            cell_size=cell_size,
+            zones_total=zones_total,
+            pattern_cells=zone_cells_pattern,
+            zone_cells_w=zone_cells_w,
+            zone_cells_s=zone_cells_s,
             min_zone_width=float(cutoff),
             strict_min_width=bool(strict_min_zone_width),
         )
         zones = layout.build()
         if traversal == "backward":
-            order = list(range(zones_total-1, -1, -1))
+            order = list(range(zones_total - 1, -1, -1))
         else:
             order = list(range(zones_total))
         cache = PersistentZoneLocalZBinsCache()
         if observer is not None and observer_every:
             _emit_observer(0)
-        for step in range(1, n_steps+1):
+        for step in range(1, n_steps + 1):
             assign_atoms_to_zones(r, zones, box)
             for z in zones:
                 z.ztype = ZoneType.D if z.atom_ids.size else ZoneType.F
@@ -205,7 +237,7 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                 z0p = z.z0 - cutoff
                 z1p = z.z1 + cutoff
                 pzids = zones_overlapping_range_pbc(z0p, z1p, box, zones)
-                cand=[]
+                cand = []
                 for nzid in pzids:
                     nz = zones[nzid]
                     if nz.atom_ids.size:
@@ -226,17 +258,25 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                         if f_zone is None:
                             f_zone = np.zeros((z.atom_ids.size, 3), dtype=np.float64)
                     else:
-                        zc = cache.get(zid, r, box, candidate_ids, rc=rc,
-                                       skin_global=0.0,
-                                       step=2*step, verlet_k_steps=1,
-                                       z0=z0p, z1=z1p)
+                        zc = cache.get(
+                            zid,
+                            r,
+                            box,
+                            candidate_ids,
+                            rc=rc,
+                            skin_global=0.0,
+                            step=2 * step,
+                            verlet_k_steps=1,
+                            z0=z0p,
+                            z1=z1p,
+                        )
                         f_zone = forces_on_targets_zonecells(
                             r, box, potential, cutoff, z.atom_ids, zc, atom_types=atom_types
                         )
                     f0[z.atom_ids] = f_zone
 
             v_half = v + 0.5 * dt * _accel(f0)
-            r[:] = (r + dt*v_half) % box
+            r[:] = (r + dt * v_half) % box
 
             assign_atoms_to_zones(r, zones, box)
             for z in zones:
@@ -250,7 +290,7 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                 z0p = z.z0 - cutoff
                 z1p = z.z1 + cutoff
                 pzids = zones_overlapping_range_pbc(z0p, z1p, box, zones)
-                cand=[]
+                cand = []
                 for nzid in pzids:
                     nz = zones[nzid]
                     if nz.atom_ids.size:
@@ -271,10 +311,18 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                         if f_zone is None:
                             f_zone = np.zeros((z.atom_ids.size, 3), dtype=np.float64)
                     else:
-                        zc = cache.get(zid, r, box, candidate_ids, rc=rc,
-                                       skin_global=0.0,
-                                       step=2*step+1, verlet_k_steps=1,
-                                       z0=z0p, z1=z1p)
+                        zc = cache.get(
+                            zid,
+                            r,
+                            box,
+                            candidate_ids,
+                            rc=rc,
+                            skin_global=0.0,
+                            step=2 * step + 1,
+                            verlet_k_steps=1,
+                            z0=z0p,
+                            z1=z1p,
+                        )
                         f_zone = forces_on_targets_zonecells(
                             r, box, potential, cutoff, z.atom_ids, zc, atom_types=atom_types
                         )
@@ -289,7 +337,9 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
         return
 
     if decomposition.lower() == "3d":
-        layout3 = ZoneLayout3DBlocks.build(box=box, nx=int(zones_nx), ny=int(zones_ny), nz=int(zones_nz))
+        layout3 = ZoneLayout3DBlocks.build(
+            box=box, nx=int(zones_nx), ny=int(zones_ny), nz=int(zones_nz)
+        )
         zones3 = layout3.zones
         assign_atoms_to_zones_3d(r, layout3)
         for z in zones3:
@@ -298,12 +348,12 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
 
         order = list(range(len(zones3)))
         if traversal == "backward":
-            order = list(range(len(zones3)-1, -1, -1))
+            order = list(range(len(zones3) - 1, -1, -1))
 
         if observer is not None and observer_every:
             _emit_observer(0)
 
-        for step in range(1, n_steps+1):
+        for step in range(1, n_steps + 1):
             if chaos_mode:
                 rng.shuffle(order)
 
@@ -314,8 +364,11 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
             # compute global skin as safety envelope (same idea as 1D path)
             skin_global = 0.0
             for z in zones3:
-                b, skin = compute_zone_buffer_skin(v, z.atom_ids, dt, buffer_k, skin_from_buffer=skin_from_buffer)
-                z.buffer = b; z.skin = skin
+                b, skin = compute_zone_buffer_skin(
+                    v, z.atom_ids, dt, buffer_k, skin_from_buffer=skin_from_buffer
+                )
+                z.buffer = b
+                z.skin = skin
                 skin_global = max(skin_global, skin)
             rc = cutoff + skin_global
 
@@ -333,15 +386,23 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                     state_before = z.ztype
                     z.ztype = ZoneType.W
                     if trace is not None:
-                        trace.log(step_id=int(step), zone_id=int(zid), event="START_COMPUTE",
-                                  state_before=state_before, state_after=z.ztype,
-                                  halo_ids_count=0, migration_count=0, lag=0, invariant_flags="")
+                        trace.log(
+                            step_id=int(step),
+                            zone_id=int(zid),
+                            event="START_COMPUTE",
+                            state_before=state_before,
+                            state_after=z.ztype,
+                            halo_ids_count=0,
+                            migration_count=0,
+                            lag=0,
+                            invariant_flags="",
+                        )
 
                     lo = z.lo - cutoff
                     hi = z.hi + cutoff
                     deps = zones_overlapping_aabb_pbc(lo, hi, box, layout3)
                     # mark deps as P if needed
-                    cand=[]
+                    cand = []
                     for did in deps:
                         dz = zones3[did]
                         if dz.atom_ids.size:
@@ -409,9 +470,17 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                     state_before = z.ztype
                     z.ztype = ZoneType.S
                     if trace is not None:
-                        trace.log(step_id=int(step), zone_id=int(zid), event="FINISH_COMPUTE",
-                                  state_before=state_before, state_after=z.ztype,
-                                  halo_ids_count=0, migration_count=0, lag=0, invariant_flags="")
+                        trace.log(
+                            step_id=int(step),
+                            zone_id=int(zid),
+                            event="FINISH_COMPUTE",
+                            state_before=state_before,
+                            state_after=z.ztype,
+                            halo_ids_count=0,
+                            migration_count=0,
+                            lag=0,
+                            invariant_flags="",
+                        )
 
             box, lam_b = _apply_ensemble(step, atom_box=box)
             if ensemble.kind == "npt":
@@ -426,8 +495,12 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
     # Legacy 1D slab mode
     # ---------------------
     layout = ZoneLayout1DCells(
-        box=box, cell_size=cell_size, zones_total=zones_total,
-        pattern_cells=zone_cells_pattern, zone_cells_w=zone_cells_w, zone_cells_s=zone_cells_s,
+        box=box,
+        cell_size=cell_size,
+        zones_total=zones_total,
+        pattern_cells=zone_cells_pattern,
+        zone_cells_w=zone_cells_w,
+        zone_cells_s=zone_cells_s,
         min_zone_width=float(cutoff),
         strict_min_width=bool(strict_min_zone_width),
     )
@@ -437,7 +510,7 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
         z.ztype = ZoneType.D
 
     if traversal == "backward":
-        order = list(range(zones_total-1,-1,-1))
+        order = list(range(zones_total - 1, -1, -1))
     else:
         order = list(range(zones_total))
 
@@ -445,7 +518,7 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
 
     if observer is not None and observer_every:
         _emit_observer(0)
-    for step in range(1, n_steps+1):
+    for step in range(1, n_steps + 1):
         if chaos_mode:
             rng.shuffle(order)
         for z in zones:
@@ -453,8 +526,11 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
         processed = np.zeros(r.shape[0], dtype=bool)
         skin_global = 0.0
         for z in zones:
-            b, skin = compute_zone_buffer_skin(v, z.atom_ids, dt, buffer_k, skin_from_buffer=skin_from_buffer)
-            z.buffer=b; z.skin=skin
+            b, skin = compute_zone_buffer_skin(
+                v, z.atom_ids, dt, buffer_k, skin_from_buffer=skin_from_buffer
+            )
+            z.buffer = b
+            z.skin = skin
             skin_global = max(skin_global, skin)
         rc = cutoff + skin_global
 
@@ -468,13 +544,21 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                 state_before = z.ztype
                 z.ztype = ZoneType.W
                 if trace is not None:
-                    trace.log(step_id=int(step), zone_id=int(zid), event="START_COMPUTE",
-                              state_before=state_before, state_after=z.ztype,
-                              halo_ids_count=0, migration_count=0, lag=0, invariant_flags="")
+                    trace.log(
+                        step_id=int(step),
+                        zone_id=int(zid),
+                        event="START_COMPUTE",
+                        state_before=state_before,
+                        state_after=z.ztype,
+                        halo_ids_count=0,
+                        migration_count=0,
+                        lag=0,
+                        invariant_flags="",
+                    )
                 z0p = z.z0 - cutoff
                 z1p = z.z1 + cutoff
                 pzids = zones_overlapping_range_pbc(z0p, z1p, box, zones)
-                cand=[]
+                cand = []
                 for nzid in pzids:
                     nz = zones[nzid]
                     if nz.atom_ids.size:
@@ -499,25 +583,41 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                                 backend=backend,
                             )
                             if f is None:
-                                zc = cache.get(zid, r, box, candidate_ids, rc=rc,
-                                               skin_global=(skin_global if use_verlet else 0.0),
-                                               step=step, verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-                                               z0=z0p, z1=z1p)
+                                zc = cache.get(
+                                    zid,
+                                    r,
+                                    box,
+                                    candidate_ids,
+                                    rc=rc,
+                                    skin_global=(skin_global if use_verlet else 0.0),
+                                    step=step,
+                                    verlet_k_steps=(verlet_k_steps if use_verlet else 1),
+                                    z0=z0p,
+                                    z1=z1p,
+                                )
                                 f = forces_on_targets_zonecells(
                                     r, box, potential, cutoff, ids0, zc, atom_types=atom_types
                                 )
                         else:
-                            zc = cache.get(zid, r, box, candidate_ids, rc=rc,
-                                           skin_global=(skin_global if use_verlet else 0.0),
-                                           step=step, verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-                                           z0=z0p, z1=z1p)
+                            zc = cache.get(
+                                zid,
+                                r,
+                                box,
+                                candidate_ids,
+                                rc=rc,
+                                skin_global=(skin_global if use_verlet else 0.0),
+                                step=step,
+                                verlet_k_steps=(verlet_k_steps if use_verlet else 1),
+                                z0=z0p,
+                                z1=z1p,
+                            )
                             f = forces_on_targets_zonecells(
                                 r, box, potential, cutoff, ids0, zc, atom_types=atom_types
                             )
                     vv_update_positions(r, v, mass, dt, box, ids0, f)
                     assign_atoms_to_zones(r, zones, box)
 
-                    cand2=[]
+                    cand2 = []
                     for nzid in pzids:
                         nz = zones[nzid]
                         if nz.atom_ids.size:
@@ -538,18 +638,34 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                                 backend=backend,
                             )
                             if f2 is None:
-                                zc2 = cache.get(zid, r, box, candidate_ids2, rc=rc,
-                                                skin_global=(skin_global if use_verlet else 0.0),
-                                                step=step, verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-                                                z0=z0p, z1=z1p)
+                                zc2 = cache.get(
+                                    zid,
+                                    r,
+                                    box,
+                                    candidate_ids2,
+                                    rc=rc,
+                                    skin_global=(skin_global if use_verlet else 0.0),
+                                    step=step,
+                                    verlet_k_steps=(verlet_k_steps if use_verlet else 1),
+                                    z0=z0p,
+                                    z1=z1p,
+                                )
                                 f2 = forces_on_targets_zonecells(
                                     r, box, potential, cutoff, ids0, zc2, atom_types=atom_types
                                 )
                         else:
-                            zc2 = cache.get(zid, r, box, candidate_ids2, rc=rc,
-                                            skin_global=(skin_global if use_verlet else 0.0),
-                                            step=step, verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-                                            z0=z0p, z1=z1p)
+                            zc2 = cache.get(
+                                zid,
+                                r,
+                                box,
+                                candidate_ids2,
+                                rc=rc,
+                                skin_global=(skin_global if use_verlet else 0.0),
+                                step=step,
+                                verlet_k_steps=(verlet_k_steps if use_verlet else 1),
+                                z0=z0p,
+                                z1=z1p,
+                            )
                             f2 = forces_on_targets_zonecells(
                                 r, box, potential, cutoff, ids0, zc2, atom_types=atom_types
                             )
@@ -560,9 +676,17 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
                 state_before = z.ztype
                 z.ztype = ZoneType.S
                 if trace is not None:
-                    trace.log(step_id=int(step), zone_id=int(zid), event="FINISH_COMPUTE",
-                              state_before=state_before, state_after=z.ztype,
-                              halo_ids_count=0, migration_count=0, lag=0, invariant_flags="")
+                    trace.log(
+                        step_id=int(step),
+                        zone_id=int(zid),
+                        event="FINISH_COMPUTE",
+                        state_before=state_before,
+                        state_after=z.ztype,
+                        halo_ids_count=0,
+                        migration_count=0,
+                        lag=0,
+                        invariant_flags="",
+                    )
 
         box, lam_b = _apply_ensemble(step, atom_box=box)
         if ensemble.kind == "npt":

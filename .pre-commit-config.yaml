@@ -1,0 +1,40 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+        exclude: ^examples/potentials/eam_alloy/.*\.eam\.alloy$
+      - id: trailing-whitespace
+        exclude: ^examples/potentials/eam_alloy/.*\.eam\.alloy$
+      - id: check-added-large-files
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        # Keep mypy in a small "typed island" initially; expand coverage over time.
+        args:
+          [
+            --config-file=pyproject.toml,
+            --follow-imports=skip,
+            tdmd/atoms.py,
+            tdmd/output.py,
+            tdmd/observer.py,
+            tdmd/force_dispatch.py,
+            tdmd/cli_parser.py,
+          ]
+        pass_filenames: false
+        additional_dependencies:
+          - types-PyYAML

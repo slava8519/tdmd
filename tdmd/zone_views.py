@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -12,6 +12,7 @@ IntArr = np.ndarray
 @dataclass(frozen=True)
 class ZoneView:
     """GPU-friendly, contiguous structure-of-arrays view for a work zone."""
+
     n: int
     x: FloatArr
     y: FloatArr
@@ -23,6 +24,7 @@ class ZoneView:
 @dataclass(frozen=True)
 class HaloView:
     """GPU-friendly, contiguous SoA view for halo atoms (read-only for backends)."""
+
     n: int
     x: FloatArr
     y: FloatArr

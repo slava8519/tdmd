@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+
 import numpy as np
 
 from tdmd.potentials import EAMAlloyPotential, make_potential
@@ -70,7 +71,9 @@ def test_run_serial_uses_eam_backend_and_preserves_total_momentum():
     v = np.zeros_like(r)
     mass = np.array([26.9815386, 58.6934], dtype=float)
     types = np.array([1, 2], dtype=np.int32)
-    run_serial(r, v, mass, box=10.0, potential=pot, dt=1e-3, cutoff=5.0, n_steps=4, atom_types=types)
+    run_serial(
+        r, v, mass, box=10.0, potential=pot, dt=1e-3, cutoff=5.0, n_steps=4, atom_types=types
+    )
 
     p_total = (mass[:, None] * v).sum(axis=0)
     assert np.all(np.isfinite(r))
@@ -94,5 +97,9 @@ def test_eam_matches_lammps_reference_fixture():
         )
         f_ref = np.asarray(case["expected_forces"], dtype=float)
         assert np.allclose(f_calc, f_ref, atol=float(thr["force_abs"]), rtol=0.0), case["name"]
-        assert abs(float(pe_calc) - float(case["expected_pe"])) <= float(thr["energy_abs"]), case["name"]
-        assert abs(float(vir_calc) - float(case["expected_virial"])) <= float(thr["virial_abs"]), case["name"]
+        assert abs(float(pe_calc) - float(case["expected_pe"])) <= float(thr["energy_abs"]), case[
+            "name"
+        ]
+        assert abs(float(vir_calc) - float(case["expected_virial"])) <= float(
+            thr["virial_abs"]
+        ), case["name"]

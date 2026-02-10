@@ -1,11 +1,14 @@
 from __future__ import annotations
+
+import os
 from dataclasses import dataclass
 from typing import Optional
-import os
+
 import numpy as np
 
+from ..potentials import canonical_potential_kind, ensure_pair_coeffs_complete, parse_pair_coeffs
 from .task import Task, TaskAtom
-from ..potentials import canonical_potential_kind, parse_pair_coeffs, ensure_pair_coeffs_complete
+
 
 @dataclass(frozen=True)
 class LammpsData:
@@ -17,6 +20,7 @@ class LammpsData:
     zhi: float
     masses: dict[int, float]
     atoms: list[TaskAtom]
+
 
 def _atom_style(task: Task) -> str:
     has_charge = any(a.charge is not None for a in task.atoms)
@@ -31,8 +35,7 @@ def _sorted_task_types(task: Task) -> list[int]:
     expected = list(range(1, max_type + 1))
     if types != expected:
         raise ValueError(
-            "LAMMPS export requires contiguous atom types starting from 1; "
-            f"got {types}"
+            "LAMMPS export requires contiguous atom types starting from 1; " f"got {types}"
         )
     return types
 
@@ -59,6 +62,7 @@ def _ensemble_fix_lines(task: Task) -> list[str]:
             f"iso {p_target:.8f} {p_target:.8f} {tau_p:.8f}"
         ]
     raise ValueError(f"unsupported ensemble.kind: {ens.kind}")
+
 
 def export_lammps_data(task: Task, path: str) -> str:
     atoms = sorted(task.atoms, key=lambda a: a.id)
@@ -102,6 +106,7 @@ def export_lammps_data(task: Task, path: str) -> str:
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path
+
 
 def export_lammps_in(task: Task, path: str, data_filename: str = "data.lammps") -> str:
     units = task.units
@@ -188,27 +193,33 @@ def export_lammps_in(task: Task, path: str, data_filename: str = "data.lammps") 
     ]
     for pl in pair_lines:
         lines.append(pl + "\n")
-    lines.extend([
-        f"timestep {dt:.8f}\n",
-        "neighbor 2.0 bin\n",
-    ])
+    lines.extend(
+        [
+            f"timestep {dt:.8f}\n",
+            "neighbor 2.0 bin\n",
+        ]
+    )
     for fl in fix_lines:
         lines.append(fl + "\n")
-    lines.extend([
-        f"dump 1 all custom {dump_every} traj.lammpstrj id type x y z vx vy vz\n",
-        f"run {steps}\n",
-        "unfix tdmd_int\n",
-    ])
+    lines.extend(
+        [
+            f"dump 1 all custom {dump_every} traj.lammpstrj id type x y z vx vy vz\n",
+            f"run {steps}\n",
+            "unfix tdmd_int\n",
+        ]
+    )
     text = "".join(lines)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path
 
+
 def _strip_comment(line: str) -> str:
     if "#" in line:
         return line.split("#", 1)[0].strip()
     return line.strip()
+
 
 def import_lammps_data(path: str) -> LammpsData:
     with open(path, "r", encoding="utf-8") as f:
@@ -265,15 +276,21 @@ def import_lammps_data(path: str) -> LammpsData:
             if style_hint == "charge":
                 if len(parts) < 6:
                     continue
-                aid = int(parts[0]); atype = int(parts[1]); charge = float(parts[2])
+                aid = int(parts[0])
+                atype = int(parts[1])
+                charge = float(parts[2])
                 r = (float(parts[3]), float(parts[4]), float(parts[5]))
             else:
                 if len(parts) < 5:
                     continue
-                aid = int(parts[0]); atype = int(parts[1]); charge = None
+                aid = int(parts[0])
+                atype = int(parts[1])
+                charge = None
                 r = (float(parts[2]), float(parts[3]), float(parts[4]))
             mass = float(masses.get(atype, 0.0))
-            atoms[aid] = TaskAtom(id=aid, type=atype, mass=mass, charge=charge, r=r, v=(0.0, 0.0, 0.0))
+            atoms[aid] = TaskAtom(
+                id=aid, type=atype, mass=mass, charge=charge, r=r, v=(0.0, 0.0, 0.0)
+            )
             continue
         if section == "Velocities":
             parts = _strip_comment(ln).split()
@@ -298,9 +315,12 @@ def import_lammps_data(path: str) -> LammpsData:
         out_atoms.append(TaskAtom(id=a.id, type=a.type, mass=mass, charge=a.charge, r=a.r, v=v))
 
     return LammpsData(
-        xlo=float(xlo), xhi=float(xhi),
-        ylo=float(ylo), yhi=float(yhi),
-        zlo=float(zlo), zhi=float(zhi),
+        xlo=float(xlo),
+        xhi=float(xhi),
+        ylo=float(ylo),
+        yhi=float(yhi),
+        zlo=float(zlo),
+        zhi=float(zhi),
         masses=masses,
         atoms=out_atoms,
     )

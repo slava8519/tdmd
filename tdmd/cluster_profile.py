@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-import os
 
 import yaml
 
@@ -195,9 +195,19 @@ def load_cluster_profile(path: str) -> ClusterProfile:
         )
     if not entries:
         entries = [
-            TransportEntry(name="host_blocking", overlap=0, cuda_aware_mpi=False, fabric="host_staging", env={}),
-            TransportEntry(name="host_overlap", overlap=1, cuda_aware_mpi=False, fabric="host_staging", env={}),
-            TransportEntry(name="cudaaware_overlap", overlap=1, cuda_aware_mpi=True, fabric="cuda_aware", env={}),
+            TransportEntry(
+                name="host_blocking", overlap=0, cuda_aware_mpi=False, fabric="host_staging", env={}
+            ),
+            TransportEntry(
+                name="host_overlap", overlap=1, cuda_aware_mpi=False, fabric="host_staging", env={}
+            ),
+            TransportEntry(
+                name="cudaaware_overlap",
+                overlap=1,
+                cuda_aware_mpi=True,
+                fabric="cuda_aware",
+                env={},
+            ),
         ]
     matrix = TransportMatrixProfile(
         ranks=_as_int_list(matrix_d.get("ranks"), default=runtime.ranks_default),

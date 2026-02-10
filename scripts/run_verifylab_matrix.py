@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -6,8 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime
 import warnings
+from datetime import datetime
+
 import numpy as np
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -18,128 +20,306 @@ from tdmd.backend import resolve_backend
 from tdmd.config import load_config
 from tdmd.incident_bundle import write_incident_bundle
 from tdmd.potentials import make_potential
-from tdmd.verify_lab import sweep_verify2, sweep_verify_task, write_csv, summarize, summarize_markdown
+from tdmd.verify_lab import (
+    summarize,
+    summarize_markdown,
+    sweep_verify2,
+    sweep_verify_task,
+    write_csv,
+)
 
 DEFAULT_THRESHOLDS = dict(tol_dr=1e-5, tol_dv=1e-5, tol_dE=1e-4, tol_dT=1e-4, tol_dP=1e-3)
 SMOKE_CI_THRESHOLDS = dict(tol_dr=1e-5, tol_dv=3e-5, tol_dE=2.5e-4, tol_dT=1e-4, tol_dP=1e-3)
 
 PRESETS = {
     # CI-grade strict smoke: short and expected to pass with --strict.
-    "smoke_ci": dict(steps=2, every=1, zones_total_list=[4], use_verlet_list=[False], verlet_k_steps_list=[10],
-                     chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                     tol=SMOKE_CI_THRESHOLDS),
+    "smoke_ci": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[4],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+    ),
     # Diagnostic regression smoke: keeps legacy behavior/coverage and may include non-ok rows.
-    "smoke_regression": dict(steps=80, every=10, zones_total_list=[4], use_verlet_list=[False], verlet_k_steps_list=[10],
-                             chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                             tol=DEFAULT_THRESHOLDS),
+    "smoke_regression": dict(
+        steps=80,
+        every=10,
+        zones_total_list=[4],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=DEFAULT_THRESHOLDS,
+    ),
     # Backward-compatible alias.
-    "smoke": dict(steps=80, every=10, zones_total_list=[4], use_verlet_list=[False], verlet_k_steps_list=[10],
-                  chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                  tol=DEFAULT_THRESHOLDS),
-    "paper": dict(steps=400, every=20, zones_total_list=[4, 8], use_verlet_list=[False, True], verlet_k_steps_list=[10],
-                  chaos_mode_list=[False, True], chaos_delay_prob_list=[0.0, 0.02]),
-    "stress": dict(steps=800, every=20, zones_total_list=[8, 16], use_verlet_list=[True], verlet_k_steps_list=[10],
-                   chaos_mode_list=[True], chaos_delay_prob_list=[0.05]),
-    "async": dict(steps=300, every=10, zones_total_list=[4, 8], use_verlet_list=[False], verlet_k_steps_list=[10],
-                  chaos_mode_list=[False], chaos_delay_prob_list=[0.0]),
+    "smoke": dict(
+        steps=80,
+        every=10,
+        zones_total_list=[4],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=DEFAULT_THRESHOLDS,
+    ),
+    "paper": dict(
+        steps=400,
+        every=20,
+        zones_total_list=[4, 8],
+        use_verlet_list=[False, True],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False, True],
+        chaos_delay_prob_list=[0.0, 0.02],
+    ),
+    "stress": dict(
+        steps=800,
+        every=20,
+        zones_total_list=[8, 16],
+        use_verlet_list=[True],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[True],
+        chaos_delay_prob_list=[0.05],
+    ),
+    "async": dict(
+        steps=300,
+        every=10,
+        zones_total_list=[4, 8],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+    ),
     "longrun_envelope_ci": dict(
-                 steps=300,
-                 every=10,
-                 zones_total_list=[4, 8],
-                 use_verlet_list=[False],
-                 verlet_k_steps_list=[10],
-                 chaos_mode_list=[False],
-                 chaos_delay_prob_list=[0.0],
-                 # Keep base verify gate permissive; strict envelope gate is applied from baseline.
-                 tol=dict(tol_dr=100.0, tol_dv=2.0, tol_dE=500.0, tol_dT=1.0, tol_dP=1e-3),
-                 envelope_file="golden/longrun_envelope_v1.json"),
-    "sync": dict(steps=200, every=10, zones_total_list=[4, 8], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0], sync_mode=True),
-    "paper_testcases_light": dict(steps=120, every=20, zones_total_list=[4], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0]),
-    "interop_smoke": dict(steps=40, every=10, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=DEFAULT_THRESHOLDS, task_mode=True),
-    "nvt_smoke": dict(steps=40, every=10, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=DEFAULT_THRESHOLDS, task_mode=True, sync_mode=True,
-                 task_path="examples/interop/task_nvt.yaml"),
-    "npt_smoke": dict(steps=40, every=10, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=DEFAULT_THRESHOLDS, task_mode=True, sync_mode=True,
-                 task_path="examples/interop/task_npt.yaml"),
-    "metal_smoke": dict(steps=4, every=1, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, task_mode=True, sync_mode=True,
-                 task_path="examples/interop/task_eam_al.yaml"),
-    "interop_metal_smoke": dict(steps=4, every=1, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, task_mode=True, sync_mode=True,
-                 task_path="examples/interop/task_eam_alloy.yaml"),
-    "gpu_smoke": dict(steps=2, every=1, zones_total_list=[4], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, sync_mode=True, device="cuda"),
-    "gpu_smoke_hw": dict(steps=2, every=1, zones_total_list=[4], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, sync_mode=True, device="cuda", require_effective_cuda=True),
-    "gpu_interop_smoke": dict(steps=2, every=1, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, task_mode=True, sync_mode=True, device="cuda",
-                 task_path="examples/interop/task.yaml"),
-    "gpu_interop_smoke_hw": dict(steps=2, every=1, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, task_mode=True, sync_mode=True, device="cuda", require_effective_cuda=True,
-                 task_path="examples/interop/task.yaml"),
-    "gpu_metal_smoke": dict(steps=2, every=1, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, task_mode=True, sync_mode=True, device="cuda",
-                 task_path="examples/interop/task_eam_alloy_uniform_mass.yaml"),
-    "gpu_metal_smoke_hw": dict(steps=2, every=1, zones_total_list=[1], use_verlet_list=[False], verlet_k_steps_list=[10],
-                 chaos_mode_list=[False], chaos_delay_prob_list=[0.0],
-                 tol=SMOKE_CI_THRESHOLDS, task_mode=True, sync_mode=True, device="cuda", require_effective_cuda=True,
-                 task_path="examples/interop/task_eam_alloy_uniform_mass.yaml"),
+        steps=300,
+        every=10,
+        zones_total_list=[4, 8],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        # Keep base verify gate permissive; strict envelope gate is applied from baseline.
+        tol=dict(tol_dr=100.0, tol_dv=2.0, tol_dE=500.0, tol_dT=1.0, tol_dP=1e-3),
+        envelope_file="golden/longrun_envelope_v1.json",
+    ),
+    "sync": dict(
+        steps=200,
+        every=10,
+        zones_total_list=[4, 8],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        sync_mode=True,
+    ),
+    "paper_testcases_light": dict(
+        steps=120,
+        every=20,
+        zones_total_list=[4],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+    ),
+    "interop_smoke": dict(
+        steps=40,
+        every=10,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=DEFAULT_THRESHOLDS,
+        task_mode=True,
+    ),
+    "nvt_smoke": dict(
+        steps=40,
+        every=10,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=DEFAULT_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        task_path="examples/interop/task_nvt.yaml",
+    ),
+    "npt_smoke": dict(
+        steps=40,
+        every=10,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=DEFAULT_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        task_path="examples/interop/task_npt.yaml",
+    ),
+    "metal_smoke": dict(
+        steps=4,
+        every=1,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        task_path="examples/interop/task_eam_al.yaml",
+    ),
+    "interop_metal_smoke": dict(
+        steps=4,
+        every=1,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        task_path="examples/interop/task_eam_alloy.yaml",
+    ),
+    "gpu_smoke": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[4],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        sync_mode=True,
+        device="cuda",
+    ),
+    "gpu_smoke_hw": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[4],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        sync_mode=True,
+        device="cuda",
+        require_effective_cuda=True,
+    ),
+    "gpu_interop_smoke": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        device="cuda",
+        task_path="examples/interop/task.yaml",
+    ),
+    "gpu_interop_smoke_hw": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        device="cuda",
+        require_effective_cuda=True,
+        task_path="examples/interop/task.yaml",
+    ),
+    "gpu_metal_smoke": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        device="cuda",
+        task_path="examples/interop/task_eam_alloy_uniform_mass.yaml",
+    ),
+    "gpu_metal_smoke_hw": dict(
+        steps=2,
+        every=1,
+        zones_total_list=[1],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        device="cuda",
+        require_effective_cuda=True,
+        task_path="examples/interop/task_eam_alloy_uniform_mass.yaml",
+    ),
     "mpi_overlap_smoke": dict(
-                 mpi_overlap_mode=True,
-                 mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
-                 mpi_ranks=[2, 4],
-                 overlap_list="0,1",
-                 strict_invariants=True,
-                 timeout=180),
+        mpi_overlap_mode=True,
+        mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
+        mpi_ranks=[2, 4],
+        overlap_list="0,1",
+        strict_invariants=True,
+        timeout=180,
+    ),
     "mpi_overlap_cudaaware_smoke": dict(
-                 mpi_overlap_mode=True,
-                 mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
-                 mpi_ranks=[2, 4],
-                 overlap_list="0,1",
-                 strict_invariants=True,
-                 cuda_aware=True,
-                 timeout=180),
+        mpi_overlap_mode=True,
+        mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
+        mpi_ranks=[2, 4],
+        overlap_list="0,1",
+        strict_invariants=True,
+        cuda_aware=True,
+        timeout=180,
+    ),
     "cluster_scale_smoke": dict(
-                 cluster_scale_mode=True,
-                 cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
-                 timeout=300),
+        cluster_scale_mode=True,
+        cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
+        timeout=300,
+    ),
     "cluster_stability_smoke": dict(
-                 cluster_stability_mode=True,
-                 cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
-                 timeout=300),
+        cluster_stability_mode=True,
+        cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
+        timeout=300,
+    ),
     "mpi_transport_matrix_smoke": dict(
-                 mpi_transport_matrix_mode=True,
-                 cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
-                 timeout=300),
+        mpi_transport_matrix_mode=True,
+        cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
+        timeout=300,
+    ),
     "viz_smoke": dict(
-                 viz_contract_mode=True,
-                 cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
-                 timeout=240),
+        viz_contract_mode=True,
+        cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
+        timeout=240,
+    ),
     "metal_property_smoke": dict(
-                 materials_property_mode=True,
-                 materials_fixture="examples/interop/materials_parity_suite_v2.json",
-                 case_prefix="eam_al_",
-                 timeout=300),
+        materials_property_mode=True,
+        materials_fixture="examples/interop/materials_parity_suite_v2.json",
+        case_prefix="eam_al_",
+        timeout=300,
+    ),
     "interop_metal_property_smoke": dict(
-                 materials_property_mode=True,
-                 materials_fixture="examples/interop/materials_parity_suite_v2.json",
-                 case_prefix="eam_alloy_",
-                 timeout=300),
+        materials_property_mode=True,
+        materials_fixture="examples/interop/materials_parity_suite_v2.json",
+        case_prefix="eam_alloy_",
+        timeout=300,
+    ),
 }
+
 
 def _backend_evidence(requested_device: str) -> dict[str, object]:
     req = str(requested_device).strip().lower()
@@ -273,12 +453,7 @@ def _detect_mpirun() -> str:
     for cand in local_candidates:
         if os.path.isfile(cand) and os.access(cand, os.X_OK):
             return cand
-    return (
-        shutil.which("mpiexec.hydra")
-        or shutil.which("mpiexec")
-        or shutil.which("mpirun")
-        or ""
-    )
+    return shutil.which("mpiexec.hydra") or shutil.which("mpiexec") or shutil.which("mpirun") or ""
 
 
 def _read_overlap_csv(path: str) -> list[dict[str, str]]:
@@ -318,6 +493,7 @@ def _pareto_frontier(points, *, x_key, y_key):
             best_y = y
     return frontier
 
+
 def _best_under(points, *, x_key, y_key, x_max):
     cand = [p for p in points if float(p.get(x_key, 0.0)) <= float(x_max)]
     if not cand:
@@ -341,12 +517,18 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
         cmd = [
             sys.executable,
             "scripts/bench_mpi_overlap.py",
-            "--config", mpi_config,
-            "--n", str(int(n)),
-            "--overlap-list", overlap_list,
-            "--timeout", str(timeout),
-            "--out", out_csv,
-            "--md", out_md,
+            "--config",
+            mpi_config,
+            "--n",
+            str(int(n)),
+            "--overlap-list",
+            overlap_list,
+            "--timeout",
+            str(timeout),
+            "--out",
+            out_csv,
+            "--md",
+            out_md,
         ]
         if mpirun:
             cmd.extend(["--mpirun", str(mpirun)])
@@ -393,26 +575,28 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
         if strict_invariants and strict_ok and any(int(x) != 1 for x in strict_ok):
             reasons.append("strict_invariants_failed")
 
-        rank_runs.append({
-            "ranks": int(n),
-            "ok": bool(run_ok),
-            "bench_returncode": int(proc.returncode),
-            "records": int(len(bench_rows)),
-            "overlap_speedup": float(min(speedup_overlap) if speedup_overlap else 0.0),
-            "hG_max": int(max(hG_vals) if hG_vals else 0),
-            "hV_max": int(max(hV_vals) if hV_vals else 0),
-            "violW_max": int(max(violW_vals) if violW_vals else 0),
-            "lagV_max": int(max(lagV_vals) if lagV_vals else 0),
-            "wfgC_max": int(max(wfgC_vals) if wfgC_vals else 0),
-            "wfgO_max": int(max(wfgO_vals) if wfgO_vals else 0),
-            "wfgS_max": int(max(wfgS_vals) if wfgS_vals else 0),
-            "wfgC_rate": float(max(wfgC_rate_vals) if wfgC_rate_vals else 0.0),
-            "wfgC_per_100_steps": float(max(wfgC_p100_vals) if wfgC_p100_vals else 0.0),
-            "diag_samples_min": int(min(diag_vals) if diag_vals else 0),
-            "reasons": reasons,
-            "out_csv": out_csv,
-            "out_md": out_md,
-        })
+        rank_runs.append(
+            {
+                "ranks": int(n),
+                "ok": bool(run_ok),
+                "bench_returncode": int(proc.returncode),
+                "records": int(len(bench_rows)),
+                "overlap_speedup": float(min(speedup_overlap) if speedup_overlap else 0.0),
+                "hG_max": int(max(hG_vals) if hG_vals else 0),
+                "hV_max": int(max(hV_vals) if hV_vals else 0),
+                "violW_max": int(max(violW_vals) if violW_vals else 0),
+                "lagV_max": int(max(lagV_vals) if lagV_vals else 0),
+                "wfgC_max": int(max(wfgC_vals) if wfgC_vals else 0),
+                "wfgO_max": int(max(wfgO_vals) if wfgO_vals else 0),
+                "wfgS_max": int(max(wfgS_vals) if wfgS_vals else 0),
+                "wfgC_rate": float(max(wfgC_rate_vals) if wfgC_rate_vals else 0.0),
+                "wfgC_per_100_steps": float(max(wfgC_p100_vals) if wfgC_p100_vals else 0.0),
+                "diag_samples_min": int(min(diag_vals) if diag_vals else 0),
+                "reasons": reasons,
+                "out_csv": out_csv,
+                "out_md": out_md,
+            }
+        )
 
     total = int(len(rank_runs))
     ok_n = int(sum(1 for r in rank_runs if bool(r.get("ok", False))))
@@ -428,7 +612,9 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             "max_hV": max((int(r["hV_max"]) for r in rank_runs), default=0),
             "max_violW": max((int(r["violW_max"]) for r in rank_runs), default=0),
             "max_lagV": max((int(r["lagV_max"]) for r in rank_runs), default=0),
-            "min_overlap_speedup": min((float(r["overlap_speedup"]) for r in rank_runs), default=0.0),
+            "min_overlap_speedup": min(
+                (float(r["overlap_speedup"]) for r in rank_runs), default=0.0
+            ),
         },
         "by_case": {},
         "mpi_overlap_runs": rank_runs,
@@ -456,7 +642,9 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
     return summary
 
 
-def _run_external_cluster_script(*, script_rel: str, preset: dict, out_dir: str) -> dict[str, object]:
+def _run_external_cluster_script(
+    *, script_rel: str, preset: dict, out_dir: str
+) -> dict[str, object]:
     profile = str(preset.get("cluster_profile", "examples/cluster/cluster_profile_smoke.yaml"))
     timeout = int(preset.get("timeout", 300))
     script_name = os.path.splitext(os.path.basename(script_rel))[0]
@@ -481,7 +669,9 @@ def _run_external_cluster_script(*, script_rel: str, preset: dict, out_dir: str)
     proc_out = ""
     proc_err = ""
     try:
-        proc = subprocess.run(cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout))
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
         proc_rc = int(proc.returncode)
         proc_out = str(proc.stdout or "")
         proc_err = str(proc.stderr or "")
@@ -530,7 +720,9 @@ def _run_external_cluster_script(*, script_rel: str, preset: dict, out_dir: str)
 
 
 def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, object]:
-    fixture = str(preset.get("materials_fixture", "examples/interop/materials_parity_suite_v2.json"))
+    fixture = str(
+        preset.get("materials_fixture", "examples/interop/materials_parity_suite_v2.json")
+    )
     case_prefix = str(preset.get("case_prefix", ""))
     timeout = int(preset.get("timeout", 300))
     out_json = os.path.join(out_dir, "materials_property_gate.summary.json")
@@ -552,7 +744,9 @@ def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, obj
     proc_out = ""
     proc_err = ""
     try:
-        proc = subprocess.run(cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout))
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
         proc_rc = int(proc.returncode)
         proc_out = str(proc.stdout or "")
         proc_err = str(proc.stderr or "")
@@ -605,8 +799,12 @@ def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, obj
                             "property_fail": int(c.get("property_fail", 0)),
                         },
                     }
-                    worst["max_abs_diff"] = max(worst["max_abs_diff"], float(c.get("max_abs_diff", 0.0)))
-                    worst["property_fail"] = max(worst["property_fail"], int(c.get("property_fail", 0)))
+                    worst["max_abs_diff"] = max(
+                        worst["max_abs_diff"], float(c.get("max_abs_diff", 0.0))
+                    )
+                    worst["property_fail"] = max(
+                        worst["property_fail"], int(c.get("property_fail", 0))
+                    )
                 summary.update(
                     {
                         "total": total,
@@ -624,18 +822,26 @@ def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, obj
     summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
     return summary
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("yaml", help="Path to YAML config (examples/*.yaml)")
     ap.add_argument("--preset", choices=sorted(PRESETS.keys()), default="smoke_ci")
     ap.add_argument("--outdir", default="results", help="Root output directory")
     ap.add_argument("--strict", action="store_true", help="fail run if any row is not ok")
-    ap.add_argument("--golden", choices=['none','write','check'], default='none', help='golden baseline mode')
+    ap.add_argument(
+        "--golden", choices=['none', 'write', 'check'], default='none', help='golden baseline mode'
+    )
     ap.add_argument("--cases-mode", choices=["cfg", "testcases"], default="cfg")
     ap.add_argument("--task", default="", help="Task YAML (for interop_smoke)")
-    ap.add_argument("--require-effective-cuda", action="store_true",
-                    help="fail if requested CUDA resolves to CPU fallback")
-    ap.add_argument("--envelope-file", default="", help="Override envelope baseline file for supported presets")
+    ap.add_argument(
+        "--require-effective-cuda",
+        action="store_true",
+        help="fail if requested CUDA resolves to CPU fallback",
+    )
+    ap.add_argument(
+        "--envelope-file", default="", help="Override envelope baseline file for supported presets"
+    )
     ap.add_argument("--run-id", default=None, help="Optional run id (default timestamp)")
     args = ap.parse_args()
 
@@ -651,7 +857,9 @@ def main():
     strict_guardrails = bool(p.get("strict_guardrails", False) or args.strict)
     requested_device = str(p.get("device", "cpu")).strip().lower()
     backend = _backend_evidence(requested_device)
-    require_effective_cuda = bool(args.require_effective_cuda or p.get("require_effective_cuda", False))
+    require_effective_cuda = bool(
+        args.require_effective_cuda or p.get("require_effective_cuda", False)
+    )
 
     rows = []
     mode_summary = None
@@ -685,31 +893,39 @@ def main():
         mode_kind = "materials_property"
     elif bool(p.get("task_mode", False)):
         task_path = args.task or str(p.get("task_path", "examples/interop/task.yaml"))
-        rows = sweep_verify_task(task_path, cfg.td,
-                                 steps=int(p["steps"]), every=int(p["every"]),
-                                 zones_total_list=list(p["zones_total_list"]),
-                                 use_verlet_list=list(p["use_verlet_list"]),
-                                 verlet_k_steps_list=list(p["verlet_k_steps_list"]),
-                                 chaos_mode_list=list(p["chaos_mode_list"]),
-                                 chaos_delay_prob_list=list(p["chaos_delay_prob_list"]),
-                                 tol=tol,
-                                 sync_mode=bool(p.get("sync_mode", False)),
-                                 device=requested_device,
-                                 strict_min_zone_width=bool(strict_guardrails))
+        rows = sweep_verify_task(
+            task_path,
+            cfg.td,
+            steps=int(p["steps"]),
+            every=int(p["every"]),
+            zones_total_list=list(p["zones_total_list"]),
+            use_verlet_list=list(p["use_verlet_list"]),
+            verlet_k_steps_list=list(p["verlet_k_steps_list"]),
+            chaos_mode_list=list(p["chaos_mode_list"]),
+            chaos_delay_prob_list=list(p["chaos_delay_prob_list"]),
+            tol=tol,
+            sync_mode=bool(p.get("sync_mode", False)),
+            device=requested_device,
+            strict_min_zone_width=bool(strict_guardrails),
+        )
     else:
         pot = make_potential(cfg.potential.kind, cfg.potential.params)
-        rows = sweep_verify2(cfg, pot,
-                             steps=int(p["steps"]), every=int(p["every"]),
-                             zones_total_list=list(p["zones_total_list"]),
-                             use_verlet_list=list(p["use_verlet_list"]),
-                             verlet_k_steps_list=list(p["verlet_k_steps_list"]),
-                             chaos_mode_list=list(p["chaos_mode_list"]),
-                             chaos_delay_prob_list=list(p["chaos_delay_prob_list"]),
-                             tol=tol,
-                             cases_mode=str(args.cases_mode),
-                             sync_mode=bool(p.get("sync_mode", False)),
-                             device=requested_device,
-                             strict_min_zone_width=bool(strict_guardrails))
+        rows = sweep_verify2(
+            cfg,
+            pot,
+            steps=int(p["steps"]),
+            every=int(p["every"]),
+            zones_total_list=list(p["zones_total_list"]),
+            use_verlet_list=list(p["use_verlet_list"]),
+            verlet_k_steps_list=list(p["verlet_k_steps_list"]),
+            chaos_mode_list=list(p["chaos_mode_list"]),
+            chaos_delay_prob_list=list(p["chaos_delay_prob_list"]),
+            tol=tol,
+            cases_mode=str(args.cases_mode),
+            sync_mode=bool(p.get("sync_mode", False)),
+            device=requested_device,
+            strict_min_zone_width=bool(strict_guardrails),
+        )
 
     backend_ok = (not require_effective_cuda) or bool(backend.get("ok_effective_cuda", False))
     if require_effective_cuda and not backend_ok:
@@ -727,13 +943,22 @@ def main():
 
     # artifacts
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
-        json.dump({"yaml": args.yaml, "preset": args.preset, "params": p,
-                   "cases_mode": args.cases_mode, "task": (args.task or ""),
-                   "backend": backend,
-                   "envelope_file": envelope_file,
-                   "envelope": envelope_summary,
-                   "strict_guardrails": strict_guardrails,
-                   "require_effective_cuda": require_effective_cuda}, f, indent=2)
+        json.dump(
+            {
+                "yaml": args.yaml,
+                "preset": args.preset,
+                "params": p,
+                "cases_mode": args.cases_mode,
+                "task": (args.task or ""),
+                "backend": backend,
+                "envelope_file": envelope_file,
+                "envelope": envelope_summary,
+                "strict_guardrails": strict_guardrails,
+                "require_effective_cuda": require_effective_cuda,
+            },
+            f,
+            indent=2,
+        )
     if rows:
         write_csv(rows, os.path.join(out_dir, "metrics.csv"))
     summ = dict(mode_summary) if mode_summary is not None else summarize(rows)
@@ -752,17 +977,34 @@ def main():
         golden_path = os.path.join('golden', f'cfg_system_{args.preset}.json')
     else:
         golden_path = os.path.join('golden', f'{args.cases_mode}_{args.preset}.json')
-    if args.golden in ('write','check'):
+    if args.golden in ('write', 'check'):
         os.makedirs('golden', exist_ok=True)
-        key_rows = [r for r in rows if r.case == 'cfg_system'] if str(args.cases_mode) == "cfg" else list(rows)
+        key_rows = (
+            [r for r in rows if r.case == 'cfg_system']
+            if str(args.cases_mode) == "cfg"
+            else list(rows)
+        )
         if key_rows:
             g = {
                 'preset': args.preset,
                 'cases_mode': str(args.cases_mode),
-                'rows': [dict(case=r.case, zones_total=r.zones_total, use_verlet=r.use_verlet, verlet_k_steps=r.verlet_k_steps,
-                             chaos_mode=r.chaos_mode, chaos_delay_prob=r.chaos_delay_prob,
-                             max_dr=r.max_dr, max_dv=r.max_dv, max_dE=r.max_dE, max_dT=r.max_dT, max_dP=r.max_dP,
-                             ok=r.ok) for r in key_rows]
+                'rows': [
+                    dict(
+                        case=r.case,
+                        zones_total=r.zones_total,
+                        use_verlet=r.use_verlet,
+                        verlet_k_steps=r.verlet_k_steps,
+                        chaos_mode=r.chaos_mode,
+                        chaos_delay_prob=r.chaos_delay_prob,
+                        max_dr=r.max_dr,
+                        max_dv=r.max_dv,
+                        max_dE=r.max_dE,
+                        max_dT=r.max_dT,
+                        max_dP=r.max_dP,
+                        ok=r.ok,
+                    )
+                    for r in key_rows
+                ],
             }
             if args.golden == 'write':
                 with open(golden_path, 'w', encoding='utf-8') as f:
@@ -772,21 +1014,41 @@ def main():
                     raise SystemExit(f'Golden file not found: {golden_path}')
                 with open(golden_path, 'r', encoding='utf-8') as f:
                     g0 = json.load(f)
+
                 # strict compare of ok flags and metric upper bounds
                 def _row_key(x):
-                    return (x['case'], x['zones_total'], x['use_verlet'], x['verlet_k_steps'], x['chaos_mode'], x['chaos_delay_prob'])
-                base_map = { _row_key(x): x for x in g0.get('rows', []) }
+                    return (
+                        x['case'],
+                        x['zones_total'],
+                        x['use_verlet'],
+                        x['verlet_k_steps'],
+                        x['chaos_mode'],
+                        x['chaos_delay_prob'],
+                    )
+
+                base_map = {_row_key(x): x for x in g0.get('rows', [])}
                 for r in key_rows:
-                    k = (r.case, r.zones_total, r.use_verlet, r.verlet_k_steps, r.chaos_mode, r.chaos_delay_prob)
+                    k = (
+                        r.case,
+                        r.zones_total,
+                        r.use_verlet,
+                        r.verlet_k_steps,
+                        r.chaos_mode,
+                        r.chaos_delay_prob,
+                    )
                     if k not in base_map:
                         raise SystemExit(f'Golden missing row {k}')
                     b = base_map[k]
                     if bool(r.ok) != bool(b['ok']):
-                        raise SystemExit(f'Golden ok mismatch for {k}: got {r.ok}, expected {b["ok"]}')
+                        raise SystemExit(
+                            f'Golden ok mismatch for {k}: got {r.ok}, expected {b["ok"]}'
+                        )
                     # metrics should not get worse by >10x (conservative)
-                    for nm in ['max_dr','max_dv','max_dE','max_dT','max_dP']:
+                    for nm in ['max_dr', 'max_dv', 'max_dE', 'max_dT', 'max_dP']:
                         if float(r.__dict__[nm]) > 10.0 * float(b[nm]) + 1e-18:
-                            raise SystemExit(f'Golden regression {nm} for {k}: got {r.__dict__[nm]} expected <= {10.0*b[nm]}')
+                            raise SystemExit(
+                                f'Golden regression {nm} for {k}: got {r.__dict__[nm]} expected <= {10.0*b[nm]}'
+                            )
     incident_bundle = None
     with open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(summ, f, indent=2)
@@ -930,7 +1192,9 @@ def main():
             f.write(f"- ok_all: `{bool(envelope_summary.get('ok_all', False))}`\n")
             f.write(f"- rows_checked: `{int(envelope_summary.get('rows_checked', 0))}`\n")
             f.write(f"- rows_failed: `{int(envelope_summary.get('rows_failed', 0))}`\n")
-            f.write(f"- missing_baseline_rows: `{int(envelope_summary.get('missing_baseline_rows', 0))}`\n")
+            f.write(
+                f"- missing_baseline_rows: `{int(envelope_summary.get('missing_baseline_rows', 0))}`\n"
+            )
         f.write('\n\n```json\n')
         f.write(json.dumps(summ, indent=2))
         f.write('\n```\n')
@@ -938,6 +1202,7 @@ def main():
 
     if args.strict and (not ok):
         raise SystemExit(2)
+
 
 if __name__ == "__main__":
     main()

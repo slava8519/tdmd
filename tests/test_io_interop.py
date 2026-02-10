@@ -1,11 +1,14 @@
 from __future__ import annotations
-import numpy as np
+
 import subprocess
 import sys
+
+import numpy as np
 import pytest
 import yaml
 
-from tdmd.io import load_task, export_lammps_data, export_lammps_in, import_lammps_data
+from tdmd.io import export_lammps_data, export_lammps_in, import_lammps_data, load_task
+
 
 def test_lammps_roundtrip(tmp_path):
     task = load_task("examples/interop/task.yaml")

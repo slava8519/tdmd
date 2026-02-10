@@ -1,5 +1,6 @@
+from .lammps import LammpsData, export_lammps_data, export_lammps_in, import_lammps_data
+from .metrics import MetricsWriter
 from .task import (
-    load_task,
     Task,
     TaskAtom,
     TaskBarostat,
@@ -7,9 +8,8 @@ from .task import (
     TaskEnsemble,
     TaskPotential,
     TaskThermostat,
+    load_task,
     task_to_arrays,
     validate_task_for_run,
 )
-from .lammps import export_lammps_data, export_lammps_in, import_lammps_data, LammpsData
 from .trajectory import TrajectoryWriter
-from .metrics import MetricsWriter

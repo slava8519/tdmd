@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import pytest
 
 from tdmd.io.task import TaskValidationError, load_task, parse_task_dict, validate_task_for_run

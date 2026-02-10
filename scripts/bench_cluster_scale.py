@@ -5,10 +5,10 @@ import csv
 import json
 import math
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,8 +62,18 @@ def _pick_row(rows: list[dict[str, str]], overlap: int) -> dict[str, str] | None
     return None
 
 
-def _run_case(*, profile_path: str, ranks: int, overlap: int, cuda_aware: bool,
-              steps: int, timeout: int, retries: int, simulate: bool, out_dir: Path) -> dict[str, Any]:
+def _run_case(
+    *,
+    profile_path: str,
+    ranks: int,
+    overlap: int,
+    cuda_aware: bool,
+    steps: int,
+    timeout: int,
+    retries: int,
+    simulate: bool,
+    out_dir: Path,
+) -> dict[str, Any]:
     out_csv = out_dir / f"scale_overlap_n{int(ranks)}_m{int(overlap)}.csv"
     out_md = out_dir / f"scale_overlap_n{int(ranks)}_m{int(overlap)}.md"
     out_json = out_dir / f"scale_overlap_n{int(ranks)}_m{int(overlap)}.summary.json"
@@ -141,7 +151,9 @@ def _node_count(ranks: int, ranks_per_node: int) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Cluster strong/weak scaling benchmark and strict gate")
+    ap = argparse.ArgumentParser(
+        description="Cluster strong/weak scaling benchmark and strict gate"
+    )
     ap.add_argument("--profile", default="examples/cluster/cluster_profile_smoke.yaml")
     ap.add_argument("--out", default="results/cluster_scale.csv")
     ap.add_argument("--md", default="results/cluster_scale.md")
@@ -155,8 +167,12 @@ def main() -> int:
 
     if args.dry_run:
         print(f"[cluster-scale] dry-run profile={profile.source_path}")
-        print(f"[cluster-scale] strong_ranks={profile.scaling.strong_ranks} weak_ranks={profile.scaling.weak_ranks}")
-        print(f"[cluster-scale] overlap={profile.scaling.overlap} cuda_aware={profile.scaling.cuda_aware_mpi}")
+        print(
+            f"[cluster-scale] strong_ranks={profile.scaling.strong_ranks} weak_ranks={profile.scaling.weak_ranks}"
+        )
+        print(
+            f"[cluster-scale] overlap={profile.scaling.overlap} cuda_aware={profile.scaling.cuda_aware_mpi}"
+        )
         return 0
 
     out_csv = Path(args.out)
@@ -170,14 +186,24 @@ def main() -> int:
         tmp_dir = Path(td)
         rows: list[dict[str, Any]] = []
         for mode in ("strong", "weak"):
-            ranks_list = list(profile.scaling.strong_ranks if mode == "strong" else profile.scaling.weak_ranks)
+            ranks_list = list(
+                profile.scaling.strong_ranks if mode == "strong" else profile.scaling.weak_ranks
+            )
             base_rank = int(min(ranks_list))
             mode_results: list[dict[str, Any]] = []
             for rk in ranks_list:
                 rk_i = int(rk)
                 steps = int(profile.runtime.stability_steps)
                 if mode == "weak":
-                    steps = max(1, int(round(float(profile.runtime.stability_steps) * (float(rk_i) / float(base_rank)))))
+                    steps = max(
+                        1,
+                        int(
+                            round(
+                                float(profile.runtime.stability_steps)
+                                * (float(rk_i) / float(base_rank))
+                            )
+                        ),
+                    )
                 run = _run_case(
                     profile_path=profile.source_path,
                     ranks=rk_i,
@@ -270,7 +296,9 @@ def main() -> int:
                     rs.append(f"envelope_efficiency<{min_eff:.3f}")
                     r["reasons"] = rs
             else:
-                max_ratio = float(spec.get("max_weak_elapsed_ratio", profile.scaling.max_weak_elapsed_ratio))
+                max_ratio = float(
+                    spec.get("max_weak_elapsed_ratio", profile.scaling.max_weak_elapsed_ratio)
+                )
                 if float(r["weak_elapsed_ratio"]) > max_ratio:
                     r["ok"] = False
                     rs = list(r.get("reasons", []))
@@ -293,7 +321,9 @@ def main() -> int:
             "max_lagV": max((int(r["lagV_max"]) for r in rows), default=0),
             "min_speedup": min((float(r["speedup"]) for r in rows), default=0.0),
             "min_efficiency": min((float(r["efficiency"]) for r in rows), default=0.0),
-            "max_weak_elapsed_ratio": max((float(r["weak_elapsed_ratio"]) for r in rows), default=0.0),
+            "max_weak_elapsed_ratio": max(
+                (float(r["weak_elapsed_ratio"]) for r in rows), default=0.0
+            ),
         },
         "rows": rows,
         "env_snapshot": capture_env_snapshot(extra_keys=list(profile.runtime.env.keys())),

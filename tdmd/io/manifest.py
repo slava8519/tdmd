@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -67,4 +67,3 @@ def metrics_manifest_payload(
         "cutoff": float(cutoff),
         "atom_count": int(atom_count),
     }
-

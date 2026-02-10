@@ -1,15 +1,18 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 
-from .zones import ZoneType, zones_overlapping_range_pbc
-from .zone_bins_localz import PersistentZoneLocalZBinsCache
-from .forces_cells import forces_on_targets_zonecells, forces_on_targets_celllist_compact
-from .celllist import build_cell_list, CellList
-from .integrator import vv_update_positions, vv_finish_velocities
-from .interaction_table_state import InteractionTableState
+from .celllist import CellList, build_cell_list
+from .forces_cells import forces_on_targets_celllist_compact, forces_on_targets_zonecells
 from .geom_pbc import mask_in_aabb_pbc
+from .integrator import vv_finish_velocities, vv_update_positions
+from .interaction_table_state import InteractionTableState
+from .zone_bins_localz import PersistentZoneLocalZBinsCache
+from .zones import ZoneType, zones_overlapping_range_pbc
+
 
 @dataclass
 class ZoneRuntime:
@@ -19,12 +22,15 @@ class ZoneRuntime:
     ztype: ZoneType
     atom_ids: np.ndarray
     n_cells: int = 1
-    halo_ids: np.ndarray = field(default_factory=lambda: np.empty((0,), np.int32))  # ghosts/halo for interaction tables
+    halo_ids: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), np.int32)
+    )  # ghosts/halo for interaction tables
     halo_step_id: int = -1  # zone-time layer for which halo_ids are valid
     step_id: int = 0
     buffer: float = 0.0
     skin: float = 0.0
     table: InteractionTableState | None = None
+
 
 class TDAutomaton1W:
     """Строгое ядро TD: максимум одна зона в W на ранге.
@@ -33,13 +39,19 @@ class TDAutomaton1W:
     - time-lag safety: запрещаем старт вычисления зоны, если зависимости слишком отстают по времени.
     - age-limited tables: перестраиваем таблицу, если она слишком стара по зоне-времени.
     """
-    def __init__(self, zones_runtime: List[ZoneRuntime], box: float, cutoff: float,
-                 bins_cache: PersistentZoneLocalZBinsCache,
-                 traversal_order: List[int],
-                 formal_core: bool = True,
-                 debug_invariants: bool = False,
-                 max_step_lag: int = 1,
-                 table_max_age: int = 1):
+
+    def __init__(
+        self,
+        zones_runtime: List[ZoneRuntime],
+        box: float,
+        cutoff: float,
+        bins_cache: PersistentZoneLocalZBinsCache,
+        traversal_order: List[int],
+        formal_core: bool = True,
+        debug_invariants: bool = False,
+        max_step_lag: int = 1,
+        table_max_age: int = 1,
+    ):
         self.zones = zones_runtime
         self.box = float(box)
         self.cutoff = float(cutoff)
@@ -100,8 +112,10 @@ class TDAutomaton1W:
     def zone_id_for_z(self, zpos: float) -> int:
         zz = float(zpos) % self.box
         zid = int(zz / self.zwidth)
-        if zid < 0: zid = 0
-        if zid >= len(self.zones): zid = len(self.zones)-1
+        if zid < 0:
+            zid = 0
+        if zid >= len(self.zones):
+            zid = len(self.zones) - 1
         return zid
 
     def migrate_atoms_by_position(self, r: np.ndarray, source_zid: int, dest_step_id: int):
@@ -119,13 +133,19 @@ class TDAutomaton1W:
             if dz.ztype == ZoneType.F:
                 self.outbox.setdefault(dest, {}).setdefault(int(dest_step_id), []).append(int(aid))
             else:
-                dz.atom_ids = np.array([int(aid)], dtype=np.int32) if dz.atom_ids.size == 0 else np.concatenate([dz.atom_ids, np.array([int(aid)], np.int32)])
+                dz.atom_ids = (
+                    np.array([int(aid)], dtype=np.int32)
+                    if dz.atom_ids.size == 0
+                    else np.concatenate([dz.atom_ids, np.array([int(aid)], np.int32)])
+                )
                 dz.table = None
             # remove from src
         src.atom_ids = np.array(keep_src, dtype=np.int32) if keep_src else np.empty((0,), np.int32)
         src.table = None
         self.diag["migrations"] += 1
-        self.diag["outbox_atoms"] = sum(len(lst) for d in self.outbox.values() for lst in d.values())
+        self.diag["outbox_atoms"] = sum(
+            len(lst) for d in self.outbox.values() for lst in d.values()
+        )
         self.diag["outbox_groups"] = sum(len(d) for d in self.outbox.values())
 
     def on_recv(self, zid: int, atom_ids: np.ndarray, step_id: int):
@@ -158,8 +178,6 @@ class TDAutomaton1W:
         self.deps_table_func = table_func
         self.deps_owner_func = owner_func
 
-
-
     def set_priority_key(self, keyfunc):
         """Set total-order priority key for selecting next computable zone.
         keyfunc(zid)->tuple comparable lexicographically.
@@ -173,9 +191,6 @@ class TDAutomaton1W:
             return sorted(list(self.order), key=lambda zid: self.priority_key(int(zid)))
         except Exception:
             return list(self.order)
-
-
-
 
     def _deps_table_missing(self, zid: int) -> list[int]:
         if self.deps_table_func is None or self.deps_table_pred is None:
@@ -221,6 +236,7 @@ class TDAutomaton1W:
     def wfg_local_cycle(self) -> list[int] | None:
         """Detect a cycle in local WFG sample (if any)."""
         from .graph_utils import find_cycle
+
         g = self.wfg_local_sample()
         return find_cycle(g)
 
@@ -234,7 +250,6 @@ class TDAutomaton1W:
         if cyc:
             self.diag["wfg_cycles"] = self.diag.get("wfg_cycles", 0) + 1
             self.diag["wfg_last_cycle"] = list(map(int, cyc))
-
 
     def _deps_table_ok(self, deps: List[int]) -> bool:
         pred = self.deps_table_pred
@@ -277,8 +292,9 @@ class TDAutomaton1W:
                 return False
         return True
 
-    def ensure_table(self, zid: int, r: np.ndarray, rc: float, skin_global: float,
-                     step: int, verlet_k_steps: int):
+    def ensure_table(
+        self, zid: int, r: np.ndarray, rc: float, skin_global: float, step: int, verlet_k_steps: int
+    ):
         geom_aabb = None
         if self.geom_provider is not None:
             try:
@@ -318,21 +334,39 @@ class TDAutomaton1W:
             # candidate_ids already defines the support; build cell list on these ids
             cell = build_cell_list(r, candidate_ids.astype(np.int32), self.box, rc)
             # v4.3: store 3D AABB support geometry in table state
-            mask_ok = mask_in_aabb_pbc(r, candidate_ids.astype(np.int32), geom_aabb.lo, geom_aabb.hi, rc, self.box)
+            mask_ok = mask_in_aabb_pbc(
+                r, candidate_ids.astype(np.int32), geom_aabb.lo, geom_aabb.hi, rc, self.box
+            )
             if not bool(mask_ok.all()):
-                self.diag['tG3'] = self.diag.get('tG3', 0) + int((~mask_ok).sum())  # table-geom violations (candidate outside support)
-            z.table = InteractionTableState(impl=cell, candidate_ids=candidate_ids.astype(np.int32), rc=float(rc), build_step=int(step),
-                                    z0p=float(z.z0-rc), z1p=float(z.z1+rc), lo=np.asarray(geom_aabb.lo, dtype=float), hi=np.asarray(geom_aabb.hi, dtype=float))
+                self.diag['tG3'] = self.diag.get('tG3', 0) + int(
+                    (~mask_ok).sum()
+                )  # table-geom violations (candidate outside support)
+            z.table = InteractionTableState(
+                impl=cell,
+                candidate_ids=candidate_ids.astype(np.int32),
+                rc=float(rc),
+                build_step=int(step),
+                z0p=float(z.z0 - rc),
+                z1p=float(z.z1 + rc),
+                lo=np.asarray(geom_aabb.lo, dtype=float),
+                hi=np.asarray(geom_aabb.hi, dtype=float),
+            )
             return
         if candidate_ids.size == 0:
             z.table = None
             return None
 
         impl = self.cache.get(
-            zid, r, self.box, candidate_ids,
-            rc=float(rc), skin_global=float(skin_global),
-            step=int(step), verlet_k_steps=int(verlet_k_steps),
-            z0=float(z0p), z1=float(z1p)
+            zid,
+            r,
+            self.box,
+            candidate_ids,
+            rc=float(rc),
+            skin_global=float(skin_global),
+            step=int(step),
+            verlet_k_steps=int(verlet_k_steps),
+            z0=float(z0p),
+            z1=float(z1p),
         )
         z.table = InteractionTableState(
             impl=impl,
@@ -340,7 +374,7 @@ class TDAutomaton1W:
             rc=float(rc),
             build_step=int(z.step_id),  # note: zone-time
             z0p=float(z0p),
-            z1p=float(z1p)
+            z1p=float(z1p),
         )
         return z.table
 
@@ -361,11 +395,17 @@ class TDAutomaton1W:
                     deps_owner = list(self.deps_owner_func(int(zid)))
                 if self.deps_table_func is not None:
                     deps_table = list(self.deps_table_func(int(zid)))
-                if self._deps_table_ok(deps_table) and self._deps_owner_ok(deps_owner) and self._lag_ok(zid, deps_table):
+                if (
+                    self._deps_table_ok(deps_table)
+                    and self._deps_owner_ok(deps_owner)
+                    and self._lag_ok(zid, deps_table)
+                ):
                     return True
         return False
 
-    def start_compute(self, r: np.ndarray, rc: float, skin_global: float, step: int, verlet_k_steps: int):
+    def start_compute(
+        self, r: np.ndarray, rc: float, skin_global: float, step: int, verlet_k_steps: int
+    ):
         self._assert_invariants()
         if self.work_zid is not None and self.formal_core:
             raise RuntimeError("Attempt to start compute while a zone is already in W")
@@ -405,10 +445,24 @@ class TDAutomaton1W:
 
                 z.ztype = ZoneType.W
                 self.work_zid = zid
-                self.ensure_table(zid, r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps)
+                self.ensure_table(
+                    zid,
+                    r=r,
+                    rc=rc,
+                    skin_global=skin_global,
+                    step=step,
+                    verlet_k_steps=verlet_k_steps,
+                )
                 # v4.3: 3D halo geometric invariant check (I4) against table AABB support
                 if z.table is not None and z.table.lo is not None and z.halo_ids.size > 0:
-                    m = mask_in_aabb_pbc(r, z.halo_ids.astype(np.int32), z.table.lo, z.table.hi, float(z.table.rc), self.box)
+                    m = mask_in_aabb_pbc(
+                        r,
+                        z.halo_ids.astype(np.int32),
+                        z.table.lo,
+                        z.table.hi,
+                        float(z.table.rc),
+                        self.box,
+                    )
                     if not bool(m.all()):
                         self.diag['hG3'] = self.diag.get('hG3', 0) + int((~m).sum())
                 # v4.3: 3D halo-in-support invariant (I3) against table.support_ids
@@ -421,11 +475,21 @@ class TDAutomaton1W:
                 return zid
         return None
 
-    def compute_step_for_work_zone(self, r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], dt: float,
-                                   potential, cutoff: float, rc: float,
-                                   skin_global: float, step: int, verlet_k_steps: int,
-                                   atom_types: np.ndarray | None = None,
-                                   enable_step_id: bool = True):
+    def compute_step_for_work_zone(
+        self,
+        r: np.ndarray,
+        v: np.ndarray,
+        mass: Union[float, np.ndarray],
+        dt: float,
+        potential,
+        cutoff: float,
+        rc: float,
+        skin_global: float,
+        step: int,
+        verlet_k_steps: int,
+        atom_types: np.ndarray | None = None,
+        enable_step_id: bool = True,
+    ):
         self._assert_invariants()
         if self.work_zid is None:
             return None
@@ -441,7 +505,9 @@ class TDAutomaton1W:
             return zid
 
         if z.table is None:
-            self.ensure_table(zid, r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps)
+            self.ensure_table(
+                zid, r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps
+            )
 
         if atom_types is None:
             atom_types = np.ones((r.shape[0],), dtype=np.int32)
@@ -465,7 +531,11 @@ class TDAutomaton1W:
             )
         else:
             f = forces_on_targets_zonecells(
-                r, self.box, potential, cutoff, z.atom_ids,
+                r,
+                self.box,
+                potential,
+                cutoff,
+                z.atom_ids,
                 z.table.impl if z.table else None,
                 atom_types=atom_types,
             )
@@ -474,7 +544,9 @@ class TDAutomaton1W:
         dest_sid = z.step_id + (1 if enable_step_id else 0)
         self.migrate_atoms_by_position(r, zid, dest_step_id=dest_sid)
 
-        self.ensure_table(zid, r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps)
+        self.ensure_table(
+            zid, r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps
+        )
         if z.table is not None and z.atom_ids.size:
             if hasattr(potential, "forces_on_targets"):
                 support = z.table.support_ids() if z.table is not None else z.atom_ids
@@ -494,7 +566,11 @@ class TDAutomaton1W:
                 )
             else:
                 f2 = forces_on_targets_zonecells(
-                    r, self.box, potential, cutoff, z.atom_ids,
+                    r,
+                    self.box,
+                    potential,
+                    cutoff,
+                    z.atom_ids,
                     z.table.impl if z.table else None,
                     atom_types=atom_types,
                 )
@@ -527,10 +603,11 @@ class TDAutomaton1W:
         if batch:
             bs = int(len(batch))
             self.diag["send_batches"] = int(self.diag.get("send_batches", 0)) + 1
-            self.diag["send_batch_zones_total"] = int(self.diag.get("send_batch_zones_total", 0)) + bs
+            self.diag["send_batch_zones_total"] = (
+                int(self.diag.get("send_batch_zones_total", 0)) + bs
+            )
             self.diag["send_batch_size_max"] = max(int(self.diag.get("send_batch_size_max", 0)), bs)
         return batch
-
 
     def iter_outbox_records(self):
         """Yield (dest_zid, step_id, ids_array) for all pending outbox groups."""

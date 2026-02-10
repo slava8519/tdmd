@@ -20,8 +20,8 @@ Note: This provider assumes periodic boundary conditions in all three axes.
 
 """
 
-from typing import List, Tuple
 import math
+from typing import List, Tuple
 
 
 class DepsProvider3DBlock:
@@ -47,10 +47,15 @@ class DepsProvider3DBlock:
     The static owner mapping is ``owner_rank(id) = id % mpi_size``.
     """
 
-    def __init__(self, nx: int, ny: int, nz: int,
-                 box: Tuple[float, float, float],
-                 cutoff: float,
-                 mpi_size: int):
+    def __init__(
+        self,
+        nx: int,
+        ny: int,
+        nz: int,
+        box: Tuple[float, float, float],
+        cutoff: float,
+        mpi_size: int,
+    ):
         self.nx = nx
         self.ny = ny
         self.nz = nz
@@ -69,7 +74,9 @@ class DepsProvider3DBlock:
         iz = zid // (self.nx * self.ny)
         return ix, iy, iz
 
-    def _bounds(self, ix: int, iy: int, iz: int) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    def _bounds(
+        self, ix: int, iy: int, iz: int
+    ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
         """Return bounding box of zone indices."""
         x0 = ix * self.zsize_x
         y0 = iy * self.zsize_y

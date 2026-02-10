@@ -44,7 +44,9 @@ def build_parser(
     )
     pr.add_argument("--trace-td", action="store_true", help="Enable TD trace logging")
     pr.add_argument("--trace-td-out", default="td_trace.csv", help="TD trace output path")
-    pr.add_argument("--device", choices=["auto", "cpu", "cuda"], default="", help="Compute device override")
+    pr.add_argument(
+        "--device", choices=["auto", "cpu", "cuda"], default="", help="Compute device override"
+    )
     pr.set_defaults(func=cmd_run)
 
     pv = sub.add_parser("verify")
@@ -97,4 +99,3 @@ def build_parser(
     pv2.set_defaults(func=cmd_verify2)
 
     return p
-

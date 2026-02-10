@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Optional, Union
-import math
+
 import numpy as np
 
 from .observables import compute_observables
@@ -69,7 +70,9 @@ def build_ensemble_spec(
     return EnsembleSpec(kind=k, thermostat=th, barostat=br)
 
 
-def _param_float(params: dict[str, Any], key: str, default: Optional[float] = None, *, positive: bool = False) -> float:
+def _param_float(
+    params: dict[str, Any], key: str, default: Optional[float] = None, *, positive: bool = False
+) -> float:
     if key not in params:
         if default is None:
             raise ValueError(f"missing required parameter: {key}")
@@ -132,7 +135,9 @@ def _apply_berendsen_barostat(
     max_volume_scale_step = _param_float(params, "max_volume_scale_step", 0.10, positive=True)
     scale_velocities = bool(params.get("scale_velocities", True))
 
-    obs = compute_observables(r, v, mass, float(box), potential, float(cutoff), atom_types=atom_types)
+    obs = compute_observables(
+        r, v, mass, float(box), potential, float(cutoff), atom_types=atom_types
+    )
     p_inst = float(obs.get("P", 0.0))
 
     # Berendsen isotropic volume coupling:
@@ -210,4 +215,3 @@ def apply_ensemble_step(
                 raise ValueError(f"unsupported barostat kind: {br_kind}")
 
     return float(out_box), float(lam_t), float(lam_box)
-

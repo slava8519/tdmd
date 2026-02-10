@@ -12,7 +12,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Prepare/run ParaView adapter artifacts")
     ap.add_argument("--traj", required=True, help="Input trajectory path")
     ap.add_argument("--outdir", required=True, help="Output directory")
-    ap.add_argument("--run", action="store_true", help="Execute generated pvpython script if available")
+    ap.add_argument(
+        "--run", action="store_true", help="Execute generated pvpython script if available"
+    )
     ap.add_argument("--pvpython", default="", help="Path to pvpython binary (optional)")
     args = ap.parse_args()
 
@@ -64,4 +66,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

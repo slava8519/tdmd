@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -22,12 +22,7 @@ def _detect_mpirun_for_test() -> str:
     ):
         if cand.is_file() and os.access(str(cand), os.X_OK):
             return str(cand)
-    return (
-        shutil.which("mpiexec.hydra")
-        or shutil.which("mpiexec")
-        or shutil.which("mpirun")
-        or ""
-    )
+    return shutil.which("mpiexec.hydra") or shutil.which("mpiexec") or shutil.which("mpirun") or ""
 
 
 def test_verifylab_mpi_overlap_smoke_strict():

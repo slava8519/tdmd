@@ -2,10 +2,20 @@ from __future__ import annotations
 
 from .cli_commands import (
     cmd_golden_check as _cmd_golden_check_impl,
+)
+from .cli_commands import (
     cmd_golden_gen as _cmd_golden_gen_impl,
+)
+from .cli_commands import (
     cmd_run as _cmd_run_impl,
+)
+from .cli_commands import (
     cmd_verify as _cmd_verify_impl,
+)
+from .cli_commands import (
     cmd_verify2 as _cmd_verify2_impl,
+)
+from .cli_commands import (
     cmd_verifylab as _cmd_verifylab_impl,
 )
 from .cli_parser import build_parser
@@ -65,4 +75,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

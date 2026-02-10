@@ -74,7 +74,9 @@ def _resolve_property_thresholds(
         "thermo_press_abs": float(prop.get("thermo_press_abs", base_thresholds["press_abs"])),
         "transport_r_abs": float(prop.get("transport_r_abs", base_thresholds["traj_r_abs"])),
         "transport_v_abs": float(prop.get("transport_v_abs", base_thresholds["traj_v_abs"])),
-        "transport_verify_abs": float(prop.get("transport_verify_abs", base_thresholds["verify_abs"])),
+        "transport_verify_abs": float(
+            prop.get("transport_verify_abs", base_thresholds["verify_abs"])
+        ),
     }
 
 
@@ -186,9 +188,17 @@ def _compute_case_actual(case: dict[str, Any], cfg) -> dict[str, Any]:
     dt = float(task.dt)
     cutoff = float(task.cutoff)
 
-    f0, pe0, vir0 = pot.forces_energy_virial(arr.r.copy(), box=box, cutoff=cutoff, atom_types=arr.atom_types)
+    f0, pe0, vir0 = pot.forces_energy_virial(
+        arr.r.copy(), box=box, cutoff=cutoff, atom_types=arr.atom_types
+    )
     obs0 = compute_observables(
-        arr.r.copy(), arr.v.copy(), masses, box=box, potential=pot, cutoff=cutoff, atom_types=arr.atom_types
+        arr.r.copy(),
+        arr.v.copy(),
+        masses,
+        box=box,
+        potential=pot,
+        cutoff=cutoff,
+        atom_types=arr.atom_types,
     )
 
     r = arr.r.copy()
@@ -206,7 +216,9 @@ def _compute_case_actual(case: dict[str, Any], cfg) -> dict[str, Any]:
         atom_types=arr.atom_types,
         device="cpu",
     )
-    obsf = compute_observables(r, v, masses, box=box, potential=pot, cutoff=cutoff, atom_types=arr.atom_types)
+    obsf = compute_observables(
+        r, v, masses, box=box, potential=pot, cutoff=cutoff, atom_types=arr.atom_types
+    )
 
     vr = run_verify_task(
         potential=pot,
@@ -358,9 +370,7 @@ def _check_case(
         diff = float(pc["diff"])
         max_abs_diff = max(max_abs_diff, diff)
         if not bool(pc["ok"]):
-            violations.append(
-                f"property:{pc['name']}: diff={diff:.6e} tol={float(pc['tol']):.6e}"
-            )
+            violations.append(f"property:{pc['name']}: diff={diff:.6e} tol={float(pc['tol']):.6e}")
 
     return CaseCheck(
         name=name,
@@ -409,7 +419,9 @@ def run_suite(*, fixture_path: str, cfg_path: str) -> dict[str, Any]:
                 slot["ok"] = int(slot["ok"]) + 1
             else:
                 slot["fail"] = int(slot["fail"]) + 1
-            slot["max_abs_diff"] = float(max(float(slot["max_abs_diff"]), float(pc.get("diff", 0.0))))
+            slot["max_abs_diff"] = float(
+                max(float(slot["max_abs_diff"]), float(pc.get("diff", 0.0)))
+            )
 
     total = int(len(checks))
     ok_n = int(sum(1 for c in checks if c.ok))
@@ -428,7 +440,9 @@ def run_suite(*, fixture_path: str, cfg_path: str) -> dict[str, Any]:
                 "ok": bool(c.ok),
                 "max_abs_diff": float(c.max_abs_diff),
                 "violations": list(c.violations),
-                "property_fail": int(sum(1 for x in c.property_checks if not bool(x.get("ok", False)))),
+                "property_fail": int(
+                    sum(1 for x in c.property_checks if not bool(x.get("ok", False)))
+                ),
                 "property_checks": list(c.property_checks),
             }
             for c in checks

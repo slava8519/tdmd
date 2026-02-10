@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +44,19 @@ def _pick_row(rows: list[dict[str, str]], overlap: int) -> dict[str, str] | None
     return None
 
 
-def _run_case(*, profile_path: str, ranks: int, overlap: int, cuda_aware: bool,
-              steps: int, thermo_every: int, timeout: int, retries: int,
-              simulate: bool, out_dir: Path) -> dict[str, Any]:
+def _run_case(
+    *,
+    profile_path: str,
+    ranks: int,
+    overlap: int,
+    cuda_aware: bool,
+    steps: int,
+    thermo_every: int,
+    timeout: int,
+    retries: int,
+    simulate: bool,
+    out_dir: Path,
+) -> dict[str, Any]:
     out_csv = out_dir / f"stability_n{int(ranks)}_m{int(overlap)}.csv"
     out_md = out_dir / f"stability_n{int(ranks)}_m{int(overlap)}.md"
     out_json = out_dir / f"stability_n{int(ranks)}_m{int(overlap)}.summary.json"
@@ -138,7 +148,9 @@ def main() -> int:
         overlaps = sorted(set([0, int(profile.stability.overlap)]))
         print(f"[cluster-stability] dry-run profile={profile.source_path}")
         print(f"[cluster-stability] ranks={profile.stability.ranks} overlaps={overlaps}")
-        print(f"[cluster-stability] steps={profile.runtime.stability_steps} thermo_every={profile.runtime.stability_thermo_every}")
+        print(
+            f"[cluster-stability] steps={profile.runtime.stability_steps} thermo_every={profile.runtime.stability_thermo_every}"
+        )
         return 0
 
     out_csv = Path(args.out)
@@ -169,7 +181,9 @@ def main() -> int:
                     out_dir=tmp_dir,
                 )
                 reasons: list[str] = list(run.get("reasons", []))
-                gate_ok = bool(int(run["returncode"]) == 0 and int(run["strict_invariants_ok"]) == 1)
+                gate_ok = bool(
+                    int(run["returncode"]) == 0 and int(run["strict_invariants_ok"]) == 1
+                )
                 if int(run["hG_max"]) > int(profile.stability.max_hG):
                     gate_ok = False
                     reasons.append(f"hG>{int(profile.stability.max_hG)}")

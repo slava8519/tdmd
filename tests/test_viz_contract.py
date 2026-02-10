@@ -107,7 +107,11 @@ def test_viz_plugins_run(tmp_path):
 
     rows, summary = run_plugins(
         str(traj),
-        [MobilityPlugin(), SpeciesMixingPlugin(), RegionOccupancyPlugin(xlo=0, xhi=2.5, ylo=0, yhi=2.5, zlo=0, zhi=2.5)],
+        [
+            MobilityPlugin(),
+            SpeciesMixingPlugin(),
+            RegionOccupancyPlugin(xlo=0, xhi=2.5, ylo=0, yhi=2.5, zlo=0, zhi=2.5),
+        ],
     )
     assert len(rows) == 3
     assert "mobility.rms" in rows[-1]

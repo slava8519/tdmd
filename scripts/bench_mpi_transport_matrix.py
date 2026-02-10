@@ -4,10 +4,10 @@ import argparse
 import csv
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,8 +45,19 @@ def _pick_row(rows: list[dict[str, str]], overlap: int) -> dict[str, str] | None
     return None
 
 
-def _run_case(*, profile_path: str, ranks: int, overlap: int, cuda_aware: bool, fabric: str,
-              timeout: int, retries: int, simulate: bool, out_dir: Path, extra_env: dict[str, str]) -> dict[str, Any]:
+def _run_case(
+    *,
+    profile_path: str,
+    ranks: int,
+    overlap: int,
+    cuda_aware: bool,
+    fabric: str,
+    timeout: int,
+    retries: int,
+    simulate: bool,
+    out_dir: Path,
+    extra_env: dict[str, str],
+) -> dict[str, Any]:
     out_csv = out_dir / f"transport_n{int(ranks)}_m{int(overlap)}_{fabric}.csv"
     out_md = out_dir / f"transport_n{int(ranks)}_m{int(overlap)}_{fabric}.md"
     out_json = out_dir / f"transport_n{int(ranks)}_m{int(overlap)}_{fabric}.summary.json"
@@ -140,7 +151,9 @@ def main() -> int:
         print(f"[transport-matrix] dry-run profile={profile.source_path}")
         print(f"[transport-matrix] ranks={profile.transport_matrix.ranks}")
         for e in profile.transport_matrix.entries:
-            print(f"  - {e.name}: overlap={e.overlap} cuda_aware={e.cuda_aware_mpi} fabric={e.fabric}")
+            print(
+                f"  - {e.name}: overlap={e.overlap} cuda_aware={e.cuda_aware_mpi} fabric={e.fabric}"
+            )
         return 0
 
     out_csv = Path(args.out)
@@ -214,7 +227,9 @@ def main() -> int:
             "max_hV": max((int(r["hV_max"]) for r in rows), default=0),
             "max_violW": max((int(r["violW_max"]) for r in rows), default=0),
             "max_lagV": max((int(r["lagV_max"]) for r in rows), default=0),
-            "min_speedup_vs_blocking": min((float(r["speedup_vs_blocking"]) for r in rows), default=0.0),
+            "min_speedup_vs_blocking": min(
+                (float(r["speedup_vs_blocking"]) for r in rows), default=0.0
+            ),
         },
         "rows": rows,
         "env_snapshot": capture_env_snapshot(extra_keys=list(profile.runtime.env.keys())),

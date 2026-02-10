@@ -12,7 +12,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Prepare/run VMD adapter artifacts")
     ap.add_argument("--traj", required=True, help="Input trajectory path")
     ap.add_argument("--outdir", required=True, help="Output directory")
-    ap.add_argument("--run", action="store_true", help="Execute generated VMD script if vmd is available")
+    ap.add_argument(
+        "--run", action="store_true", help="Execute generated VMD script if vmd is available"
+    )
     ap.add_argument("--vmd", default="", help="Path to vmd binary (optional)")
     args = ap.parse_args()
 
@@ -65,4 +67,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

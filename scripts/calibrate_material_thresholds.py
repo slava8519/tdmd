@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 
 def _abs_max(values: list[float]) -> float:
@@ -76,7 +76,9 @@ def _collect_scales(fixture: dict) -> dict[str, float]:
     }
 
 
-def _recommend_thresholds(*, scales: dict[str, float], floor: float, rel: dict[str, float]) -> dict[str, float]:
+def _recommend_thresholds(
+    *, scales: dict[str, float], floor: float, rel: dict[str, float]
+) -> dict[str, float]:
     eos_tol = max(float(floor), float(rel["eos"]) * float(scales["eos"]))
     thermo_tol = max(float(floor), float(rel["thermo"]) * float(scales["thermo"]))
     transport_tol = max(float(floor), float(rel["transport"]) * float(scales["transport"]))
@@ -104,7 +106,9 @@ def _recommend_thresholds(*, scales: dict[str, float], floor: float, rel: dict[s
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Calibrate materials threshold policy from parity fixture")
+    ap = argparse.ArgumentParser(
+        description="Calibrate materials threshold policy from parity fixture"
+    )
     ap.add_argument("--fixture", default="examples/interop/materials_parity_suite_v2.json")
     ap.add_argument("--out-json", default="golden/material_threshold_policy_v2.json")
     ap.add_argument("--out-md", default="results/material_threshold_policy_v2.md")

@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 import csv
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import Iterable
 
 import yaml
@@ -104,7 +104,9 @@ def _write_csv(path: str, rows: list[dict[str, float | int]]) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["k", "returncode", "elapsed_sec", "speedup_vs_k1", "stdout_bytes", "stderr_bytes"])
+        w.writerow(
+            ["k", "returncode", "elapsed_sec", "speedup_vs_k1", "stdout_bytes", "stderr_bytes"]
+        )
         base = None
         for row in rows:
             if int(row["returncode"]) == 0 and int(row["k"]) == 1:
@@ -112,27 +114,39 @@ def _write_csv(path: str, rows: list[dict[str, float | int]]) -> None:
                 break
         for row in rows:
             elapsed = float(row["elapsed_sec"])
-            speedup = (base / elapsed) if (base is not None and elapsed > 0.0 and int(row["returncode"]) == 0) else 0.0
-            w.writerow([
-                int(row["k"]),
-                int(row["returncode"]),
-                f"{elapsed:.6f}",
-                f"{speedup:.6f}",
-                int(row["stdout_bytes"]),
-                int(row["stderr_bytes"]),
-            ])
+            speedup = (
+                (base / elapsed)
+                if (base is not None and elapsed > 0.0 and int(row["returncode"]) == 0)
+                else 0.0
+            )
+            w.writerow(
+                [
+                    int(row["k"]),
+                    int(row["returncode"]),
+                    f"{elapsed:.6f}",
+                    f"{speedup:.6f}",
+                    int(row["stdout_bytes"]),
+                    int(row["stderr_bytes"]),
+                ]
+            )
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Measure TD-MPI time-blocking K impact (batch_size/time_block_k)")
+    p = argparse.ArgumentParser(
+        description="Measure TD-MPI time-blocking K impact (batch_size/time_block_k)"
+    )
     p.add_argument("--config", default="examples/td_1d_morse_static_rr.yaml")
     p.add_argument("--n", type=int, default=2, help="MPI ranks")
     p.add_argument("--k-list", default="1,2,4", help="Comma-separated K values (>=1)")
-    p.add_argument("--steps", type=int, default=40, help="Override run.n_steps (set <=0 to keep config value)")
+    p.add_argument(
+        "--steps", type=int, default=40, help="Override run.n_steps (set <=0 to keep config value)"
+    )
     p.add_argument("--mpirun", default="", help="Path to mpirun/mpiexec")
     p.add_argument("--timeout", type=int, default=180)
     p.add_argument("--out", default="results/time_blocking.csv")
-    p.add_argument("--dry-run", action="store_true", help="Only validate inputs and print planned runs")
+    p.add_argument(
+        "--dry-run", action="store_true", help="Only validate inputs and print planned runs"
+    )
     args = p.parse_args()
 
     root = Path(__file__).resolve().parents[1]

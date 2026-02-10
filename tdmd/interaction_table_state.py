@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import numpy as np
+
 
 @dataclass
 class InteractionTableState:
@@ -11,6 +14,7 @@ class InteractionTableState:
     - параметры rc и геометрия p-окрестности (для валидности),
     - шаг времени (time stamp), когда таблица построена.
     """
+
     impl: object
     candidate_ids: np.ndarray
     rc: float
@@ -23,7 +27,6 @@ class InteractionTableState:
 
     def support_ids(self) -> np.ndarray:
         return self.candidate_ids
-
 
     def has_aabb(self) -> bool:
         return (self.lo is not None) and (self.hi is not None)

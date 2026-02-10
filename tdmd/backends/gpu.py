@@ -1,1 +1,2 @@
-class GPUBackend: name='gpu'
+class GPUBackend:
+    name = 'gpu'

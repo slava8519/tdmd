@@ -8,7 +8,9 @@ from tdmd.serial import run_serial
 from tdmd.td_local import run_td_local
 
 
-def _run_serial_vs_td_local(task_path: str, *, sync_mode: bool, zones_total: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _run_serial_vs_td_local(
+    task_path: str, *, sync_mode: bool, zones_total: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     task = load_task(task_path)
     arr = task_to_arrays(task)
     masses = validate_task_for_run(task, allowed_potential_kinds=("eam/alloy",))

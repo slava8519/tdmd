@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -32,7 +32,9 @@ def main() -> int:
         default="examples/interop/materials_parity_suite_v2_template.json",
         help="Template JSON with cases/thresholds",
     )
-    ap.add_argument("--config", default="examples/td_1d_morse.yaml", help="TD config for sync verify path")
+    ap.add_argument(
+        "--config", default="examples/td_1d_morse.yaml", help="TD config for sync verify path"
+    )
     ap.add_argument(
         "--out",
         default="examples/interop/materials_parity_suite_v2.json",

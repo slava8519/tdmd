@@ -34,7 +34,9 @@ def test_config_time_block_k_alias(tmp_path):
 
 def test_pop_send_batch_tracks_batch_metrics():
     zones = [
-        ZoneRuntime(zid=i, z0=float(i), z1=float(i + 1), ztype=ZoneType.D, atom_ids=np.empty((0,), np.int32))
+        ZoneRuntime(
+            zid=i, z0=float(i), z1=float(i + 1), ztype=ZoneType.D, atom_ids=np.empty((0,), np.int32)
+        )
         for i in range(6)
     ]
     autom = TDAutomaton1W(

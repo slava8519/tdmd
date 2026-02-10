@@ -13,7 +13,9 @@ def test_contract_w_leq_1_guard_present():
         r"one\s*-?zone\s+.*W",
         r"\bmax_w\b",
     ]
-    assert any(re.search(p, src) for p in patterns), "Expected a W<=1 enforcement marker in td_full_mpi"
+    assert any(
+        re.search(p, src) for p in patterns
+    ), "Expected a W<=1 enforcement marker in td_full_mpi"
 
 
 def test_contract_a4b_tie_break_present():

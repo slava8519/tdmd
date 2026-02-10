@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+
 import numpy as np
 
 
@@ -103,7 +104,9 @@ def _write_task_yaml(
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Generate Al/Cu crack-healing task with exact atom count")
+    p = argparse.ArgumentParser(
+        description="Generate Al/Cu crack-healing task with exact atom count"
+    )
     p.add_argument(
         "--out",
         default="examples/interop/task_al_cu_crack_100k_nvt.yaml",
