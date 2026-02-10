@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Optional, Union
-import inspect
 import numpy as np
 
 from .zones import (
@@ -18,6 +17,7 @@ from .forces_gpu import (
     forces_on_targets_pair_backend,
     supports_pair_gpu,
 )
+from .observer import emit_observer, observer_accepts_box
 from .potentials import EAMAlloyPotential
 
 def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box: float, potential,
@@ -84,26 +84,12 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
         barostat=barostat,
         source="td_local",
     )
-    observer_accepts_box = False
-    if observer is not None:
-        try:
-            sig = inspect.signature(observer)
-            params = list(sig.parameters.values())
-            observer_accepts_box = (
-                any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
-                or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
-                or len(params) >= 4
-            )
-        except (TypeError, ValueError):
-            observer_accepts_box = False
+    accepts_box = observer_accepts_box(observer)
 
     def _emit_observer(step: int) -> None:
-        if observer is None or not observer_every:
+        if not observer_every:
             return
-        if observer_accepts_box:
-            observer(int(step), r, v, float(box))
-        else:
-            observer(int(step), r, v)
+        emit_observer(observer, accepts_box=accepts_box, step=step, r=r, v=v, box=float(box))
 
     many_body = hasattr(potential, "forces_energy_virial")
 
