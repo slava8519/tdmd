@@ -189,7 +189,7 @@ class TDAutomaton1W:
             return list(self.order)
         try:
             return sorted(list(self.order), key=lambda zid: self.priority_key(int(zid)))
-        except Exception:
+        except (TypeError, ValueError):
             return list(self.order)
 
     def _deps_table_missing(self, zid: int) -> list[int]:
@@ -299,7 +299,7 @@ class TDAutomaton1W:
         if self.geom_provider is not None:
             try:
                 geom_aabb = self.geom_provider.geom(int(zid))
-            except Exception:
+            except (KeyError, IndexError, AttributeError):
                 geom_aabb = None
         z = self.zones[zid]
         deps, z0p, z1p = self._deps(zid)

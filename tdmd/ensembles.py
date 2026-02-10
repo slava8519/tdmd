@@ -6,6 +6,7 @@ from typing import Any, Optional, Union
 
 import numpy as np
 
+from .constants import GEOM_EPSILON
 from .observables import compute_observables
 from .state import kinetic_energy, temperature_from_ke
 
@@ -108,7 +109,7 @@ def _apply_berendsen_thermostat(
         return 1.0
 
     lam2 = 1.0 + (float(dt) / tau) * ((t_target / t_inst) - 1.0)
-    lam2 = max(lam2, 1e-12)
+    lam2 = max(lam2, GEOM_EPSILON)
     lam = math.sqrt(lam2)
     lo = max(1e-6, 1.0 - max_scale_step)
     hi = 1.0 + max_scale_step

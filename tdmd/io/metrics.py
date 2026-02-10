@@ -81,7 +81,7 @@ class MetricsWriter:
     def close(self):
         try:
             self._f.close()
-        except Exception as exc:
+        except OSError as exc:
             warnings.warn(
                 f"MetricsWriter.close() failed for {self.path!r}: {exc!r}",
                 RuntimeWarning,

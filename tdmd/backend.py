@@ -19,6 +19,9 @@ def _detect_cupy() -> tuple[object | None, str]:
     try:
         import cupy as cp  # type: ignore
     except Exception as exc:
+        # CuPy can fail to import for many reasons beyond ImportError
+        # (e.g., missing/invalid CUDA runtime libraries). Treat any failure
+        # as "CUDA unavailable" so CPU-only runs remain usable.
         return None, f"cupy import failed: {exc}"
     try:
         ndev = int(cp.cuda.runtime.getDeviceCount())
@@ -65,7 +68,7 @@ def local_rank_from_env(env: dict[str, str] | None = None) -> int:
         if raw:
             try:
                 return max(0, int(raw))
-            except Exception:
+            except (ValueError, TypeError):
                 continue
     return 0
 

@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from .constants import GEOM_EPSILON
+
 
 class ZoneType(str, Enum):
     F = "f"
@@ -88,7 +90,7 @@ class ZoneLayout1DCells:
                 if z.n_cells <= 0 or z.z1 <= z.z0:
                     continue
                 width = float(z.z1 - z.z0)
-                if width + 1e-12 < min_width:
+                if width + GEOM_EPSILON < min_width:
                     bad.append((int(z.zid), width))
             if bad:
                 zlist = ", ".join([f"{zid}:{w:.6g}" for zid, w in bad[:4]])
@@ -285,7 +287,7 @@ def zones_overlapping_aabb_pbc(
         # normalize to [0,box) but keep width
         w = a1 - a0
         # If query covers whole box, return whole.
-        if w >= box - 1e-12:
+        if w >= box - GEOM_EPSILON:
             return [(0.0, box)]
         b0 = a0 % box
         b1 = b0 + w

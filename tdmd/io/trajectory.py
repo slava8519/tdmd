@@ -6,6 +6,7 @@ import warnings
 
 import numpy as np
 
+from ..constants import GEOM_EPSILON
 from .manifest import trajectory_manifest_payload, write_manifest
 from .snapshot_forces import compute_forces_snapshot
 
@@ -132,8 +133,8 @@ class TrajectoryWriter:
     def _forces_for_frame(self, r: np.ndarray, box_xyz: tuple[float, float, float]) -> np.ndarray:
         # Force snapshots currently support cubic boxes only, matching runtime contract.
         if (
-            abs(float(box_xyz[0]) - float(box_xyz[1])) > 1e-12
-            or abs(float(box_xyz[0]) - float(box_xyz[2])) > 1e-12
+            abs(float(box_xyz[0]) - float(box_xyz[1])) > GEOM_EPSILON
+            or abs(float(box_xyz[0]) - float(box_xyz[2])) > GEOM_EPSILON
         ):
             raise ValueError("trajectory force channel requires cubic box")
         return compute_forces_snapshot(
@@ -231,7 +232,7 @@ class TrajectoryWriter:
     def close(self):
         try:
             self._f.close()
-        except Exception as exc:
+        except OSError as exc:
             warnings.warn(
                 f"TrajectoryWriter.close() failed for {self.path!r}: {exc!r}",
                 RuntimeWarning,

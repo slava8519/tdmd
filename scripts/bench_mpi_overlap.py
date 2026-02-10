@@ -220,7 +220,7 @@ def _iter_rows(
                     "wfgS_max": int(wfgS_max),
                     "wfgC_rate": float(wfgC_max) / float(wfgS_max) if int(wfgS_max) > 0 else 0.0,
                     "wfgC_per_100_steps": (
-                        100.0 * float(wfgC_max) / float(steps) if int(steps) > 0 else 0.0
+                        100.0 * float(wfgC_max) / float(n_steps) if int(n_steps) > 0 else 0.0
                     ),
                     "invariants_ok": int(inv_ok),
                     "strict_invariants_ok": int(strict_ok),

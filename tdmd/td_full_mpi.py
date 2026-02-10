@@ -17,6 +17,7 @@ except Exception:
 
 from .atoms import normalize_atom_types
 from .backend import cuda_device_for_local_rank, local_rank_from_env, resolve_backend
+from .constants import FLOAT_EQ_ATOL, GEOM_EPSILON
 from .deps_provider import ZoneGeomAABB
 from .deps_provider_3d import DepsProvider3DBlock
 from .ensembles import apply_ensemble_step, build_ensemble_spec
@@ -332,7 +333,7 @@ def run_td_full_mpi_1d(
                     f"[backend rank={rank}] device=cuda local_rank={local_rank} cuda_dev={dev}",
                     flush=True,
                 )
-        except Exception as exc:
+        except (RuntimeError, AttributeError) as exc:
             print(
                 f"[backend rank={rank}] cuda setup failed ({exc}); using host staging", flush=True
             )
@@ -467,12 +468,12 @@ def run_td_full_mpi_1d(
     def _lag_value(zid: int) -> int:
         try:
             deps, _, _ = autom._deps(int(zid))
-        except Exception:
+        except (KeyError, IndexError, ValueError):
             deps = []
         if autom.deps_table_func is not None:
             try:
                 deps = list(autom.deps_table_func(int(zid)))
-            except Exception:
+            except (KeyError, IndexError, ValueError):
                 deps = list(deps)
         zt = zones[int(zid)].step_id
         lags = []
@@ -693,12 +694,12 @@ def run_td_full_mpi_1d(
                 speeds = np.linalg.norm(v[z.atom_ids], axis=1)
                 vmax = float(speeds.max()) if speeds.size else 0.0
                 required = vmax * dt * float(max_step_lag + 1)
-                if b + 1e-15 < required:
+                if b + FLOAT_EQ_ATOL < required:
                     autom.diag["viol_buffer"] = autom.diag.get("viol_buffer", 0) + 1
             skin_global = max(skin_global, sk)
 
     def _scale_zone_geometry(lam: float, new_box: float) -> None:
-        if abs(float(lam) - 1.0) <= 1e-15:
+        if abs(float(lam) - 1.0) <= FLOAT_EQ_ATOL:
             autom.box = float(new_box)
             autom.zwidth = autom.box / max(1, len(zones))
             return
@@ -706,7 +707,7 @@ def run_td_full_mpi_1d(
             z.z0 = float(z.z0) * float(lam)
             z.z1 = float(z.z1) * float(lam)
         widths = [float(z.z1 - z.z0) for z in zones if z.n_cells > 0 and z.z1 > z.z0]
-        if widths and (min(widths) + 1e-12 < float(cutoff)):
+        if widths and (min(widths) + GEOM_EPSILON < float(cutoff)):
             raise ValueError("NPT scaling violated zone width >= cutoff in td_full_mpi layout")
         autom.box = float(new_box)
         autom.zwidth = autom.box / max(1, len(zones))
@@ -907,10 +908,10 @@ def run_td_full_mpi_1d(
             # REQ_HALO
             if ids.size >= 2:
                 req_zid = int(ids[0])
-                req_step = int(ids[1])
+                _req_step = int(ids[1])  # noqa: F841 – reserved for future lag check
             else:
                 req_zid = -1
-                req_step = -1
+                _req_step = -1  # noqa: F841
 
             if (
                 0 <= dep_zid < zones_total
@@ -1141,7 +1142,7 @@ def run_td_full_mpi_1d(
                 for dep_zid in deps:
                     try:
                         ov = overlap_set_for_send(zid, dep_zid, rc=rc, step=step)
-                    except Exception:
+                    except (KeyError, IndexError, ValueError):
                         ov = set()
                     ov_ids = (
                         np.array(list(ov), dtype=np.int32) if ov else z.atom_ids.astype(np.int32)
@@ -1382,7 +1383,7 @@ def run_td_full_mpi_1d(
             # Local WFG diagnostics (no global sync)
             try:
                 autom.record_wfg_sample()
-            except Exception:
+            except (AttributeError, KeyError, IndexError):
                 pass
             diag = autom.diag
             sb = int(diag.get("send_batches", 0))

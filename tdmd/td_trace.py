@@ -23,7 +23,7 @@ def format_invariant_flags(diag: dict) -> str:
         try:
             if float(v) != 0.0:
                 keys.append(str(k))
-        except Exception:
+        except (ValueError, TypeError):
             continue
     return ",".join(sorted(keys))
 
@@ -95,7 +95,7 @@ class TDTraceLogger:
         try:
             if self._f is not None:
                 self._f.close()
-        except Exception as exc:
+        except OSError as exc:
             warnings.warn(
                 f"TDTraceLogger.close() failed for {self.path!r}: {exc!r}",
                 RuntimeWarning,

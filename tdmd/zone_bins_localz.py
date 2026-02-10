@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
+from .constants import GEOM_EPSILON
 from .state import minimum_image
 
 
@@ -132,7 +133,7 @@ class PersistentZoneLocalZBinsCache:
             if float(zc.rc) != float(rc):
                 need_rebuild = True
             elif (
-                abs(zc.origin_z - origin_z) > 1e-12
+                abs(zc.origin_z - origin_z) > GEOM_EPSILON
                 or abs(zc.width_z - width_z) > 1e-9
                 or bool(zc.wraps) != bool(wraps)
             ):
