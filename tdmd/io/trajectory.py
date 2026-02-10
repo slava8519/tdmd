@@ -1,6 +1,7 @@
 from __future__ import annotations
 import gzip
 import os
+import warnings
 import numpy as np
 
 from .manifest import trajectory_manifest_payload, write_manifest
@@ -218,5 +219,8 @@ class TrajectoryWriter:
     def close(self):
         try:
             self._f.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                f"TrajectoryWriter.close() failed for {self.path!r}: {exc!r}",
+                RuntimeWarning,
+            )

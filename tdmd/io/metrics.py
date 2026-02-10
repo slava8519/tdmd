@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Union
 import csv
 import os
+import warnings
 import numpy as np
 
 from ..observables import compute_observables
@@ -68,5 +69,8 @@ class MetricsWriter:
     def close(self):
         try:
             self._f.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                f"MetricsWriter.close() failed for {self.path!r}: {exc!r}",
+                RuntimeWarning,
+            )
