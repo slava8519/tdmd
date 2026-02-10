@@ -12,7 +12,7 @@ def _read_version() -> str:
     repo_root = Path(__file__).resolve().parents[1]
     try:
         return (repo_root / "VERSION").read_text(encoding="utf-8").strip()
-    except Exception:
+    except (FileNotFoundError, OSError):
         return "4.5.0"
 
 

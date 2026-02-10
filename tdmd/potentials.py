@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from .constants import NUMERICAL_ZERO
+
 
 def canonical_potential_kind(kind: str) -> str:
     k = str(kind).strip().lower()
@@ -30,7 +32,7 @@ def _parse_pair_key(key: str) -> tuple[int, int]:
             try:
                 i = int(parts[0])
                 j = int(parts[1])
-            except Exception as exc:
+            except (ValueError, TypeError) as exc:
                 raise ValueError(f"invalid pair_coeffs key '{key}'") from exc
             if i <= 0 or j <= 0:
                 raise ValueError(f"pair_coeffs key '{key}' must use positive atom types")
@@ -118,7 +120,7 @@ def _read_setfl(
         raise ValueError(f"invalid setfl element header in {path}")
     try:
         nelem = int(hdr[0])
-    except Exception as exc:
+    except (ValueError, TypeError) as exc:
         raise ValueError(f"invalid nelem in setfl header: {hdr}") from exc
     elems = [str(x) for x in hdr[1 : 1 + nelem]]
     if len(elems) != nelem:
@@ -133,7 +135,7 @@ def _read_setfl(
         nr = int(grid[2])
         dr = float(grid[3])
         cutoff = float(grid[4])
-    except Exception as exc:
+    except (ValueError, TypeError) as exc:
         raise ValueError(f"invalid setfl grid values: {grid}") from exc
     if nrho < 2 or nr < 2 or drho <= 0.0 or dr <= 0.0 or cutoff <= 0.0:
         raise ValueError(f"invalid setfl grid parameters in {path}")
@@ -160,7 +162,7 @@ def _read_setfl(
                 tok = token_buf.pop(0)
                 try:
                     vals.append(float(tok))
-                except Exception as exc:
+                except (ValueError, TypeError) as exc:
                     raise ValueError(f"invalid numeric token in setfl {path}: {tok}") from exc
         return np.asarray(vals, dtype=float)
 
@@ -175,7 +177,7 @@ def _read_setfl(
             float(meta[0])
             float(meta[1])
             float(meta[2])
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             raise ValueError(
                 f"invalid setfl element metadata numeric fields in {path}: {meta}"
             ) from exc
@@ -189,7 +191,7 @@ def _read_setfl(
             z = _take_floats(nr)  # z(r) = r * phi(r)
             p = np.zeros_like(z)
             if nr > 1:
-                p[1:] = z[1:] / np.maximum(r_grid[1:], 1e-30)
+                p[1:] = z[1:] / np.maximum(r_grid[1:], NUMERICAL_ZERO)
                 p[0] = p[1]
             else:
                 p[0] = 0.0
@@ -231,7 +233,7 @@ def _read_table_section(path: str, keyword: str) -> tuple[np.ndarray, np.ndarray
                 raise ValueError(f"invalid table header after keyword '{key}' in {path}: {txt}")
             try:
                 n_expected = int(toks[1])
-            except Exception as exc:
+            except (ValueError, TypeError) as exc:
                 raise ValueError(f"invalid N value in table header: {txt}") from exc
         else:
             i -= 1
@@ -254,7 +256,7 @@ def _read_table_section(path: str, keyword: str) -> tuple[np.ndarray, np.ndarray
             rr = float(toks[1])
             uu = float(toks[2])
             ff = float(toks[3])
-        except Exception:
+        except (ValueError, TypeError, IndexError):
             if rows:
                 break
             raise ValueError(f"invalid table row in {path}: {txt}")
@@ -362,14 +364,14 @@ class Morse:
         type_i: np.ndarray | None = None,
         type_j: np.ndarray | None = None,
     ):
-        r = np.sqrt(r2 + 1e-30)
+        r = np.sqrt(r2 + NUMERICAL_ZERO)
         mask = (r2 > 0.0) & (r2 < cutoff2)
         d, aa, r0 = self._coeff_arrays(int(r2.shape[0]), type_i, type_j)
         x = r - r0
         exp1 = np.exp(-aa * x)
         U = d * (1.0 - exp1) ** 2 - d
         dUdr = 2.0 * d * aa * (1.0 - exp1) * exp1
-        coef = np.where(mask, dUdr / (r + 1e-30), 0.0)
+        coef = np.where(mask, dUdr / (r + NUMERICAL_ZERO), 0.0)
         U = np.where(mask, U, 0.0)
         return coef, U
 
@@ -388,7 +390,7 @@ class TablePotential:
         type_j: np.ndarray | None = None,
     ):
         del type_i, type_j
-        r = np.sqrt(r2 + 1e-30)
+        r = np.sqrt(r2 + NUMERICAL_ZERO)
         mask = (r2 > 0.0) & (r2 < cutoff2)
         U = np.zeros_like(r2, dtype=float)
         coef = np.zeros_like(r2, dtype=float)
@@ -396,7 +398,7 @@ class TablePotential:
             rr = r[mask]
             U[mask] = np.interp(rr, self.r_grid, self.u_grid, left=0.0, right=0.0)
             force_mag = np.interp(rr, self.r_grid, self.f_grid, left=0.0, right=0.0)
-            coef[mask] = force_mag / (rr + 1e-30)
+            coef[mask] = force_mag / (rr + NUMERICAL_ZERO)
         return coef, U
 
 
@@ -521,7 +523,7 @@ class EAMAlloyPotential:
             del rhoi, rhoj
             dEdr = float(dphi[0]) + dF[li] * float(drhoi[0]) + dF[lj] * float(drhoj[0])
             fmag = -dEdr
-            fij = (fmag / (rij + 1e-30)) * dr
+            fij = (fmag / (rij + NUMERICAL_ZERO)) * dr
             i = int(cand[li])
             j = int(cand[lj])
             forces[i] += fij
@@ -576,7 +578,7 @@ class EAMAlloyPotential:
             )
             del phi, rhoi, rhoj
             dEdr = float(dphi[0]) + dF[li] * float(drhoi[0]) + dF[lj] * float(drhoj[0])
-            fij = (-dEdr / (rij + 1e-30)) * dr  # force on i from j
+            fij = (-dEdr / (rij + NUMERICAL_ZERO)) * dr  # force on i from j
             gi = int(cand[li])
             gj = int(cand[lj])
             ti = pos_tgt.get(gi, -1)

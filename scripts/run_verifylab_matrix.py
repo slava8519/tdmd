@@ -486,7 +486,7 @@ def _pareto_frontier(points, *, x_key, y_key):
     frontier = []
     best_y = -float("inf")
     for p in pts:
-        x = float(p.get(x_key, 0.0))
+        _x = float(p.get(x_key, 0.0))  # noqa: F841 – kept for symmetry with sort key
         y = float(p.get(y_key, 0.0))
         if y > best_y:
             frontier.append(p)

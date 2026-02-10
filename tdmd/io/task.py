@@ -7,6 +7,7 @@ from typing import Any, Optional, Sequence
 import numpy as np
 import yaml
 
+from ..constants import GEOM_EPSILON
 from ..potentials import canonical_potential_kind, ensure_pair_coeffs_complete, parse_pair_coeffs
 
 _LAMMPS_UNITS = {
@@ -411,6 +412,6 @@ def validate_task_for_run(
     if require_single_type and (np.unique(types).size != 1):
         raise _err("TDMD run in this mode requires a single atom type")
     # TDMD uses cubic box
-    if abs(task.box.x - task.box.y) > 1e-12 or abs(task.box.x - task.box.z) > 1e-12:
+    if abs(task.box.x - task.box.y) > GEOM_EPSILON or abs(task.box.x - task.box.z) > GEOM_EPSILON:
         raise _err("TDMD run requires cubic box (x==y==z)")
     return masses

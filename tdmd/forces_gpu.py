@@ -4,6 +4,7 @@ import numpy as np
 
 from .backend import ComputeBackend, resolve_backend
 from .celllist import build_cell_list
+from .constants import NUMERICAL_ZERO
 from .potentials import EAMAlloyPotential, LennardJones, Morse, TablePotential
 
 
@@ -110,17 +111,17 @@ def forces_on_targets_pair_backend(
         coef = cp.where(mask, 24.0 * eps * (2.0 * sr12 - sr6) * inv_r2, 0.0)
     elif isinstance(potential, Morse):
         d, a, r0 = _pair_mats_morse(cp, potential, types_i, types_j)
-        rr = cp.sqrt(r2 + 1e-30)
+        rr = cp.sqrt(r2 + NUMERICAL_ZERO)
         x = rr - r0
         exp1 = cp.exp(-a * x)
         dUdr = 2.0 * d * a * (1.0 - exp1) * exp1
-        coef = cp.where(mask, dUdr / (rr + 1e-30), 0.0)
+        coef = cp.where(mask, dUdr / (rr + NUMERICAL_ZERO), 0.0)
     elif isinstance(potential, TablePotential):
-        rr = cp.sqrt(r2 + 1e-30)
+        rr = cp.sqrt(r2 + NUMERICAL_ZERO)
         r_grid = cp.asarray(np.asarray(potential.r_grid, dtype=np.float64))
         f_grid = cp.asarray(np.asarray(potential.f_grid, dtype=np.float64))
         force_mag = cp.interp(rr, r_grid, f_grid, left=0.0, right=0.0)
-        coef = cp.where(mask, force_mag / (rr + 1e-30), 0.0)
+        coef = cp.where(mask, force_mag / (rr + NUMERICAL_ZERO), 0.0)
     elif isinstance(potential, EAMAlloyPotential):
         cand = np.unique(np.concatenate([cids, tids]).astype(np.int32))
         if cand.size == 0:
@@ -136,7 +137,7 @@ def forces_on_targets_pair_backend(
         drc = rr_c[:, None, :] - rr_c[None, :, :]
         drc = drc - float(box) * cp.rint(drc / float(box))
         r2c = cp.sum(drc * drc, axis=2)
-        rc = cp.sqrt(r2c + 1e-30)
+        rc = cp.sqrt(r2c + NUMERICAL_ZERO)
         m = (r2c > 0.0) & (r2c < cutoff2)
 
         grid_r = cp.asarray(np.asarray(potential.grid_r, dtype=np.float64))
@@ -170,7 +171,7 @@ def forces_on_targets_pair_backend(
                 dphi = cp.where(mask_ij, dphi_ij, dphi)
 
         dEdr = dphi + dF[:, None] * drho_col + dF[None, :] * drho_row
-        coef_c = cp.where(m, -dEdr / (rc + 1e-30), 0.0)
+        coef_c = cp.where(m, -dEdr / (rc + NUMERICAL_ZERO), 0.0)
         f_c = cp.sum(coef_c[:, :, None] * drc, axis=1)
         return cp.asnumpy(f_c[cp.asarray(tgt_local, dtype=cp.int32)])
     else:
