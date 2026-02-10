@@ -1,0 +1,41 @@
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+skip-string-normalization = true
+extend-exclude = """
+(
+  \\.venv
+| results
+| out
+| build
+| dist
+| __pycache__
+)
+"""
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+  ".venv",
+  "results",
+  "out",
+  "build",
+  "dist",
+  "__pycache__",
+]
+
+[tool.ruff.lint]
+# Start with import sorting only; expand selects once the codebase is cleaned up.
+select = ["I"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+exclude = "^(\\.venv/|results/|out/|build/|dist/|__pycache__/)"
+
