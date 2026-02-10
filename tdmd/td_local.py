@@ -17,6 +17,7 @@ from .forces_gpu import (
     forces_on_targets_pair_backend,
     supports_pair_gpu,
 )
+from .atoms import normalize_atom_types, normalize_mass
 from .observer import emit_observer, observer_accepts_box
 from .potentials import EAMAlloyPotential
 
@@ -48,20 +49,8 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
       - True: synchronous snapshot update (verification-oriented)
     """
     rng = np.random.default_rng(int(chaos_seed)) if chaos_mode else None
-    if np.isscalar(mass):
-        mass_scalar = float(mass)
-        if mass_scalar <= 0.0:
-            raise ValueError("mass must be positive")
-        mass_arr = None
-        inv_mass = 1.0 / mass_scalar
-    else:
-        mass_arr = np.asarray(mass, dtype=float)
-        if mass_arr.ndim != 1 or mass_arr.shape[0] != r.shape[0]:
-            raise ValueError("mass array must have shape (N,)")
-        if np.any(mass_arr <= 0.0):
-            raise ValueError("all masses must be positive")
-        mass_scalar = None
-        inv_mass = None
+
+    mass_scalar, mass_arr, inv_mass = normalize_mass(mass, n_atoms=r.shape[0])
 
     def _accel(f: np.ndarray, ids: Optional[np.ndarray] = None) -> np.ndarray:
         if mass_arr is None:
@@ -70,12 +59,7 @@ def run_td_local(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], b
             return f / mass_arr[:, None]
         return f / mass_arr[ids][:, None]
 
-    if atom_types is None:
-        atom_types = np.ones(r.shape[0], dtype=np.int32)
-    else:
-        atom_types = np.asarray(atom_types, dtype=np.int32)
-        if atom_types.ndim != 1 or atom_types.shape[0] != r.shape[0]:
-            raise ValueError("atom_types must have shape (N,)")
+    atom_types = normalize_atom_types(atom_types, n_atoms=r.shape[0])
     backend = resolve_backend(device)
     use_gpu_pair = (backend.device == "cuda") and supports_pair_gpu(potential)
     ensemble = build_ensemble_spec(
