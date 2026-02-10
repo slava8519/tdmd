@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Union
-import inspect
 import numpy as np
 from .celllist import forces_on_targets_celllist
 from .backend import resolve_backend
@@ -10,6 +9,7 @@ from .forces_gpu import (
     supports_pair_gpu,
 )
 from .ensembles import apply_ensemble_step, build_ensemble_spec
+from .observer import emit_observer, observer_accepts_box
 from .potentials import EAMAlloyPotential
 
 def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box: float, potential,
@@ -50,26 +50,12 @@ def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box
         barostat=barostat,
         source="serial",
     )
-    observer_accepts_box = False
-    if observer is not None:
-        try:
-            sig = inspect.signature(observer)
-            params = list(sig.parameters.values())
-            observer_accepts_box = (
-                any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
-                or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
-                or len(params) >= 4
-            )
-        except (TypeError, ValueError):
-            observer_accepts_box = False
+    accepts_box = observer_accepts_box(observer)
 
     def _emit_observer(step: int) -> None:
-        if observer is None or not observer_every:
+        if not observer_every:
             return
-        if observer_accepts_box:
-            observer(int(step), r, v, float(box))
-        else:
-            observer(int(step), r, v)
+        emit_observer(observer, accepts_box=accepts_box, step=step, r=r, v=v, box=float(box))
 
     def _forces(rr: np.ndarray) -> np.ndarray:
         if use_gpu_pair:

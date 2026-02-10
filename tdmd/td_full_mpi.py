@@ -20,9 +20,7 @@ from .td_automaton import ZoneRuntime, TDAutomaton1W
 from .geom_pbc import mask_in_aabb_pbc
 from .deps_provider import ZoneGeomAABB
 from .deps_provider_3d import DepsProvider3DBlock
-from .output import OutputBundle, OutputSpec
-from .io.trajectory import TrajectoryWriter
-from .io.metrics import MetricsWriter
+from .output import OutputSpec, make_output_bundle
 from .td_trace import TDTraceLogger, format_invariant_flags
 from .backend import cuda_device_for_local_rank, local_rank_from_env, resolve_backend
 from .ensembles import apply_ensemble_step, build_ensemble_spec
@@ -274,33 +272,7 @@ def run_td_full_mpi_1d(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarr
         out_metrics_every = int(output_spec.metrics_every) if output_spec.metrics_every else 0
         output_enabled = (out_traj_every > 0) or (out_metrics_every > 0)
     if output_spec is not None and rank == 0:
-        traj_writer = None
-        metrics_writer = None
-        if output_spec.traj_path and out_traj_every > 0:
-            traj_writer = TrajectoryWriter(
-                output_spec.traj_path,
-                box=output_spec.box,
-                pbc=output_spec.pbc,
-                atom_ids=output_spec.atom_ids,
-                atom_types=output_spec.atom_types,
-                channels=tuple(output_spec.traj_channels or ()),
-                compression=str(getattr(output_spec, "traj_compression", "none")),
-                write_output_manifest=bool(getattr(output_spec, "write_output_manifest", True)),
-                force_potential=output_spec.potential,
-                force_cutoff=float(output_spec.cutoff),
-                force_atom_types=output_spec.atom_types,
-            )
-        if output_spec.metrics_path and out_metrics_every > 0:
-            metrics_writer = MetricsWriter(
-                output_spec.metrics_path,
-                mass=output_spec.mass,
-                box=output_spec.box[0],
-                cutoff=output_spec.cutoff,
-                potential=output_spec.potential,
-                atom_types=output_spec.atom_types,
-                write_output_manifest=bool(getattr(output_spec, "write_output_manifest", True)),
-            )
-        output = OutputBundle(traj=traj_writer, metrics=metrics_writer)
+        output = make_output_bundle(output_spec)
 
     deps_mode = str(deps_provider_mode)
     static_rr = deps_mode == "static_rr"

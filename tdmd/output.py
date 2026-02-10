@@ -40,3 +40,43 @@ class OutputSpec:
     traj_channels: tuple[str, ...] = ()
     traj_compression: str = "none"
     write_output_manifest: bool = True
+
+
+def make_output_bundle(spec: OutputSpec | None) -> OutputBundle:
+    """Create output writers from an OutputSpec.
+
+    Note: cadence (every/period) is enforced by the caller.
+    Writers are only created if the corresponding path is set and `*_every > 0`.
+    """
+    if spec is None:
+        return OutputBundle(traj=None, metrics=None)
+
+    traj_writer = None
+    metrics_writer = None
+
+    if spec.traj_path and int(spec.traj_every) > 0:
+        traj_writer = TrajectoryWriter(
+            spec.traj_path,
+            box=spec.box,
+            pbc=spec.pbc,
+            atom_ids=spec.atom_ids,
+            atom_types=spec.atom_types,
+            channels=tuple(spec.traj_channels or ()),
+            compression=str(spec.traj_compression),
+            write_output_manifest=bool(spec.write_output_manifest),
+            force_potential=spec.potential,
+            force_cutoff=float(spec.cutoff),
+            force_atom_types=spec.atom_types,
+        )
+    if spec.metrics_path and int(spec.metrics_every) > 0:
+        metrics_writer = MetricsWriter(
+            spec.metrics_path,
+            mass=spec.mass,
+            box=float(spec.box[0]),
+            cutoff=float(spec.cutoff),
+            potential=spec.potential,
+            atom_types=spec.atom_types,
+            write_output_manifest=bool(spec.write_output_manifest),
+        )
+
+    return OutputBundle(traj=traj_writer, metrics=metrics_writer)
