@@ -12,7 +12,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Prepare/run OVITO adapter artifacts")
     ap.add_argument("--traj", required=True, help="Input trajectory path")
     ap.add_argument("--outdir", required=True, help="Output directory")
-    ap.add_argument("--run", action="store_true", help="Execute generated OVITO script if ovitos is available")
+    ap.add_argument(
+        "--run", action="store_true", help="Execute generated OVITO script if ovitos is available"
+    )
     ap.add_argument("--ovitos", default="", help="Path to ovitos binary (optional)")
     args = ap.parse_args()
 
@@ -67,4 +69,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

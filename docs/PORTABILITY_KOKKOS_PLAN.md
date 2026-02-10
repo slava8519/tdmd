@@ -1,6 +1,6 @@
 # GPU Portability Plan (NVIDIA + AMD via Kokkos)
 
-Status: planned, not started.  
+Status: planned, not started.
 Scope owner: Orchestrator + GPU Backend Engineer + VerifyLab Engineer.
 
 ## Goal

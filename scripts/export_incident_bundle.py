@@ -12,10 +12,16 @@ from tdmd.incident_bundle import export_incident_bundle_zip, write_incident_bund
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Export TDMD incident bundle from a VerifyLab run directory")
+    p = argparse.ArgumentParser(
+        description="Export TDMD incident bundle from a VerifyLab run directory"
+    )
     p.add_argument("--run-dir", required=True, help="Run directory (e.g. results/<run_id>)")
     p.add_argument("--reason", default="manual_export", help="Bundle reason label")
-    p.add_argument("--bundle-name", default="incident_bundle_manual", help="Bundle directory name under run-dir")
+    p.add_argument(
+        "--bundle-name",
+        default="incident_bundle_manual",
+        help="Bundle directory name under run-dir",
+    )
     p.add_argument("--zip-out", default="", help="Optional zip output path")
     args = p.parse_args()
 

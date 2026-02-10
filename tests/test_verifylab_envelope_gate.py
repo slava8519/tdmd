@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from tdmd.verify_lab import LabRow
 from scripts.run_verifylab_matrix import apply_envelope_gate
+from tdmd.verify_lab import LabRow
 
 
 def _mk_row(*, zones_total: int, final_dr: float, rms_dr: float) -> LabRow:

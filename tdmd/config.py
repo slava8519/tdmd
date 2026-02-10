@@ -1,19 +1,23 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+
 import yaml
 
 PotentialType = Literal["lj", "morse", "table", "eam/alloy", "eam_alloy"]
-TraversalType = Literal["forward","backward","snake"]
-StartupMode = Literal["rank0_all","scatter_zones"]
-OverlapMode = Literal["table_support","geometric_rc"]
+TraversalType = Literal["forward", "backward", "snake"]
+StartupMode = Literal["rank0_all", "scatter_zones"]
+OverlapMode = Literal["table_support", "geometric_rc"]
 
 _ENSEMBLE_KINDS = {"nve", "nvt", "npt"}
+
 
 @dataclass
 class PotentialConfig:
     kind: PotentialType
     params: Dict[str, Any]
+
 
 @dataclass
 class SystemConfig:
@@ -22,6 +26,7 @@ class SystemConfig:
     box: float
     temperature: float
     seed: int = 1
+
 
 @dataclass
 class TDConfig:
@@ -58,24 +63,29 @@ class TDConfig:
     enable_step_id: bool = True
 
     # v1.8: time-lag safety controls (true TD)
-    max_step_lag: int = 1      # max allowed lag between a work-zone and its dependencies
-    table_max_age: int = 1     # max allowed age of interaction table in zone-time steps
+    max_step_lag: int = 1  # max allowed lag between a work-zone and its dependencies
+    table_max_age: int = 1  # max allowed age of interaction table in zone-time steps
 
     # v2.2: bounded pending-delta buffer (memory safety)
     max_pending_delta_atoms: int = 200000
     require_local_deps: bool = True  # v3.1 legacy alias (mapped to require_table_deps)
-    require_table_deps: bool = True   # v3.2: readiness for table/forces deps (present locally: owned or shadow)
+    require_table_deps: bool = (
+        True  # v3.2: readiness for table/forces deps (present locally: owned or shadow)
+    )
     require_owner_deps: bool = False  # readiness for ownership deps (optional; stronger, slower)
-    require_owner_ver: bool = True    # v3.4: owner-deps require up-to-date holder version (not just known)
-    enable_req_holder: bool = True    # v3.4: pull protocol for holder map
-    holder_gossip: bool = True        # piggyback holder-map updates
-    chaos_mode: bool = False       # v3.8: randomize TD-local scheduling and delta application
-    chaos_seed: int = 12345        # v3.8: RNG seed for chaos mode
+    require_owner_ver: bool = (
+        True  # v3.4: owner-deps require up-to-date holder version (not just known)
+    )
+    enable_req_holder: bool = True  # v3.4: pull protocol for holder map
+    holder_gossip: bool = True  # piggyback holder-map updates
+    chaos_mode: bool = False  # v3.8: randomize TD-local scheduling and delta application
+    chaos_seed: int = 12345  # v3.8: RNG seed for chaos mode
     chaos_delay_prob: float = 0.0  # v3.8: probability to defer an applicable delta/halo once
     deps_provider_mode: str = "dynamic"  # v4.1: dynamic|static_rr|static_3d
     owner_buffer: float = 0.0  # 0=>cutoff
     cuda_aware_mpi: bool = False
     comm_overlap_isend: bool = False
+
 
 @dataclass
 class RunConfig:
@@ -85,16 +95,19 @@ class RunConfig:
     cutoff: float = 8.0
     device: str = "auto"
 
+
 @dataclass
 class EnsembleControlConfig:
     kind: str
     params: Dict[str, Any]
+
 
 @dataclass
 class EnsembleConfig:
     kind: str = "nve"
     thermostat: Optional[EnsembleControlConfig] = None
     barostat: Optional[EnsembleControlConfig] = None
+
 
 @dataclass
 class Config:
@@ -159,8 +172,9 @@ def _parse_ensemble_config(root: dict[str, Any]) -> EnsembleConfig:
 
     return EnsembleConfig(kind=kind, thermostat=thermostat, barostat=barostat)
 
+
 def load_config(path: str) -> Config:
-    with open(path,"r",encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         d = yaml.safe_load(f)
 
     td = d["td"]
@@ -181,8 +195,8 @@ def load_config(path: str) -> Config:
             n_atoms=int(d["system"]["n_atoms"]),
             mass=float(d["system"]["mass"]),
             box=float(d["system"]["box"]),
-            temperature=float(d["system"].get("temperature",300.0)),
-            seed=int(d["system"].get("seed",1)),
+            temperature=float(d["system"].get("temperature", 300.0)),
+            seed=int(d["system"].get("seed", 1)),
         ),
         potential=PotentialConfig(
             kind=str(d["potential"]["kind"]).lower(),
@@ -191,29 +205,29 @@ def load_config(path: str) -> Config:
         run=RunConfig(
             dt=float(d["run"]["dt"]),
             n_steps=int(d["run"]["n_steps"]),
-            thermo_every=int(d["run"].get("thermo_every",50)),
-            cutoff=float(d["run"].get("cutoff",8.0)),
+            thermo_every=int(d["run"].get("thermo_every", 50)),
+            cutoff=float(d["run"].get("cutoff", 8.0)),
             device=device,
         ),
         td=TDConfig(
             cell_size=float(td["cell_size"]),
             zones_total=int(td["zones_total"]),
-            zone_cells_w=int(td.get("zone_cells_w",1)),
-            zone_cells_s=int(td.get("zone_cells_s",1)),
+            zone_cells_w=int(td.get("zone_cells_w", 1)),
+            zone_cells_s=int(td.get("zone_cells_s", 1)),
             zone_cells_pattern=pattern,
-            traversal=str(td.get("traversal","snake")).lower(),
+            traversal=str(td.get("traversal", "snake")).lower(),
             fast_sync=bool(td.get("fast_sync", False)),
             strict_fast_sync=bool(td.get("strict_fast_sync", False)),
-            startup_mode=str(td.get("startup_mode","scatter_zones")).lower(),
-            warmup_steps=int(td.get("warmup_steps",2)),
-            warmup_compute=bool(td.get("warmup_compute",True)),
-            buffer_k=float(td.get("buffer_k",1.2)),
-            use_verlet=bool(td.get("use_verlet",True)),
-            verlet_k_steps=int(td.get("verlet_k_steps",20)),
-            skin_from_buffer=bool(td.get("skin_from_buffer",True)),
+            startup_mode=str(td.get("startup_mode", "scatter_zones")).lower(),
+            warmup_steps=int(td.get("warmup_steps", 2)),
+            warmup_compute=bool(td.get("warmup_compute", True)),
+            buffer_k=float(td.get("buffer_k", 1.2)),
+            use_verlet=bool(td.get("use_verlet", True)),
+            verlet_k_steps=int(td.get("verlet_k_steps", 20)),
+            skin_from_buffer=bool(td.get("skin_from_buffer", True)),
             formal_core=bool(td.get("formal_core", True)),
             batch_size=batch_size,
-            overlap_mode=str(td.get("overlap_mode","table_support")).lower(),
+            overlap_mode=str(td.get("overlap_mode", "table_support")).lower(),
             debug_invariants=bool(td.get("debug_invariants", False)),
             strict_min_zone_width=bool(td.get("strict_min_zone_width", False)),
             enable_step_id=bool(td.get("enable_step_id", True)),
@@ -221,7 +235,9 @@ def load_config(path: str) -> Config:
             table_max_age=int(td.get("table_max_age", 1)),
             max_pending_delta_atoms=int(td.get("max_pending_delta_atoms", 200000)),
             require_local_deps=bool(td.get("require_local_deps", True)),
-            require_table_deps=bool(td.get("require_table_deps", td.get("require_local_deps", True))),
+            require_table_deps=bool(
+                td.get("require_table_deps", td.get("require_local_deps", True))
+            ),
             require_owner_deps=bool(td.get("require_owner_deps", False)),
             require_owner_ver=bool(td.get("require_owner_ver", True)),
             enable_req_holder=bool(td.get("enable_req_holder", True)),

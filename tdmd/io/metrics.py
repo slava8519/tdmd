@@ -1,12 +1,15 @@
 from __future__ import annotations
-from typing import Union
+
 import csv
 import os
 import warnings
+from typing import Union
+
 import numpy as np
 
 from ..observables import compute_observables
 from .manifest import metrics_manifest_payload, write_manifest
+
 
 class MetricsWriter:
     SCHEMA_NAME = "tdmd.metrics.csv"
@@ -32,7 +35,7 @@ class MetricsWriter:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self._f = open(path, "w", newline="", encoding="utf-8")
         self._w = csv.writer(self._f)
-        self._columns = ["step","T","E_kin","E_pot","P","vmax","buffer"]
+        self._columns = ["step", "T", "E_kin", "E_pot", "P", "vmax", "buffer"]
         self._w.writerow(self._columns)
         self._f.flush()
         if write_output_manifest:
@@ -48,22 +51,31 @@ class MetricsWriter:
             )
             write_manifest(mpath, mp)
 
-    def write(self, step: int, r: np.ndarray, v: np.ndarray, buffer_value: float = 0.0, box_value: float | None = None):
+    def write(
+        self,
+        step: int,
+        r: np.ndarray,
+        v: np.ndarray,
+        buffer_value: float = 0.0,
+        box_value: float | None = None,
+    ):
         box_cur = float(self.box if box_value is None else box_value)
         obs = compute_observables(
             r, v, self.mass, box_cur, self.potential, self.cutoff, atom_types=self.atom_types
         )
         speeds = np.linalg.norm(v, axis=1)
         vmax = float(speeds.max()) if speeds.size else 0.0
-        self._w.writerow([
-            int(step),
-            float(obs.get("T", 0.0)),
-            float(obs.get("KE", 0.0)),
-            float(obs.get("PE", 0.0)),
-            float(obs.get("P", 0.0)),
-            vmax,
-            float(buffer_value),
-        ])
+        self._w.writerow(
+            [
+                int(step),
+                float(obs.get("T", 0.0)),
+                float(obs.get("KE", 0.0)),
+                float(obs.get("PE", 0.0)),
+                float(obs.get("P", 0.0)),
+                vmax,
+                float(buffer_value),
+            ]
+        )
         self._f.flush()
 
     def close(self):

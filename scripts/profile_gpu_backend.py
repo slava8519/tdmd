@@ -4,10 +4,10 @@ import argparse
 import csv
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 def _run(cmd: list[str], cwd: str, timeout: int) -> tuple[int, float, str, str]:
@@ -65,7 +65,9 @@ def main() -> int:
                 "run_id": run_id,
                 "returncode": rc,
                 "elapsed_sec": elapsed,
-                "ok_all": bool(summary.get("ok_all", False)) if isinstance(summary, dict) else False,
+                "ok_all": (
+                    bool(summary.get("ok_all", False)) if isinstance(summary, dict) else False
+                ),
                 "max_dr": float(worst.get("max_dr", 0.0) or 0.0),
                 "max_dv": float(worst.get("max_dv", 0.0) or 0.0),
                 "max_dE": float(worst.get("max_dE", 0.0) or 0.0),
@@ -79,40 +81,56 @@ def main() -> int:
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     with open(args.out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow([
-            "preset",
-            "run_id",
-            "returncode",
-            "elapsed_sec",
-            "ok_all",
-            "max_dr",
-            "max_dv",
-            "max_dE",
-            "max_dT",
-            "max_dP",
-            "stdout_bytes",
-            "stderr_bytes",
-        ])
+        w.writerow(
+            [
+                "preset",
+                "run_id",
+                "returncode",
+                "elapsed_sec",
+                "ok_all",
+                "max_dr",
+                "max_dv",
+                "max_dE",
+                "max_dT",
+                "max_dP",
+                "stdout_bytes",
+                "stderr_bytes",
+            ]
+        )
         for r in rows:
-            w.writerow([
-                r["preset"],
-                r["run_id"],
-                r["returncode"],
-                f"{float(r['elapsed_sec']):.6f}",
-                int(bool(r["ok_all"])),
-                r["max_dr"],
-                r["max_dv"],
-                r["max_dE"],
-                r["max_dT"],
-                r["max_dP"],
-                r["stdout_bytes"],
-                r["stderr_bytes"],
-            ])
+            w.writerow(
+                [
+                    r["preset"],
+                    r["run_id"],
+                    r["returncode"],
+                    f"{float(r['elapsed_sec']):.6f}",
+                    int(bool(r["ok_all"])),
+                    r["max_dr"],
+                    r["max_dv"],
+                    r["max_dE"],
+                    r["max_dT"],
+                    r["max_dP"],
+                    r["stdout_bytes"],
+                    r["stderr_bytes"],
+                ]
+            )
 
     base = {r["preset"]: float(r["elapsed_sec"]) for r in rows}
-    ratio_smoke = (base.get("smoke_ci", 0.0) / max(base.get("gpu_smoke", 1e-12), 1e-12)) if base.get("smoke_ci") else 0.0
-    ratio_interop = (base.get("interop_smoke", 0.0) / max(base.get("gpu_interop_smoke", 1e-12), 1e-12)) if base.get("interop_smoke") else 0.0
-    ratio_metal = (base.get("interop_metal_smoke", 0.0) / max(base.get("gpu_metal_smoke", 1e-12), 1e-12)) if base.get("interop_metal_smoke") else 0.0
+    ratio_smoke = (
+        (base.get("smoke_ci", 0.0) / max(base.get("gpu_smoke", 1e-12), 1e-12))
+        if base.get("smoke_ci")
+        else 0.0
+    )
+    ratio_interop = (
+        (base.get("interop_smoke", 0.0) / max(base.get("gpu_interop_smoke", 1e-12), 1e-12))
+        if base.get("interop_smoke")
+        else 0.0
+    )
+    ratio_metal = (
+        (base.get("interop_metal_smoke", 0.0) / max(base.get("gpu_metal_smoke", 1e-12), 1e-12))
+        if base.get("interop_metal_smoke")
+        else 0.0
+    )
 
     with open(args.out_md, "w", encoding="utf-8") as f:
         f.write("# GPU Backend Profile\n\n")

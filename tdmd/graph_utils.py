@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 from typing import Dict, Iterable, List, Optional, Tuple, TypeVar
 
 T = TypeVar("T")
+
 
 def find_cycle(adj: Dict[T, Iterable[T]]) -> Optional[List[T]]:
     """Return one directed cycle as a list of nodes [v0, v1, ..., v0], or None if acyclic."""
@@ -45,6 +47,7 @@ def find_cycle(adj: Dict[T, Iterable[T]]) -> Optional[List[T]]:
             if cyc is not None:
                 return cyc
     return None
+
 
 def is_acyclic(adj: Dict[T, Iterable[T]]) -> bool:
     return find_cycle(adj) is None

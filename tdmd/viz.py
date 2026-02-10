@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import gzip
 import math
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 import numpy as np
@@ -196,9 +196,12 @@ class RegionOccupancyPlugin(BaseVizPlugin):
         zhi: float,
         label: str = "region",
     ):
-        self.xlo = float(xlo); self.xhi = float(xhi)
-        self.ylo = float(ylo); self.yhi = float(yhi)
-        self.zlo = float(zlo); self.zhi = float(zhi)
+        self.xlo = float(xlo)
+        self.xhi = float(xhi)
+        self.ylo = float(ylo)
+        self.yhi = float(yhi)
+        self.zlo = float(zlo)
+        self.zhi = float(zhi)
         self.label = str(label or "region")
         self._ref_count: int | None = None
         self._last_count = 0
@@ -207,9 +210,12 @@ class RegionOccupancyPlugin(BaseVizPlugin):
 
     def _mask(self, rr: np.ndarray) -> np.ndarray:
         return (
-            (rr[:, 0] >= self.xlo) & (rr[:, 0] <= self.xhi)
-            & (rr[:, 1] >= self.ylo) & (rr[:, 1] <= self.yhi)
-            & (rr[:, 2] >= self.zlo) & (rr[:, 2] <= self.zhi)
+            (rr[:, 0] >= self.xlo)
+            & (rr[:, 0] <= self.xhi)
+            & (rr[:, 1] >= self.ylo)
+            & (rr[:, 1] <= self.yhi)
+            & (rr[:, 2] >= self.zlo)
+            & (rr[:, 2] <= self.zhi)
         )
 
     def begin(self, frame: TrajectoryFrame) -> None:
@@ -224,7 +230,11 @@ class RegionOccupancyPlugin(BaseVizPlugin):
         self._last_count = int(np.sum(m))
         self._last_frac = float(self._last_count) / float(max(1, rr.shape[0]))
         self._last_fill = float(self._last_count) / float(max(1, int(self._ref_count or 0)))
-        return {"count": float(self._last_count), "fraction": self._last_frac, "fill_fraction": self._last_fill}
+        return {
+            "count": float(self._last_count),
+            "fraction": self._last_frac,
+            "fill_fraction": self._last_fill,
+        }
 
     def finalize(self) -> dict[str, Any]:
         return {

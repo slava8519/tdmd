@@ -8,7 +8,9 @@ from tdmd.potentials import make_potential
 from tdmd.state import minimum_image
 
 
-def _bruteforce_forces(r: np.ndarray, box: float, cutoff: float, potential, atom_types: np.ndarray) -> np.ndarray:
+def _bruteforce_forces(
+    r: np.ndarray, box: float, cutoff: float, potential, atom_types: np.ndarray
+) -> np.ndarray:
     n = int(r.shape[0])
     out = np.zeros_like(r)
     cutoff2 = float(cutoff * cutoff)
@@ -30,7 +32,9 @@ def _bruteforce_forces(r: np.ndarray, box: float, cutoff: float, potential, atom
     return out
 
 
-def _bruteforce_pe(r: np.ndarray, box: float, cutoff: float, potential, atom_types: np.ndarray) -> float:
+def _bruteforce_pe(
+    r: np.ndarray, box: float, cutoff: float, potential, atom_types: np.ndarray
+) -> float:
     n = int(r.shape[0])
     cutoff2 = float(cutoff * cutoff)
     pe = 0.0
@@ -80,9 +84,7 @@ def test_lj_pair_coeff_matrix_matches_bruteforce():
     f_ref = _bruteforce_forces(r, box, cutoff, potential, atom_types)
     assert np.allclose(f_cell, f_ref, atol=1e-10, rtol=1e-10)
 
-    pe_obs = compute_observables(
-        r, v, 1.0, box, potential, cutoff, atom_types=atom_types
-    )["PE"]
+    pe_obs = compute_observables(r, v, 1.0, box, potential, cutoff, atom_types=atom_types)["PE"]
     pe_ref = _bruteforce_pe(r, box, cutoff, potential, atom_types)
     assert np.isclose(float(pe_obs), float(pe_ref), atol=1e-10, rtol=1e-10)
 
@@ -118,8 +120,6 @@ def test_morse_pair_coeff_matrix_matches_bruteforce():
     f_ref = _bruteforce_forces(r, box, cutoff, potential, atom_types)
     assert np.allclose(f_cell, f_ref, atol=1e-10, rtol=1e-10)
 
-    pe_obs = compute_observables(
-        r, v, 1.0, box, potential, cutoff, atom_types=atom_types
-    )["PE"]
+    pe_obs = compute_observables(r, v, 1.0, box, potential, cutoff, atom_types=atom_types)["PE"]
     pe_ref = _bruteforce_pe(r, box, cutoff, potential, atom_types)
     assert np.isclose(float(pe_obs), float(pe_ref), atol=1e-10, rtol=1e-10)

@@ -4,7 +4,7 @@ import numpy as np
 
 from tdmd.potentials import make_potential
 from tdmd.serial import run_serial
-from tdmd.td_automaton import ZoneRuntime, TDAutomaton1W
+from tdmd.td_automaton import TDAutomaton1W, ZoneRuntime
 from tdmd.zone_bins_localz import PersistentZoneLocalZBinsCache
 from tdmd.zones import ZoneType
 

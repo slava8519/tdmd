@@ -1,21 +1,35 @@
 from __future__ import annotations
+
 from typing import Union
+
 import numpy as np
-from .celllist import forces_on_targets_celllist
-from .backend import resolve_backend
-from .force_dispatch import try_gpu_forces_on_targets
-from .ensembles import apply_ensemble_step, build_ensemble_spec
+
 from .atoms import normalize_atom_types, normalize_mass
+from .backend import resolve_backend
+from .celllist import forces_on_targets_celllist
+from .ensembles import apply_ensemble_step, build_ensemble_spec
+from .force_dispatch import try_gpu_forces_on_targets
 from .observer import emit_observer, observer_accepts_box
 
-def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box: float, potential,
-               dt: float, cutoff: float, n_steps: int, thermo_every: int = 0,
-               observer=None, observer_every: int = 0,
-               atom_types: np.ndarray | None = None,
-               ensemble_kind: str = "nve",
-               thermostat: object | None = None,
-               barostat: object | None = None,
-               device: str = "cpu"):
+
+def run_serial(
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    box: float,
+    potential,
+    dt: float,
+    cutoff: float,
+    n_steps: int,
+    thermo_every: int = 0,
+    observer=None,
+    observer_every: int = 0,
+    atom_types: np.ndarray | None = None,
+    ensemble_kind: str = "nve",
+    thermostat: object | None = None,
+    barostat: object | None = None,
+    device: str = "cpu",
+):
     """Эталонный последовательный MD (Velocity-Verlet), силы через cell-list по всем атомам."""
     ids = np.arange(r.shape[0], dtype=np.int32)
     rc = cutoff  # для serial достаточно cutoff cell size
@@ -62,18 +76,20 @@ def run_serial(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarray], box
         if hasattr(potential, "forces_energy_virial"):
             f, _pe, _w = potential.forces_energy_virial(rr, box, cutoff, atom_types)
             return np.asarray(f, dtype=float)
-        return forces_on_targets_celllist(rr, box, potential, cutoff, ids, ids, rc=rc, atom_types=atom_types)
+        return forces_on_targets_celllist(
+            rr, box, potential, cutoff, ids, ids, rc=rc, atom_types=atom_types
+        )
 
     if observer is not None and observer_every:
         _emit_observer(0)
-    for step in range(1, n_steps+1):
+    for step in range(1, n_steps + 1):
         f = _forces(r)
         # VV pos + half vel
         if masses is None:
             v_half = v + 0.5 * dt * f * inv_m
         else:
             v_half = v + 0.5 * dt * f / masses[:, None]
-        r[:] = (r + dt*v_half) % box
+        r[:] = (r + dt * v_half) % box
         v[:] = v_half
         # new forces
         f2 = _forces(r)

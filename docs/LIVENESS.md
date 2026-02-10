@@ -17,16 +17,16 @@ an edge `a → b` means “zone a cannot progress at step t until some condition
 
 ## 2. Assumptions (A1–A4)
 
-A1. **Reliable communication**  
+A1. **Reliable communication**
 All sent messages are delivered within finite time (no loss).
 
-A2. **Weak fairness**  
+A2. **Weak fairness**
 If an action remains enabled indefinitely (message handling, scheduled transition), it eventually executes.
 
-A3. **Bounded time-lag**  
+A3. **Bounded time-lag**
 The runtime enforces a bounded lag `L` between interacting zones (see `max_step_lag` and related guards).
 
-A4. **No cyclic waiting at fixed step (or cycle breaking)**  
+A4. **No cyclic waiting at fixed step (or cycle breaking)**
 Either:
 - (A4a) `WFG(t)` is acyclic for all `t` under the allowed deps-graph + protocol; or
 - (A4b) the protocol implements a deterministic cycle-breaking rule (global priority/tie-break).

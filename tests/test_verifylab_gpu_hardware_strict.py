@@ -31,7 +31,7 @@ def test_verifylab_gpu_smoke_hw_backend_gate():
     assert "effective_device" in backend
     assert summary.get("require_effective_cuda") is True
 
-    have_cuda = (resolve_backend("cuda").device == "cuda")
+    have_cuda = resolve_backend("cuda").device == "cuda"
     if have_cuda:
         assert proc.returncode == 0, proc.stderr or proc.stdout
         assert bool(summary.get("backend_ok")) is True

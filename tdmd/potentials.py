@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
-import os
+
 import numpy as np
 
 
@@ -171,9 +172,13 @@ def _read_setfl(
         if len(meta) < 4:
             raise ValueError(f"invalid setfl element metadata line in {path}: {' '.join(meta)}")
         try:
-            float(meta[0]); float(meta[1]); float(meta[2])
+            float(meta[0])
+            float(meta[1])
+            float(meta[2])
         except Exception as exc:
-            raise ValueError(f"invalid setfl element metadata numeric fields in {path}: {meta}") from exc
+            raise ValueError(
+                f"invalid setfl element metadata numeric fields in {path}: {meta}"
+            ) from exc
         F[i, :] = _take_floats(nrho)
         rho[i, :] = _take_floats(nr)
 
@@ -423,12 +428,24 @@ class EAMAlloyPotential:
         cutoff: float,
         atom_types: np.ndarray,
         candidate_ids: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[tuple[int, int, np.ndarray, float, int, int]]]:
+    ) -> tuple[
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        list[tuple[int, int, np.ndarray, float, int, int]],
+    ]:
         cand = np.asarray(candidate_ids, dtype=np.int32)
         if cand.ndim != 1:
             raise ValueError("candidate_ids must be 1D")
         if cand.size == 0:
-            return cand, np.empty((0,), np.int32), np.empty((0,), dtype=float), np.empty((0,), dtype=float), []
+            return (
+                cand,
+                np.empty((0,), np.int32),
+                np.empty((0,), dtype=float),
+                np.empty((0,), dtype=float),
+                [],
+            )
         cand = np.unique(cand)
         elem_all = self._types_to_elem_idx(atom_types)
         elem = elem_all[cand]
@@ -448,8 +465,12 @@ class EAMAlloyPotential:
                     continue
                 ai = int(elem[li])
                 aj = int(elem[lj])
-                rhoi, _ = _interp_with_grad(self.grid_r, self.density_table[aj], np.array([rij], dtype=float))
-                rhoj, _ = _interp_with_grad(self.grid_r, self.density_table[ai], np.array([rij], dtype=float))
+                rhoi, _ = _interp_with_grad(
+                    self.grid_r, self.density_table[aj], np.array([rij], dtype=float)
+                )
+                rhoj, _ = _interp_with_grad(
+                    self.grid_r, self.density_table[ai], np.array([rij], dtype=float)
+                )
                 rho_acc[li] += float(rhoi[0])
                 rho_acc[lj] += float(rhoj[0])
                 pairs.append((li, lj, dr, rij, ai, aj))
@@ -457,7 +478,9 @@ class EAMAlloyPotential:
         dF = np.zeros((cand.size,), dtype=float)
         for li in range(cand.size):
             ai = int(elem[li])
-            _Fi, dFi = _interp_with_grad(self.grid_rho, self.embed_table[ai], np.array([rho_acc[li]], dtype=float))
+            _Fi, dFi = _interp_with_grad(
+                self.grid_rho, self.embed_table[ai], np.array([rho_acc[li]], dtype=float)
+            )
             dF[li] = float(dFi[0])
         return cand, elem, rho_acc, dF, pairs
 
@@ -470,26 +493,37 @@ class EAMAlloyPotential:
     ) -> tuple[np.ndarray, float, float]:
         n = int(r.shape[0])
         candidate = np.arange(n, dtype=np.int32)
-        cand, elem_idx, rho_acc, dF, pairs = self._subset_state(r, box, cutoff, atom_types, candidate)
+        cand, elem_idx, rho_acc, dF, pairs = self._subset_state(
+            r, box, cutoff, atom_types, candidate
+        )
         forces = np.zeros((n, 3), dtype=float)
 
         emb = np.zeros((cand.size,), dtype=float)
         for li in range(cand.size):
             ai = int(elem_idx[li])
-            Fi, _dFi = _interp_with_grad(self.grid_rho, self.embed_table[ai], np.array([rho_acc[li]], dtype=float))
+            Fi, _dFi = _interp_with_grad(
+                self.grid_rho, self.embed_table[ai], np.array([rho_acc[li]], dtype=float)
+            )
             emb[li] = float(Fi[0])
 
         pair_energy = 0.0
         virial = 0.0
         for li, lj, dr, rij, ai, aj in pairs:
-            phi, dphi = _interp_with_grad(self.grid_r, self.phi_table[ai, aj], np.array([rij], dtype=float))
-            rhoi, drhoi = _interp_with_grad(self.grid_r, self.density_table[aj], np.array([rij], dtype=float))
-            rhoj, drhoj = _interp_with_grad(self.grid_r, self.density_table[ai], np.array([rij], dtype=float))
+            phi, dphi = _interp_with_grad(
+                self.grid_r, self.phi_table[ai, aj], np.array([rij], dtype=float)
+            )
+            rhoi, drhoi = _interp_with_grad(
+                self.grid_r, self.density_table[aj], np.array([rij], dtype=float)
+            )
+            rhoj, drhoj = _interp_with_grad(
+                self.grid_r, self.density_table[ai], np.array([rij], dtype=float)
+            )
             del rhoi, rhoj
             dEdr = float(dphi[0]) + dF[li] * float(drhoi[0]) + dF[lj] * float(drhoj[0])
             fmag = -dEdr
             fij = (fmag / (rij + 1e-30)) * dr
-            i = int(cand[li]); j = int(cand[lj])
+            i = int(cand[li])
+            j = int(cand[lj])
             forces[i] += fij
             forces[j] -= fij
             pair_energy += float(phi[0])
@@ -531,13 +565,20 @@ class EAMAlloyPotential:
         pos_tgt = {int(gid): int(i) for i, gid in enumerate(tgt.tolist())}
 
         for li, lj, dr, rij, ai, aj in pairs:
-            phi, dphi = _interp_with_grad(self.grid_r, self.phi_table[ai, aj], np.array([rij], dtype=float))
-            rhoi, drhoi = _interp_with_grad(self.grid_r, self.density_table[aj], np.array([rij], dtype=float))
-            rhoj, drhoj = _interp_with_grad(self.grid_r, self.density_table[ai], np.array([rij], dtype=float))
+            phi, dphi = _interp_with_grad(
+                self.grid_r, self.phi_table[ai, aj], np.array([rij], dtype=float)
+            )
+            rhoi, drhoi = _interp_with_grad(
+                self.grid_r, self.density_table[aj], np.array([rij], dtype=float)
+            )
+            rhoj, drhoj = _interp_with_grad(
+                self.grid_r, self.density_table[ai], np.array([rij], dtype=float)
+            )
             del phi, rhoi, rhoj
             dEdr = float(dphi[0]) + dF[li] * float(drhoi[0]) + dF[lj] * float(drhoj[0])
             fij = (-dEdr / (rij + 1e-30)) * dr  # force on i from j
-            gi = int(cand[li]); gj = int(cand[lj])
+            gi = int(cand[li])
+            gj = int(cand[lj])
             ti = pos_tgt.get(gi, -1)
             tj = pos_tgt.get(gj, -1)
             if ti >= 0:

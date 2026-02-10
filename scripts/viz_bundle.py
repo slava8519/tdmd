@@ -19,7 +19,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Run universal visualization bundle on one trajectory")
     ap.add_argument("--traj", required=True, help="Input trajectory")
     ap.add_argument("--outdir", required=True, help="Output directory")
-    ap.add_argument("--run-adapters", action="store_true", help="Try running external adapters if binaries are available")
+    ap.add_argument(
+        "--run-adapters",
+        action="store_true",
+        help="Try running external adapters if binaries are available",
+    )
     args = ap.parse_args()
 
     outdir = str(args.outdir)
@@ -77,4 +81,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

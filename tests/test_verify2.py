@@ -1,7 +1,9 @@
 import numpy as np
+
 from tdmd.config import load_config
 from tdmd.potentials import make_potential
 from tdmd.verify_v2 import run_verify_config
+
 
 def test_verify2_cfg_system():
     # Use the example config as a baseline (cfg_system)
@@ -30,7 +32,11 @@ def test_verify2_cfg_system():
         steps=2,
         observer_every=1,
         # CI: single-step equivalence check on cfg_system
-        tol_dr=1e-5, tol_dv=3e-5, tol_dE=2.5e-4, tol_dT=1e-4, tol_dP=1e-3,
+        tol_dr=1e-5,
+        tol_dv=3e-5,
+        tol_dE=2.5e-4,
+        tol_dT=1e-4,
+        tol_dP=1e-3,
         decomposition=str(getattr(cfg.td, "decomposition", "1d")),
         zones_nx=int(getattr(cfg.td, "zones_nx", 1)),
         zones_ny=int(getattr(cfg.td, "zones_ny", 1)),
@@ -67,7 +73,11 @@ def test_verify2_cfg_system_sync_mode():
         verlet_k_steps=10,
         steps=10,
         observer_every=2,
-        tol_dr=1e-6, tol_dv=1e-6, tol_dE=1e-6, tol_dT=1e-6, tol_dP=1e-6,
+        tol_dr=1e-6,
+        tol_dv=1e-6,
+        tol_dE=1e-6,
+        tol_dT=1e-6,
+        tol_dP=1e-6,
         decomposition=str(getattr(cfg.td, "decomposition", "1d")),
         zones_nx=int(getattr(cfg.td, "zones_nx", 1)),
         zones_ny=int(getattr(cfg.td, "zones_ny", 1)),

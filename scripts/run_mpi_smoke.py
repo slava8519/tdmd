@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def _find_mpirun(user_arg: str | None) -> str | None:
@@ -14,11 +14,7 @@ def _find_mpirun(user_arg: str | None) -> str | None:
     env_val = os.environ.get("MPIRUN", "").strip()
     if env_val:
         return env_val
-    return (
-        shutil.which("mpiexec.hydra")
-        or shutil.which("mpiexec")
-        or shutil.which("mpirun")
-    )
+    return shutil.which("mpiexec.hydra") or shutil.which("mpiexec") or shutil.which("mpirun")
 
 
 def main() -> int:

@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 import numpy as np
+
 from .state import pbc_wrap
+
 
 def vv_update_positions(r, v, mass, dt, box, ids, f):
     if np.isscalar(mass):
@@ -16,9 +19,10 @@ def vv_update_positions(r, v, mass, dt, box, ids, f):
         if np.any(masses <= 0.0):
             raise ValueError("all masses must be positive")
         v_half = v[ids] + 0.5 * dt * f / masses[ids][:, None]
-    r_new = pbc_wrap(r[ids] + dt*v_half, box)
+    r_new = pbc_wrap(r[ids] + dt * v_half, box)
     r[ids] = r_new
     v[ids] = v_half
+
 
 def vv_finish_velocities(v, mass, dt, ids, f_new):
     if np.isscalar(mass):

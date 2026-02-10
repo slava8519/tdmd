@@ -40,4 +40,3 @@ def emit_observer(
         observer(int(step), r, v, float(box))
     else:
         observer(int(step), r, v)
-

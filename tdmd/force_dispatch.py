@@ -60,4 +60,3 @@ def try_gpu_forces_on_targets(
         return np.asarray(f_pair, dtype=float)
 
     return None
-

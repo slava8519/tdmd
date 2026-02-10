@@ -35,4 +35,3 @@ def compute_forces_snapshot(
         rc=float(cutoff),
         atom_types=None if atom_types is None else np.asarray(atom_types, dtype=np.int32),
     )
-

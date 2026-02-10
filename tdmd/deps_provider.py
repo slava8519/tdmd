@@ -1,12 +1,16 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Protocol, Callable
+from typing import Callable, Protocol
+
 import numpy as np
+
 
 @dataclass(frozen=True)
 class ZoneGeom1D:
     z0: float
     z1: float
+
 
 @dataclass(frozen=True)
 class ZoneGeomAABB:
@@ -15,11 +19,13 @@ class ZoneGeomAABB:
     z0: float = 0.0
     z1: float = 0.0
 
+
 class DepsProvider(Protocol):
     def deps_table(self, zid: int) -> list[int]: ...
     def deps_owner(self, zid: int) -> list[int]: ...
     def owner_rank(self, zid: int) -> int: ...
     def geom(self, zid: int): ...
+
 
 @dataclass
 class DynamicHolderDeps1D:
@@ -34,7 +40,9 @@ class DynamicHolderDeps1D:
 
     def deps_table(self, zid: int) -> list[int]:
         z = self.zones[zid]
-        deps = self.zones_overlapping_range_pbc(z.z0 - self.cutoff, z.z1 + self.cutoff, self.box, self.zones)
+        deps = self.zones_overlapping_range_pbc(
+            z.z0 - self.cutoff, z.z1 + self.cutoff, self.box, self.zones
+        )
         return [int(d) for d in deps if int(d) != int(zid)]
 
     def deps_owner(self, zid: int) -> list[int]:
@@ -50,8 +58,10 @@ class DynamicHolderDeps1D:
         z = self.zones[int(zid)]
         return ZoneGeom1D(float(z.z0), float(z.z1))
 
+
 @dataclass
 class StaticRoundRobinOwner:
     size: int
+
     def owner_rank(self, zid: int) -> int:
         return -1 if int(self.size) <= 0 else (int(zid) % int(self.size))

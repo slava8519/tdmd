@@ -1,5 +1,7 @@
 import numpy as np
-from tdmd.zone_views import build_zone_view, build_halo_view
+
+from tdmd.zone_views import build_halo_view, build_zone_view
+
 
 def test_zone_views_contiguous_and_dtypes():
     x = np.arange(5, dtype=np.float32)

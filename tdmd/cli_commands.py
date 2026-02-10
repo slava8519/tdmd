@@ -41,8 +41,7 @@ def _parse_traj_channels(raw: str) -> tuple[str, ...]:
             continue
         if t not in ("unwrapped", "image", "force"):
             raise SystemExit(
-                "invalid --traj-channels value "
-                f"{token!r}; allowed: unwrapped,image,force,all"
+                "invalid --traj-channels value " f"{token!r}; allowed: unwrapped,image,force,all"
             )
         if t not in out:
             out.append(t)
@@ -118,7 +117,9 @@ def cmd_verifylab(args) -> None:
         return s.strip().lower() in ("1", "true", "yes", "y", "on")
 
     zones_total_list = args.zones_total if args.zones_total else [cfg.td.zones_total]
-    use_verlet_list = [parse_bool(x) for x in args.use_verlet] if args.use_verlet else [cfg.td.use_verlet]
+    use_verlet_list = (
+        [parse_bool(x) for x in args.use_verlet] if args.use_verlet else [cfg.td.use_verlet]
+    )
     verlet_k_steps_list = args.verlet_k_steps if args.verlet_k_steps else [cfg.td.verlet_k_steps]
     chaos_mode_list = [parse_bool(x) for x in args.chaos] if args.chaos else [False]
     chaos_delay_prob_list = args.chaos_delay_prob if args.chaos_delay_prob else [0.0]
@@ -216,8 +217,12 @@ def cmd_run(
     if task is None and cfg is None:
         raise SystemExit("config required for run (or provide --task)")
 
-    requested_device = str(args.device).strip().lower() if args.device else (
-        str(getattr(cfg.run, "device", "auto")).strip().lower() if cfg is not None else "auto"
+    requested_device = (
+        str(args.device).strip().lower()
+        if args.device
+        else (
+            str(getattr(cfg.run, "device", "auto")).strip().lower() if cfg is not None else "auto"
+        )
     )
     backend = resolve_backend(requested_device)
     if backend.device == "cuda":
@@ -266,7 +271,9 @@ def cmd_run(
     else:
         pot = make_potential(cfg.potential.kind, cfg.potential.params)
         r0 = init_positions(cfg.system.n_atoms, cfg.system.box, cfg.system.seed)
-        v0 = init_velocities(cfg.system.n_atoms, cfg.system.temperature, cfg.system.mass, cfg.system.seed)
+        v0 = init_velocities(
+            cfg.system.n_atoms, cfg.system.temperature, cfg.system.mass, cfg.system.seed
+        )
         mass = cfg.system.mass
         box = cfg.system.box
         dt = cfg.run.dt
@@ -284,7 +291,9 @@ def cmd_run(
     output_manifest = bool(not args.no_output_manifest)
 
     traj_every = _resolve_every(int(args.traj_every), int(thermo_every)) if args.traj else 0
-    metrics_every = _resolve_every(int(args.metrics_every), int(thermo_every)) if args.metrics else 0
+    metrics_every = (
+        _resolve_every(int(args.metrics_every), int(thermo_every)) if args.metrics else 0
+    )
 
     output_spec = None
     if args.traj or args.metrics:
@@ -374,7 +383,9 @@ def cmd_run(
         return
 
     if cfg is None:
-        raise SystemExit("TD mode requires config for TD settings (use --mode serial or provide config)")
+        raise SystemExit(
+            "TD mode requires config for TD settings (use --mode serial or provide config)"
+        )
 
     run_td_full_mpi_1d(
         r=r0,
@@ -444,7 +455,9 @@ def cmd_verify(
     cfg = load_config(args.config)
     pot = make_potential(cfg.potential.kind, cfg.potential.params)
     r0 = init_positions(cfg.system.n_atoms, cfg.system.box, cfg.system.seed)
-    v0 = init_velocities(cfg.system.n_atoms, cfg.system.temperature, cfg.system.mass, cfg.system.seed)
+    v0 = init_velocities(
+        cfg.system.n_atoms, cfg.system.temperature, cfg.system.mass, cfg.system.seed
+    )
     steps = max(1, int(args.steps))
     rA = r0.copy()
     vA = v0.copy()
@@ -503,4 +516,3 @@ def cmd_verify(
         flush=True,
     )
     return
-

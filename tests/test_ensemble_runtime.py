@@ -3,12 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import tdmd.td_full_mpi as td_full_mpi
 from tdmd.io import export_lammps_in, load_task, task_to_arrays, validate_task_for_run
 from tdmd.potentials import make_potential
 from tdmd.serial import run_serial
 from tdmd.state import kinetic_energy, temperature_from_ke
 from tdmd.verify_v2 import run_verify_task
-import tdmd.td_full_mpi as td_full_mpi
 
 
 def _tiny_state() -> tuple[np.ndarray, np.ndarray]:
@@ -83,7 +83,12 @@ def test_serial_npt_berendsen_changes_box():
         thermostat={"kind": "berendsen", "params": {"t_target": 1.0, "tau": 0.1}},
         barostat={
             "kind": "berendsen",
-            "params": {"p_target": 0.0, "tau": 0.5, "compressibility": 0.02, "scale_velocities": True},
+            "params": {
+                "p_target": 0.0,
+                "tau": 0.5,
+                "compressibility": 0.02,
+                "scale_velocities": True,
+            },
         },
     )
 

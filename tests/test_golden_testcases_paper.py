@@ -12,9 +12,18 @@ def test_golden_testcases_paper_exists_and_schema():
     rows = data.get("rows", [])
     assert rows, "golden rows missing"
     required = {
-        "case", "zones_total", "use_verlet", "verlet_k_steps",
-        "chaos_mode", "chaos_delay_prob",
-        "max_dr", "max_dv", "max_dE", "max_dT", "max_dP", "ok",
+        "case",
+        "zones_total",
+        "use_verlet",
+        "verlet_k_steps",
+        "chaos_mode",
+        "chaos_delay_prob",
+        "max_dr",
+        "max_dv",
+        "max_dE",
+        "max_dT",
+        "max_dP",
+        "ok",
     }
     for r in rows:
         missing = required.difference(r.keys())

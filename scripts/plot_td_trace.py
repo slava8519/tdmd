@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import argparse
 import csv
 import glob
@@ -6,9 +7,11 @@ import os
 from collections import defaultdict
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
 
 def _load_rows(paths: list[str]):
     rows = []
@@ -20,9 +23,11 @@ def _load_rows(paths: list[str]):
                 rows.append(row)
     return rows
 
+
 def _state_code(s: str) -> int:
     s = (s or "").strip().upper()
-    return {"F":0, "D":1, "P":2, "W":3, "S":4}.get(s, 0)
+    return {"F": 0, "D": 1, "P": 2, "W": 3, "S": 4}.get(s, 0)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -74,11 +79,11 @@ def main():
     r_rows = [r for r in rows if int(r["rank"]) == rank_sel]
     r_rows.sort(key=lambda r: float(r["wall_time"]))
     zones = sorted(set(int(r["zone_id"]) for r in r_rows))
-    zone_index = {z:i for i, z in enumerate(zones)}
+    zone_index = {z: i for i, z in enumerate(zones)}
     n_events = len(r_rows)
     if zones and n_events:
         mat = np.zeros((len(zones), n_events), dtype=int)
-        current = {z:0 for z in zones}
+        current = {z: 0 for z in zones}
         for i, r in enumerate(r_rows):
             zid = int(r["zone_id"])
             state = _state_code(r.get("state_after", ""))
@@ -141,6 +146,7 @@ def main():
         f.write("</body></html>\n")
 
     print(f"[plot_td_trace] wrote {args.outdir}")
+
 
 if __name__ == "__main__":
     main()

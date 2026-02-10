@@ -1,1 +1,2 @@
-class CPUBackend: name='cpu'
+class CPUBackend:
+    name = 'cpu'

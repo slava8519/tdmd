@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import gzip
 import os
 import warnings
+
 import numpy as np
 
 from .manifest import trajectory_manifest_payload, write_manifest
@@ -10,6 +12,7 @@ from .snapshot_forces import compute_forces_snapshot
 
 class TrajectoryWriter:
     """LAMMPS dump (lammpstrj) writer."""
+
     SCHEMA_NAME = "tdmd.trajectory.lammps_dump"
     SCHEMA_VERSION = 1
 
@@ -54,9 +57,9 @@ class TrajectoryWriter:
             if c not in norm:
                 norm.append(c)
         self._channels = tuple(norm)
-        self._include_unwrapped = ("unwrapped" in self._channels)
-        self._include_image = ("image" in self._channels)
-        self._include_force = ("force" in self._channels)
+        self._include_unwrapped = "unwrapped" in self._channels
+        self._include_image = "image" in self._channels
+        self._include_force = "force" in self._channels
 
         self._compression = str(compression).strip().lower() or "none"
         if self._compression not in ("none", "gz"):
@@ -64,7 +67,9 @@ class TrajectoryWriter:
 
         self._force_potential = force_potential
         self._force_cutoff = None if force_cutoff is None else float(force_cutoff)
-        self._force_atom_types = None if force_atom_types is None else np.asarray(force_atom_types, dtype=np.int32)
+        self._force_atom_types = (
+            None if force_atom_types is None else np.asarray(force_atom_types, dtype=np.int32)
+        )
         if self._include_force:
             if self._force_potential is None or self._force_cutoff is None:
                 raise ValueError(
@@ -126,7 +131,10 @@ class TrajectoryWriter:
 
     def _forces_for_frame(self, r: np.ndarray, box_xyz: tuple[float, float, float]) -> np.ndarray:
         # Force snapshots currently support cubic boxes only, matching runtime contract.
-        if abs(float(box_xyz[0]) - float(box_xyz[1])) > 1e-12 or abs(float(box_xyz[0]) - float(box_xyz[2])) > 1e-12:
+        if (
+            abs(float(box_xyz[0]) - float(box_xyz[1])) > 1e-12
+            or abs(float(box_xyz[0]) - float(box_xyz[2])) > 1e-12
+        ):
             raise ValueError("trajectory force channel requires cubic box")
         return compute_forces_snapshot(
             r=np.asarray(r, dtype=float),
@@ -152,7 +160,9 @@ class TrajectoryWriter:
         if box_value is None:
             xhi, yhi, zhi = self.box
         else:
-            xhi = float(box_value[0]); yhi = float(box_value[1]); zhi = float(box_value[2])
+            xhi = float(box_value[0])
+            yhi = float(box_value[1])
+            zhi = float(box_value[2])
         box_xyz = (xhi, yhi, zhi)
         bflags = ["pp" if b else "ff" for b in self.pbc]
 
@@ -175,7 +185,9 @@ class TrajectoryWriter:
         ids = self.atom_ids
         types = self.atom_types
         if self._include_unwrapped:
-            unwrapped = np.asarray(r, dtype=float) + (self._images.astype(float) * np.asarray(box_xyz, dtype=float)[None, :])
+            unwrapped = np.asarray(r, dtype=float) + (
+                self._images.astype(float) * np.asarray(box_xyz, dtype=float)[None, :]
+            )
         else:
             unwrapped = None
         for i in range(n):

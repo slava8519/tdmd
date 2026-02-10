@@ -1,7 +1,11 @@
 from __future__ import annotations
+
 from typing import Union
+
 import numpy as np
+
 from .state import minimum_image
+
 
 def compute_observables(
     r: np.ndarray,
@@ -34,7 +38,7 @@ def compute_observables(
         if np.any(masses <= 0.0):
             raise ValueError("all masses must be positive")
         ke = 0.5 * float((masses[:, None] * (v * v)).sum())
-    T = (2.0*ke)/(3.0*max(1, N))  # kB=1
+    T = (2.0 * ke) / (3.0 * max(1, N))  # kB=1
     if atom_types is None:
         atom_types = np.ones((N,), dtype=np.int32)
     else:
@@ -47,10 +51,10 @@ def compute_observables(
         pe, W = potential.energy_virial(r, box, cutoff, atom_types)
     else:
         # Pairwise (vectorized) for tests: O(N^2) but N is small in verify bench.
-        dr = r[:,None,:] - r[None,:,:]
+        dr = r[:, None, :] - r[None, :, :]
         dr = minimum_image(dr, box)
-        r2 = (dr*dr).sum(axis=2)
-        cutoff2 = float(cutoff*cutoff)
+        r2 = (dr * dr).sum(axis=2)
+        cutoff2 = float(cutoff * cutoff)
 
         # upper triangle mask excluding diagonal
         iu = np.triu_indices(N, k=1)
@@ -68,5 +72,5 @@ def compute_observables(
             # virial: sum r_ij · f_ij = coef * |r|^2
             W = float((coef * r2m).sum())
 
-    P = (N*T)/V + W/(3.0*V)
-    return {"N": N, "V": V, "KE": ke, "PE": pe, "E": ke+pe, "T": T, "P": P, "virial": W}
+    P = (N * T) / V + W / (3.0 * V)
+    return {"N": N, "V": V, "KE": ke, "PE": pe, "E": ke + pe, "T": T, "P": P, "virial": W}

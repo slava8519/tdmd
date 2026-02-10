@@ -1,13 +1,23 @@
 from __future__ import annotations
+
+import warnings
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence
-import warnings
-import yaml
+
 import numpy as np
-from ..potentials import parse_pair_coeffs, ensure_pair_coeffs_complete, canonical_potential_kind
+import yaml
+
+from ..potentials import canonical_potential_kind, ensure_pair_coeffs_complete, parse_pair_coeffs
 
 _LAMMPS_UNITS = {
-    "lj", "real", "metal", "si", "cgs", "electron", "micro", "nano",
+    "lj",
+    "real",
+    "metal",
+    "si",
+    "cgs",
+    "electron",
+    "micro",
+    "nano",
 }
 _ENSEMBLE_KINDS = {"nve", "nvt", "npt"}
 _RUNTIME_POTENTIAL_PARAMS = {
@@ -17,8 +27,10 @@ _RUNTIME_POTENTIAL_PARAMS = {
     "eam/alloy": {"file", "elements"},
 }
 
+
 class TaskValidationError(ValueError):
     pass
+
 
 @dataclass(frozen=True)
 class TaskBox:
@@ -26,6 +38,7 @@ class TaskBox:
     y: float
     z: float
     pbc: tuple[bool, bool, bool]
+
 
 @dataclass(frozen=True)
 class TaskAtom:
@@ -36,26 +49,31 @@ class TaskAtom:
     r: tuple[float, float, float]
     v: tuple[float, float, float]
 
+
 @dataclass(frozen=True)
 class TaskPotential:
     kind: str
     params: dict[str, Any]
+
 
 @dataclass(frozen=True)
 class TaskThermostat:
     kind: str
     params: dict[str, Any]
 
+
 @dataclass(frozen=True)
 class TaskBarostat:
     kind: str
     params: dict[str, Any]
+
 
 @dataclass(frozen=True)
 class TaskEnsemble:
     kind: str
     thermostat: Optional[TaskThermostat] = None
     barostat: Optional[TaskBarostat] = None
+
 
 @dataclass(frozen=True)
 class Task:
@@ -71,6 +89,7 @@ class Task:
     # Legacy alias kept for backward compatibility with existing task files.
     thermostat: Optional[TaskThermostat] = None
 
+
 @dataclass(frozen=True)
 class TaskArrays:
     r: np.ndarray
@@ -80,13 +99,16 @@ class TaskArrays:
     masses: np.ndarray
     charges: np.ndarray
 
+
 def _err(msg: str) -> TaskValidationError:
     return TaskValidationError(msg)
+
 
 def _expect_dict(d: Any, key: str) -> dict:
     if not isinstance(d, dict):
         raise _err(f"{key} must be a mapping")
     return d
+
 
 def _expect_seq(x: Any, key: str, n: int | None = None) -> Sequence[Any]:
     if not isinstance(x, (list, tuple)):
@@ -95,20 +117,24 @@ def _expect_seq(x: Any, key: str, n: int | None = None) -> Sequence[Any]:
         raise _err(f"{key} must have length {n}")
     return x
 
+
 def _expect_str(x: Any, key: str) -> str:
     if not isinstance(x, str):
         raise _err(f"{key} must be a string")
     return x
+
 
 def _expect_int(x: Any, key: str) -> int:
     if not isinstance(x, (int, np.integer)):
         raise _err(f"{key} must be an int")
     return int(x)
 
+
 def _expect_float(x: Any, key: str) -> float:
     if not isinstance(x, (int, float, np.integer, np.floating)):
         raise _err(f"{key} must be a number")
     return float(x)
+
 
 def _expect_bool(x: Any, key: str) -> bool:
     if isinstance(x, bool):
@@ -116,6 +142,7 @@ def _expect_bool(x: Any, key: str) -> bool:
     if isinstance(x, (int, np.integer)) and x in (0, 1):
         return bool(x)
     raise _err(f"{key} must be a bool")
+
 
 def _parse_box(d: dict) -> TaskBox:
     box = _expect_dict(d.get("box", None), "box")
@@ -128,6 +155,7 @@ def _parse_box(d: dict) -> TaskBox:
     pbc = _expect_seq(pbc, "box.pbc", 3)
     pbc_b = tuple(_expect_bool(pbc[i], f"box.pbc[{i}]") for i in range(3))
     return TaskBox(x=float(x), y=float(y), z=float(z), pbc=pbc_b)
+
 
 def _parse_atoms(d: dict) -> list[TaskAtom]:
     atoms_raw = d.get("atoms", None)
@@ -156,6 +184,7 @@ def _parse_atoms(d: dict) -> list[TaskAtom]:
     if not atoms:
         raise _err("atoms list must be non-empty")
     return atoms
+
 
 def _parse_potential(d: dict, atom_types: np.ndarray) -> TaskPotential:
     pot = _expect_dict(d.get("potential", None), "potential")
@@ -191,6 +220,7 @@ def _parse_potential(d: dict, atom_types: np.ndarray) -> TaskPotential:
         except ValueError as exc:
             raise _err(str(exc)) from exc
     return TaskPotential(kind=kind, params=dict(params))
+
 
 def _parse_thermostat_block(data: Any, key: str) -> TaskThermostat:
     th = _expect_dict(data, key)
@@ -272,6 +302,7 @@ def _parse_ensemble(d: dict, legacy_thermostat: Optional[TaskThermostat]) -> Tas
             raise _err("ensemble.kind=npt requires ensemble.barostat")
     return TaskEnsemble(kind=kind, thermostat=thermostat, barostat=barostat)
 
+
 def parse_task_dict(d: dict) -> Task:
     if not isinstance(d, dict):
         raise _err("task root must be a mapping")
@@ -309,10 +340,12 @@ def parse_task_dict(d: dict) -> Task:
         thermostat=thermostat,
     )
 
+
 def load_task(path: str) -> Task:
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return parse_task_dict(data)
+
 
 def task_to_arrays(task: Task) -> TaskArrays:
     atoms = sorted(task.atoms, key=lambda a: a.id)
@@ -324,6 +357,7 @@ def task_to_arrays(task: Task) -> TaskArrays:
     v = np.array([a.v for a in atoms], dtype=float)
     return TaskArrays(r=r, v=v, atom_ids=ids, atom_types=types, masses=masses, charges=charges)
 
+
 def validate_task_for_run(
     task: Task,
     *,
@@ -333,7 +367,9 @@ def validate_task_for_run(
     allowed_ensemble_kinds: tuple[str, ...] = ("nve",),
 ) -> np.ndarray:
     if task.thermostat is not None:
-        raise _err("thermostat is not supported in TDMD run yet (legacy field parsed for interop only)")
+        raise _err(
+            "thermostat is not supported in TDMD run yet (legacy field parsed for interop only)"
+        )
     allowed_ensembles = tuple(str(k).strip().lower() for k in allowed_ensemble_kinds)
     if task.ensemble.kind not in allowed_ensembles:
         raise _err(
@@ -341,7 +377,9 @@ def validate_task_for_run(
             f"(allowed: {sorted(set(allowed_ensembles))})"
         )
     if not all(bool(x) for x in task.box.pbc):
-        raise _err("TDMD run requires periodic boundaries in all directions (box.pbc must be [true,true,true])")
+        raise _err(
+            "TDMD run requires periodic boundaries in all directions (box.pbc must be [true,true,true])"
+        )
     if any(a.charge is not None for a in task.atoms):
         raise _err("atom charges are not supported in TDMD run yet (charges are interop-only)")
     allowed = tuple(canonical_potential_kind(k) for k in allowed_potential_kinds)

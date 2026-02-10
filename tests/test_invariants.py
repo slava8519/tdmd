@@ -18,10 +18,13 @@ def test_invariant_buffer_skin_lag():
 
 def test_invariant_mask_in_aabb_pbc():
     box = 10.0
-    r = np.array([
-        [3.0, 3.0, 3.0],  # inside
-        [9.5, 3.0, 3.0],  # outside
-    ], dtype=float)
+    r = np.array(
+        [
+            [3.0, 3.0, 3.0],  # inside
+            [9.5, 3.0, 3.0],  # outside
+        ],
+        dtype=float,
+    )
     ids = np.array([0, 1], dtype=np.int32)
     lo = np.array([2.0, 2.0, 2.0], dtype=float)
     hi = np.array([4.0, 4.0, 4.0], dtype=float)
