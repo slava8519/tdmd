@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import subprocess
+import sys
 import pytest
 import yaml
 
@@ -99,7 +100,7 @@ def test_lammps_data_export_rejects_non_contiguous_types(tmp_path):
 def test_cli_export_lammps_eam_alloy(tmp_path):
     outdir = tmp_path / "out"
     cmd = [
-        ".venv/bin/python",
+        sys.executable,
         "-m",
         "tdmd.main",
         "run",

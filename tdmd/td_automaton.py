@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Union
 import numpy as np
 
@@ -19,7 +19,7 @@ class ZoneRuntime:
     ztype: ZoneType
     atom_ids: np.ndarray
     n_cells: int = 1
-    halo_ids: np.ndarray = np.empty((0,), np.int32)  # ghosts/halo for interaction tables
+    halo_ids: np.ndarray = field(default_factory=lambda: np.empty((0,), np.int32))  # ghosts/halo for interaction tables
     halo_step_id: int = -1  # zone-time layer for which halo_ids are valid
     step_id: int = 0
     buffer: float = 0.0
@@ -56,6 +56,7 @@ class TDAutomaton1W:
         self.zwidth = self.box / max(1, len(self.zones))
 
         self.work_zid: Optional[int] = None
+        self.priority_key = None  # A4b: keyfunc(zid)->tuple
         self.deps_local_pred = None  # legacy: callable(did)->bool (mapped to table deps)
         self.deps_table_pred = None  # callable(did)->bool
         self.deps_owner_pred = None  # callable(did)->bool
@@ -76,6 +77,10 @@ class TDAutomaton1W:
             "table_rebuild_age": 0,
             "viol_buffer": 0,
             "wait_table": 0,
+            "progress_epoch": 0,
+            "wfg_samples": 0,
+            "wfg_cycles": 0,
+            "wfg_max_outdeg": 0,
             "wait_owner": 0,
             "wait_owner_unknown": 0,
             "wait_owner_stale": 0,
@@ -152,6 +157,84 @@ class TDAutomaton1W:
     def set_deps_funcs(self, table_func=None, owner_func=None):
         self.deps_table_func = table_func
         self.deps_owner_func = owner_func
+
+
+
+    def set_priority_key(self, keyfunc):
+        """Set total-order priority key for selecting next computable zone.
+        keyfunc(zid)->tuple comparable lexicographically.
+        """
+        self.priority_key = keyfunc
+
+    def _iter_zids(self):
+        if self.priority_key is None:
+            return list(self.order)
+        try:
+            return sorted(list(self.order), key=lambda zid: self.priority_key(int(zid)))
+        except Exception:
+            return list(self.order)
+
+
+
+
+    def _deps_table_missing(self, zid: int) -> list[int]:
+        if self.deps_table_func is None or self.deps_table_pred is None:
+            return []
+        missing: list[int] = []
+        for did in self.deps_table_func(int(zid)):
+            if not bool(self.deps_table_pred(int(did))):
+                missing.append(int(did))
+        return missing
+
+    def _deps_owner_missing(self, zid: int) -> list[int]:
+        if self.deps_owner_func is None or self.deps_owner_pred is None:
+            return []
+        missing: list[int] = []
+        for did in self.deps_owner_func(int(zid)):
+            if not bool(self.deps_owner_pred(int(did))):
+                missing.append(int(did))
+        return missing
+
+    def wfg_local_sample(self, *, max_edges: int = 256) -> dict[int, list[int]]:
+        """Rank-local approximation of wait-for graph.
+
+        Edges z->d mean: zone z is currently blocked waiting for donor zone d.
+        No global synchronization is required.
+        """
+        g: dict[int, list[int]] = {}
+        n_edges = 0
+        for zid in self._iter_zids():
+            if n_edges >= max_edges:
+                break
+            z = self.zones[int(zid)]
+            if z.ztype == ZoneType.W:
+                continue
+            deps: list[int] = []
+            deps.extend(self._deps_table_missing(int(zid)))
+            deps.extend(self._deps_owner_missing(int(zid)))
+            if deps:
+                take = deps[: max(0, max_edges - n_edges)]
+                g[int(zid)] = take
+                n_edges += len(take)
+        return g
+
+    def wfg_local_cycle(self) -> list[int] | None:
+        """Detect a cycle in local WFG sample (if any)."""
+        from .graph_utils import find_cycle
+        g = self.wfg_local_sample()
+        return find_cycle(g)
+
+    def record_wfg_sample(self) -> None:
+        """Record WFG sample stats into diag counters."""
+        g = self.wfg_local_sample()
+        self.diag["wfg_samples"] = self.diag.get("wfg_samples", 0) + 1
+        outdeg = [len(v) for v in g.values()] or [0]
+        self.diag["wfg_max_outdeg"] = max(self.diag.get("wfg_max_outdeg", 0), max(outdeg))
+        cyc = self.wfg_local_cycle()
+        if cyc:
+            self.diag["wfg_cycles"] = self.diag.get("wfg_cycles", 0) + 1
+            self.diag["wfg_last_cycle"] = list(map(int, cyc))
+
 
     def _deps_table_ok(self, deps: List[int]) -> bool:
         pred = self.deps_table_pred
@@ -268,7 +351,7 @@ class TDAutomaton1W:
     def can_start_compute(self) -> bool:
         if self.work_zid is not None:
             return False
-        for zid in self.order:
+        for zid in self._iter_zids():
             z = self.zones[zid]
             if z.ztype == ZoneType.D and z.atom_ids.size:
                 deps, _, _ = self._deps(zid)
@@ -287,7 +370,7 @@ class TDAutomaton1W:
         if self.work_zid is not None and self.formal_core:
             raise RuntimeError("Attempt to start compute while a zone is already in W")
 
-        for zid in self.order:
+        for zid in self._iter_zids():
             z = self.zones[zid]
             if z.ztype == ZoneType.D and z.atom_ids.size:
                 deps, _, _ = self._deps(zid)
@@ -420,6 +503,7 @@ class TDAutomaton1W:
         z.ztype = ZoneType.S
         if enable_step_id:
             z.step_id = dest_sid
+        self.diag["progress_epoch"] = self.diag.get("progress_epoch", 0) + 1
         # ghosts are time-layer specific
         z.halo_ids = np.empty((0,), np.int32)
         z.halo_step_id = -1

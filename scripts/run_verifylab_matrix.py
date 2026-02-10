@@ -302,6 +302,29 @@ def _as_float(row: dict[str, str], key: str, default: float = 0.0) -> float:
         return float(default)
 
 
+def _pareto_frontier(points, *, x_key, y_key):
+    """Compute Pareto frontier for minimizing x and maximizing y.
+    Returns a list of points (original dicts) on the frontier, sorted by x ascending.
+    """
+    pts = [p for p in points if p is not None]
+    pts.sort(key=lambda p: (float(p.get(x_key, 0.0)), -float(p.get(y_key, 0.0))))
+    frontier = []
+    best_y = -float("inf")
+    for p in pts:
+        x = float(p.get(x_key, 0.0))
+        y = float(p.get(y_key, 0.0))
+        if y > best_y:
+            frontier.append(p)
+            best_y = y
+    return frontier
+
+def _best_under(points, *, x_key, y_key, x_max):
+    cand = [p for p in points if float(p.get(x_key, 0.0)) <= float(x_max)]
+    if not cand:
+        return None
+    return max(cand, key=lambda p: float(p.get(y_key, 0.0)))
+
+
 def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
     ranks = [int(x) for x in list(preset.get("mpi_ranks", [2, 4]))]
     overlap_list = str(preset.get("overlap_list", "0,1"))
@@ -340,6 +363,11 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
         hV_vals = [_as_int(r, "hV_max", default=0) for r in bench_rows]
         violW_vals = [_as_int(r, "violW_max", default=0) for r in bench_rows]
         lagV_vals = [_as_int(r, "lagV_max", default=0) for r in bench_rows]
+        wfgC_vals = [_as_int(r, "wfgC_max", default=0) for r in bench_rows]
+        wfgO_vals = [_as_int(r, "wfgO_max", default=0) for r in bench_rows]
+        wfgS_vals = [_as_int(r, "wfgS_max", default=0) for r in bench_rows]
+        wfgC_rate_vals = [float(r.get("wfgC_rate", 0.0) or 0.0) for r in bench_rows]
+        wfgC_p100_vals = [float(r.get("wfgC_per_100_steps", 0.0) or 0.0) for r in bench_rows]
         diag_vals = [_as_int(r, "diag_samples", default=0) for r in bench_rows]
         speedup_overlap = [
             _as_float(r, "speedup_vs_blocking", default=0.0)
@@ -375,6 +403,11 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             "hV_max": int(max(hV_vals) if hV_vals else 0),
             "violW_max": int(max(violW_vals) if violW_vals else 0),
             "lagV_max": int(max(lagV_vals) if lagV_vals else 0),
+            "wfgC_max": int(max(wfgC_vals) if wfgC_vals else 0),
+            "wfgO_max": int(max(wfgO_vals) if wfgO_vals else 0),
+            "wfgS_max": int(max(wfgS_vals) if wfgS_vals else 0),
+            "wfgC_rate": float(max(wfgC_rate_vals) if wfgC_rate_vals else 0.0),
+            "wfgC_per_100_steps": float(max(wfgC_p100_vals) if wfgC_p100_vals else 0.0),
             "diag_samples_min": int(min(diag_vals) if diag_vals else 0),
             "reasons": reasons,
             "out_csv": out_csv,
@@ -412,6 +445,11 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 "hV_max": int(r["hV_max"]),
                 "violW_max": int(r["violW_max"]),
                 "lagV_max": int(r["lagV_max"]),
+                "wfgC_max": int(r.get("wfgC_max", 0)),
+                "wfgO_max": int(r.get("wfgO_max", 0)),
+                "wfgS_max": int(r.get("wfgS_max", 0)),
+                "wfgC_rate": float(r.get("wfgC_rate", 0.0) or 0.0),
+                "wfgC_per_100_steps": float(r.get("wfgC_per_100_steps", 0.0) or 0.0),
             },
         }
     summary["by_case"] = by_case
@@ -802,8 +840,41 @@ def main():
                         f"- ranks={int(rr.get('ranks', 0))} ok={bool(rr.get('ok', False))} "
                         f"speedup={float(rr.get('overlap_speedup', 0.0)):.6f} "
                         f"hG={int(rr.get('hG_max', 0))} hV={int(rr.get('hV_max', 0))} "
-                        f"violW={int(rr.get('violW_max', 0))} lagV={int(rr.get('lagV_max', 0))}\n"
+                        f"violW={int(rr.get('violW_max', 0))} lagV={int(rr.get('lagV_max', 0))} "
+                        f"wfgC={int(rr.get('wfgC_max', 0))} wfgO={int(rr.get('wfgO_max', 0))} "
+                        f"rate={float(rr.get('wfgC_rate', 0.0)):.3f} "
+                        f"p100={float(rr.get('wfgC_per_100_steps', 0.0)):.3f}\n"
                     )
+
+                # WFG diagnostics warning (non-fatal): cycles are allowed under A4b, but indicate contention.
+                runs = list(summ.get("mpi_overlap_runs", []))
+                wfgC = [int(r.get("wfgC_max", 0)) for r in runs]
+                wfgO = [int(r.get("wfgO_max", 0)) for r in runs]
+                wfgS = [int(r.get("wfgS_max", 0)) for r in runs]
+                if any(v > 0 for v in wfgC):
+                    worstC = max(wfgC) if wfgC else 0
+                    worstO = max(wfgO) if wfgO else 0
+                    # ranks where max occurs (mpi overlap already grouped by nranks, still show it for completeness)
+                    ranks_at_worst = [
+                        int(r.get("ranks", -1)) for r in runs if int(r.get("wfgC_max", 0)) == worstC
+                    ]
+                    ranks_at_worst = sorted(set([r for r in ranks_at_worst if r >= 0]))
+                    # empirical cycle rate proxy: max(wfgC)/max(wfgS) (local sampling)
+                    rate = 0.0
+                    if max(wfgS) > 0:
+                        rate = float(worstC) / float(max(wfgS))
+                    f.write("\n### WFG contention diagnostics (mpi_overlap)\n")
+                    f.write(
+                        f"**WARNING (non-fatal):** transient local WFG cycles observed under A4b. "
+                        f"max(wfgC)={worstC}, max(wfgO)={worstO}, cycle_rate≈{rate:.3f} per sample.\n"
+                    )
+                    if ranks_at_worst:
+                        f.write(f"- Observed worst cycles at ranks={ranks_at_worst}\n")
+                    f.write(
+                        "- Interpretation: A4b prevents deadlock; wfgC>0 indicates contention/near-cycles in local wait patterns.\n"
+                        "- Next steps: inspect overlap/timing knobs and consult `docs/WFG_DIAGNOSTICS.md` for how to localize donors and hot spots.\n"
+                    )
+                    f.write("\n")
             elif mode_kind == "materials_property":
                 for cname, csum in dict(summ.get("by_case", {}) or {}).items():
                     if not isinstance(csum, dict):

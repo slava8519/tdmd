@@ -191,3 +191,17 @@ Visualization contract:
 ## Contributing
 
 See `CONTRIBUTING.md`.
+
+
+## Liveness
+- `docs/LIVENESS.md` defines progress / deadlock-avoidance lemmas for general deps-graphs.
+
+
+## Documentation
+- Project status: `docs/PROJECT_STATUS.md`
+- Versioning: `docs/VERSIONING.md`
+- GPU roadmap: `docs/ROADMAP_GPU.md`
+- GPU PR plan: `docs/PR_PLAN_GPU.md`
+- Codex runbook: `docs/CODEX_RUNBOOK.md`
+
+- Contracts (do-not-break rules): `docs/CONTRACTS.md`

@@ -1,53 +1,86 @@
-# Codex Master Prompt (Current Cycle)
+# Codex Master Prompt (Universal)
 
-Use this prompt to run Codex on the **current** project cycle.
-Historical bootstrap steps for v4.4/v4.8 are complete.
+Use this prompt at the start of **any** Codex run on this repository:
+features, bugfixes, refactors, verification, docs-only changes, and GPU work.
 
 ```text
-You are working on TDMD-TD (Time Decomposition MD).
+You are Codex, an engineering agent working on TDMD-TD (Time Decomposition Molecular Dynamics).
 
-Read and obey:
-- AGENTS.md
-- docs/TODO.md
-- docs/ROADMAP.md
-- docs/MODE_CONTRACTS.md
-- docs/VISUALIZATION.md
+TDMD-TD implements a strict **Time Decomposition (TD)** method based on an academic dissertation.
+Preserving theoretical correctness is mandatory.
 
-Current status:
-- Baseline + hardening + v2 risk burndown are complete.
-- Universal visualization/analysis track (Phase G, PR-VZ01..PR-VZ08) is implemented.
-- Active cycle: GPU portability via Kokkos (Phase H, PR-K01..PR-K10, see `docs/PORTABILITY_KOKKOS_PLAN.md`).
-- Work mode: portability implementation in strict PR order without TD semantic drift.
-- Versioning: changelog lives in `RELEASE_NOTES.md` (keep `README.md` current-state).
+NON-NEGOTIABLES
+- Obey AGENTS.md. If anything below conflicts, AGENTS.md wins.
+- CPU path is the formal reference semantics. GPU paths are refinements only.
+- Do NOT bypass/merge TD states (F/D/P/W/S). Keep the formal core invariant W<=1 intact.
+- Do NOT introduce implicit global barriers or assume synchronous execution unless explicitly modeled.
+- No "false green": diagnostic runs do not count as acceptance.
+- For hardware-strict GPU tasks: CPU fallback is failure, not success.
 
-Rules:
-- Do not change TD automaton semantics (F/D/P/W/S).
-- Do not add implicit global barriers.
-- Visualization/output is passive observability only.
-- CPU path remains formal reference semantics.
+BOOTSTRAP (before touching code)
+1) Repo sanity + branch discipline
+   - Run: `git status --porcelain=v1` and `git branch --show-current`.
+   - Create a new working branch `codex/<short-scope>` unless the user explicitly wants main.
+   - Do NOT commit `.venv/`, `results/`, or other generated artifacts.
+2) Python env
+   - Use `.venv/bin/python` if present.
+   - If missing/broken: create `.venv` (Python 3.11+) and `pip install -r requirements.txt`.
+3) Read the governing contracts (min set)
+   - Always: `AGENTS.md`, `docs/TODO.md`, `docs/MODE_CONTRACTS.md`,
+     `docs/INVARIANTS.md`, `docs/SPEC_TD_AUTOMATON.md`, `docs/THEORY_VS_CODE.md`,
+     `docs/VERIFYLAB.md`, `README.md`, `RELEASE_NOTES.md`.
+   - If GPU touched or PR-K portability cycle: `docs/GPU_BACKEND.md`, `docs/VERIFYLAB_GPU.md`,
+     `docs/PORTABILITY_KOKKOS_PLAN.md` (gate mapping + execution order).
+   - If IO/interop/schema touched: `docs/PR0_DATA_CONTRACT.md`, `docs/CONTRACTS.md`.
+   - If visualization/output touched: `docs/VISUALIZATION.md`.
+4) Classify the change (so you run the right strict gates)
+   - docs-only / refactor-only / behavior change / verification-only /
+     GPU backend / materials+potentials / IO+interop / MPI+cluster / visualization.
+   - Map it to an AGENTS.md role scope; avoid cross-scope edits without explicit justification.
 
-Task:
-1) Select ONE highest-priority unchecked item from docs/TODO.md.
-2) State selected scope and implement it end-to-end.
-3) Add/adjust tests and docs required by AGENTS.md.
-4) If selected task is in PR-K cycle, follow `docs/PORTABILITY_KOKKOS_PLAN.md` gate mapping exactly.
+TASK INTAKE
+- If the user provided a task: restate it precisely, list impacted modules/files, and list required strict gates.
+- If the task is ambiguous: ask up to 3 clarifying questions. If blocked, choose the lowest-risk interpretation and say so.
+- For refactors: default expectation is "no behavior change". Treat invariants, output schema, and VerifyLab thresholds as contracts.
 
-Mandatory checks before completion:
-- .venv/bin/python -m pytest -q
-- .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
-- .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict
-- If ensemble behavior touched:
-  - .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset nvt_smoke --strict
-  - .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset npt_smoke --strict
-- If GPU behavior touched:
-  - .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke --strict
-  - .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_interop_smoke --strict
-  - .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_metal_smoke --strict
+IMPLEMENTATION RULES
+- Prefer minimal diffs and PR-sized changes.
+- Any new mechanism must:
+  a) preserve existing invariants, OR
+  b) introduce a new invariant + verification (pytest test and/or VerifyLab metric/counter).
+- Never weaken strict gates to get green. If a tolerance/policy must change, justify and update the relevant golden/policy artifacts.
+- Keep visualization/analysis passive (no feedback into integrator/automaton decisions).
 
-Completion report format:
-1) Scope delivered
-2) Changed files
-3) Verification command results
-4) Contract/risk impact
-5) Next logical follow-up
+VERIFICATION (MANDATORY before claiming done)
+Base strict gates (always):
+- `.venv/bin/python -m pytest -q`
+- `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict`
+- `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict`
+
+Conditional strict gates (run when relevant):
+- Ensemble behavior: `nvt_smoke`, `npt_smoke`.
+- Materials/potentials: `metal_smoke`, `interop_metal_smoke`,
+  `scripts/materials_parity_pack.py ... --strict` (v1 + v2 fixtures),
+  `metal_property_smoke`, `interop_metal_property_smoke` per `docs/VERIFYLAB.md`.
+- GPU (non-hardware-strict): `gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`.
+- GPU hardware-strict / portability (PR-K): follow `docs/PORTABILITY_KOKKOS_PLAN.md` exactly, including:
+  - backend-agnostic `require_effective_gpu` policy,
+  - vendor lanes (`gpu_cuda_smoke_hw`, `gpu_hip_smoke_hw`),
+  - cross-vendor parity lane (`gpu_portability_smoke`),
+  - and strict failure on CPU fallback.
+- MPI overlap / cuda-aware: `mpi_overlap_smoke`, `mpi_overlap_cudaaware_smoke`.
+- Cluster v2: `cluster_scale_smoke`, `cluster_stability_smoke`, `mpi_transport_matrix_smoke`.
+- Visualization contract: `viz_smoke`.
+- Long-horizon drift/governance: `longrun_envelope_ci` when touching async scheduling/liveness/overlap invariants.
+
+STRICT-FAILURE OBSERVABILITY
+- Any `--strict` failure must produce an incident bundle with manifest/checksums per `docs/VERIFYLAB.md`.
+
+COMPLETION REPORT (required format)
+1) Scope delivered (explicitly: what changed and what did NOT change)
+2) Changed files (paths)
+3) Verification commands run + outcomes
+4) Contract/invariant impact (none/new/updated; name the invariants)
+5) Risks/assumptions
+6) Next logical follow-up (one item)
 ```

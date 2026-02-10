@@ -1100,6 +1100,11 @@ def run_td_full_mpi_1d(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarr
             ke = kinetic_energy(v, mass); T = temperature_from_ke(ke, r.shape[0])
             bmean = float(np.mean([zz.buffer for zz in zones]))
             q = len(autom.send_queue)
+            # Local WFG diagnostics (no global sync)
+            try:
+                autom.record_wfg_sample()
+            except Exception:
+                pass
             diag = autom.diag
             sb = int(diag.get("send_batches", 0))
             sb_total = int(diag.get("send_batch_zones_total", 0))
@@ -1111,7 +1116,7 @@ def run_td_full_mpi_1d(r: np.ndarray, v: np.ndarray, mass: Union[float, np.ndarr
                   f"mig={diag['migrations']} out={diag.get('outbox_atoms',0)} lagV={diag['viol_lag']} bufV={diag.get('viol_buffer',0)} dA={diag.get('delta_applied',0)} dD={diag.get('delta_deferred',0)} hS={diag.get('halo_sent',0)} hA={diag.get('halo_applied',0)} hD={diag.get('halo_deferred',0)} hG={diag.get('halo_geo_viol',0)} hV={diag.get('halo_support_viol',0)} dX={diag.get('delta_dropped',0)} hX={diag.get('halo_dropped',0)} dO={diag.get('delta_dropped_overflow',0)} "
                   f"tblAgeReb={diag['table_rebuild_age']} violW={diag['viol_w_gt1']} violO={diag['viol_send_overlap']} "
                   f"zone_step_spread={spread} reqS={diag.get('req_sent',0)} reqR={diag.get('req_rcv',0)} reqHS={diag.get('req_holder_sent',0)} reqHR={diag.get('req_holder_reply',0)} sh={diag.get('shadow_promoted',0)} wT={diag.get('wait_table',0)} wO={diag.get('wait_owner',0)} wOU={diag.get('wait_owner_unknown',0)} wOS={diag.get('wait_owner_stale',0)} "
-                  f"tbK={batch_size} sb={sb} sbAvg={sb_avg:.2f} sbMax={sb_max} asyncS={diag.get('async_send_msgs',0)} asyncB={diag.get('async_send_bytes',0)}", flush=True)
+                  f"tbK={batch_size} sb={sb} sbAvg={sb_avg:.2f} sbMax={sb_max} asyncS={diag.get('async_send_msgs',0)} asyncB={diag.get('async_send_bytes',0)} wfgS={diag.get('wfg_samples',0)} wfgC={diag.get('wfg_cycles',0)} wfgO={diag.get('wfg_max_outdeg',0)}", flush=True)
 
     if output is not None:
         output.close()

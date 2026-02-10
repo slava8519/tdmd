@@ -82,3 +82,8 @@ Next active portability cycle is tracked in `docs/PORTABILITY_KOKKOS_PLAN.md` (`
 - Any strict VerifyLab failure should produce a reproducible incident bundle:
   - automatic in `scripts/run_verifylab_matrix.py` strict-fail path,
   - manual export: `python scripts/export_incident_bundle.py --run-dir results/<run_id> --reason manual_export`.
+
+
+## Liveness gate (deps-graph)
+For any non-ring deps-graph mode, the runtime must satisfy `LIVENESS` assumptions A1–A4.
+In strict mode: either prove/enforce `WFG(t)` acyclic (A4a) or implement deterministic cycle-breaking (A4b).

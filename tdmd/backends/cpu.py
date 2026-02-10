@@ -1,0 +1,1 @@
+class CPUBackend: name='cpu'
