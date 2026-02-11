@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 
@@ -24,6 +24,7 @@ from .ensembles import apply_ensemble_step, build_ensemble_spec
 from .geom_pbc import mask_in_aabb_pbc
 from .output import OutputSpec, make_output_bundle
 from .overlap_cells import overlap_atoms_src_in_next_zonecells
+from .run_configs import TDFullMPIRunConfig
 from .state import kinetic_energy, temperature_from_ke
 from .td_automaton import TDAutomaton1W, ZoneRuntime
 from .td_trace import TDTraceLogger, format_invariant_flags
@@ -240,7 +241,7 @@ def startup_distribute_zones(
             z.ztype = ZoneType.F
 
 
-def run_td_full_mpi_1d(
+def _run_td_full_mpi_1d_legacy(
     r: np.ndarray,
     v: np.ndarray,
     mass: Union[float, np.ndarray],
@@ -1406,3 +1407,88 @@ def run_td_full_mpi_1d(
     if trace is not None:
         trace.close()
     return TDStats(rank=rank, size=size)
+
+
+def run_td_full_mpi_1d(
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    box: float,
+    potential,
+    dt: float,
+    cutoff: float,
+    n_steps: int,
+    *,
+    config: TDFullMPIRunConfig | None = None,
+    output_spec: OutputSpec | None = None,
+    **legacy_kwargs: Any,
+):
+    """TD full-MPI public entry point with compact config object.
+
+    Backward compatibility:
+      - legacy keyword options (thermo_every, zones_total, etc.) are still accepted;
+      - when both ``config`` and legacy kwargs are provided, raises ``TypeError``.
+    """
+    if config is not None and legacy_kwargs:
+        keys = ", ".join(sorted(legacy_kwargs.keys()))
+        raise TypeError(
+            f"run_td_full_mpi_1d received both config and legacy keyword options ({keys}); "
+            "use one style"
+        )
+    cfg = config if config is not None else TDFullMPIRunConfig.from_legacy_kwargs(legacy_kwargs)
+    return _run_td_full_mpi_1d_legacy(
+        r=r,
+        v=v,
+        mass=mass,
+        box=box,
+        potential=potential,
+        dt=dt,
+        cutoff=cutoff,
+        n_steps=n_steps,
+        thermo_every=cfg.thermo_every,
+        cell_size=cfg.cell_size,
+        zones_total=cfg.zones_total,
+        zone_cells_w=cfg.zone_cells_w,
+        zone_cells_s=cfg.zone_cells_s,
+        zone_cells_pattern=cfg.zone_cells_pattern,
+        traversal=cfg.traversal,
+        fast_sync=cfg.fast_sync,
+        strict_fast_sync=cfg.strict_fast_sync,
+        startup_mode=cfg.startup_mode,
+        warmup_steps=cfg.warmup_steps,
+        warmup_compute=cfg.warmup_compute,
+        buffer_k=cfg.buffer_k,
+        use_verlet=cfg.use_verlet,
+        verlet_k_steps=cfg.verlet_k_steps,
+        skin_from_buffer=cfg.skin_from_buffer,
+        formal_core=cfg.formal_core,
+        batch_size=cfg.batch_size,
+        overlap_mode=cfg.overlap_mode,
+        debug_invariants=cfg.debug_invariants,
+        strict_min_zone_width=cfg.strict_min_zone_width,
+        enable_step_id=cfg.enable_step_id,
+        max_step_lag=cfg.max_step_lag,
+        table_max_age=cfg.table_max_age,
+        max_pending_delta_atoms=cfg.max_pending_delta_atoms,
+        require_local_deps=cfg.require_local_deps,
+        require_table_deps=cfg.require_table_deps,
+        require_owner_deps=cfg.require_owner_deps,
+        require_owner_ver=cfg.require_owner_ver,
+        enable_req_holder=cfg.enable_req_holder,
+        holder_gossip=cfg.holder_gossip,
+        deps_provider_mode=cfg.deps_provider_mode,
+        zones_nx=cfg.zones_nx,
+        zones_ny=cfg.zones_ny,
+        zones_nz=cfg.zones_nz,
+        owner_buffer=cfg.owner_buffer,
+        cuda_aware_mpi=cfg.cuda_aware_mpi,
+        comm_overlap_isend=cfg.comm_overlap_isend,
+        atom_types=cfg.atom_types,
+        ensemble_kind=cfg.ensemble_kind,
+        thermostat=cfg.thermostat,
+        barostat=cfg.barostat,
+        device=cfg.device,
+        output_spec=output_spec,
+        trace_enabled=cfg.trace_enabled,
+        trace_path=cfg.trace_path,
+    )

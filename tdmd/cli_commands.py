@@ -16,6 +16,7 @@ from .io import (
 )
 from .output import OutputSpec, make_output_bundle
 from .potentials import make_potential
+from .run_configs import TDFullMPIRunConfig, TDLocalRunConfig
 from .state import init_positions, init_velocities
 
 
@@ -211,6 +212,21 @@ def cmd_run(
     run_td_local: Callable,
     run_td_full_mpi_1d: Callable,
 ) -> None:
+    return _cmd_run_legacy(
+        args,
+        run_serial=run_serial,
+        run_td_local=run_td_local,
+        run_td_full_mpi_1d=run_td_full_mpi_1d,
+    )
+
+
+def _cmd_run_legacy(
+    args,
+    *,
+    run_serial: Callable,
+    run_td_local: Callable,
+    run_td_full_mpi_1d: Callable,
+) -> None:
     cfg = load_config(args.config) if args.config else None
 
     task = load_task(args.task) if args.task else None
@@ -347,17 +363,7 @@ def cmd_run(
         obs, obs_every = _make_output_observer(
             output=output, traj_every=traj_every, metrics_every=metrics_every, box0=float(box)
         )
-        run_td_local(
-            r0,
-            v0,
-            mass,
-            box,
-            pot,
-            dt=dt,
-            cutoff=cutoff,
-            n_steps=n_steps,
-            observer=obs if obs_every else None,
-            observer_every=obs_every,
+        local_cfg = TDLocalRunConfig(
             atom_types=atom_types,
             cell_size=cfg.td.cell_size,
             zones_total=cfg.td.zones_total,
@@ -379,6 +385,19 @@ def cmd_run(
             barostat=barostat,
             device=backend.device,
         )
+        run_td_local(
+            r0,
+            v0,
+            mass,
+            box,
+            pot,
+            dt=dt,
+            cutoff=cutoff,
+            n_steps=n_steps,
+            observer=obs if obs_every else None,
+            observer_every=obs_every,
+            config=local_cfg,
+        )
         output.close()
         return
 
@@ -387,15 +406,7 @@ def cmd_run(
             "TD mode requires config for TD settings (use --mode serial or provide config)"
         )
 
-    run_td_full_mpi_1d(
-        r=r0,
-        v=v0,
-        mass=mass,
-        box=box,
-        potential=pot,
-        dt=dt,
-        cutoff=cutoff,
-        n_steps=n_steps,
+    mpi_cfg = TDFullMPIRunConfig(
         thermo_every=thermo_every,
         cell_size=cfg.td.cell_size,
         zones_total=cfg.td.zones_total,
@@ -439,9 +450,20 @@ def cmd_run(
         thermostat=thermostat,
         barostat=barostat,
         device=backend.device,
-        output_spec=output_spec,
         trace_enabled=bool(args.trace_td),
         trace_path=str(args.trace_td_out),
+    )
+    run_td_full_mpi_1d(
+        r=r0,
+        v=v0,
+        mass=mass,
+        box=box,
+        potential=pot,
+        dt=dt,
+        cutoff=cutoff,
+        n_steps=n_steps,
+        config=mpi_cfg,
+        output_spec=output_spec,
     )
     return
 

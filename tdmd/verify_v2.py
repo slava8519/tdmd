@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 
 from .observables import compute_observables
+from .run_configs import VerifyTaskRunConfig
 from .testcases import default_cases, make_case_state
 
 
@@ -523,7 +524,7 @@ def run_verify_config(
     )
 
 
-def run_verify_task(
+def _run_verify_task_legacy(
     *,
     potential,
     r0: np.ndarray,
@@ -740,4 +741,67 @@ def run_verify_task(
         max_dP=float(max_dP),
         ok=bool(ok),
         details=details,
+    )
+
+
+def run_verify_task(
+    *,
+    potential,
+    r0: np.ndarray,
+    v0: np.ndarray,
+    box: float,
+    mass: Union[float, np.ndarray],
+    dt: float,
+    cutoff: float,
+    config: VerifyTaskRunConfig | None = None,
+    **legacy_kwargs: Any,
+) -> VerifyResult:
+    """Public verify-task entry point with compact config object."""
+    if config is not None and legacy_kwargs:
+        keys = ", ".join(sorted(legacy_kwargs.keys()))
+        raise TypeError(
+            f"run_verify_task received both config and legacy keyword options ({keys}); "
+            "use one style"
+        )
+    cfg = config if config is not None else VerifyTaskRunConfig.from_legacy_kwargs(legacy_kwargs)
+    return _run_verify_task_legacy(
+        potential=potential,
+        r0=r0,
+        v0=v0,
+        box=box,
+        mass=mass,
+        dt=dt,
+        cutoff=cutoff,
+        atom_types=cfg.atom_types,
+        cell_size=cfg.cell_size,
+        zones_total=cfg.zones_total,
+        zone_cells_w=cfg.zone_cells_w,
+        zone_cells_s=cfg.zone_cells_s,
+        zone_cells_pattern=cfg.zone_cells_pattern,
+        traversal=cfg.traversal,
+        buffer_k=cfg.buffer_k,
+        skin_from_buffer=cfg.skin_from_buffer,
+        use_verlet=cfg.use_verlet,
+        verlet_k_steps=cfg.verlet_k_steps,
+        steps=cfg.steps,
+        observer_every=cfg.observer_every,
+        tol_dr=cfg.tol_dr,
+        tol_dv=cfg.tol_dv,
+        tol_dE=cfg.tol_dE,
+        tol_dT=cfg.tol_dT,
+        tol_dP=cfg.tol_dP,
+        decomposition=cfg.decomposition,
+        zones_nx=cfg.zones_nx,
+        zones_ny=cfg.zones_ny,
+        zones_nz=cfg.zones_nz,
+        sync_mode=cfg.sync_mode,
+        device=cfg.device,
+        strict_min_zone_width=cfg.strict_min_zone_width,
+        ensemble_kind=cfg.ensemble_kind,
+        thermostat=cfg.thermostat,
+        barostat=cfg.barostat,
+        chaos_mode=cfg.chaos_mode,
+        chaos_seed=cfg.chaos_seed,
+        chaos_delay_prob=cfg.chaos_delay_prob,
+        case_name=cfg.case_name,
     )

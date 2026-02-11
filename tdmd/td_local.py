@@ -32,6 +32,7 @@ from .forces_gpu import (
 )
 from .integrator import vv_finish_velocities, vv_update_positions
 from .observer import emit_observer, observer_accepts_box
+from .run_configs import TDLocalRunConfig
 from .zone_bins_localz import PersistentZoneLocalZBinsCache
 from .zones import (
     ZoneLayout1DCells,
@@ -713,7 +714,7 @@ def _forces_3d_post(
 # ---------------------------------------------------------------------------
 
 
-def run_td_local(
+def _run_td_local_legacy(
     r: np.ndarray,
     v: np.ndarray,
     mass: Union[float, np.ndarray],
@@ -819,3 +820,70 @@ def run_td_local(
         _run_async_3d(ctx)
     else:
         _run_async_1d(ctx)
+
+
+def run_td_local(
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    box: float,
+    potential,
+    dt: float,
+    cutoff: float,
+    n_steps: int,
+    observer=None,
+    observer_every: int = 0,
+    trace=None,
+    *,
+    config: TDLocalRunConfig | None = None,
+    **legacy_kwargs: Any,
+):
+    """TD-local public entry point with compact config object.
+
+    Backward compatibility:
+      - legacy keyword options (atom_types, zones_total, etc.) are still accepted;
+      - when both ``config`` and legacy kwargs are provided, raises ``TypeError``.
+    """
+    if config is not None and legacy_kwargs:
+        keys = ", ".join(sorted(legacy_kwargs.keys()))
+        raise TypeError(
+            f"run_td_local received both config and legacy keyword options ({keys}); use one style"
+        )
+    cfg = config if config is not None else TDLocalRunConfig.from_legacy_kwargs(legacy_kwargs)
+    return _run_td_local_legacy(
+        r=r,
+        v=v,
+        mass=mass,
+        box=box,
+        potential=potential,
+        dt=dt,
+        cutoff=cutoff,
+        n_steps=n_steps,
+        observer=observer,
+        observer_every=observer_every,
+        trace=trace,
+        atom_types=cfg.atom_types,
+        chaos_mode=cfg.chaos_mode,
+        chaos_seed=cfg.chaos_seed,
+        chaos_delay_prob=cfg.chaos_delay_prob,
+        cell_size=cfg.cell_size,
+        zones_total=cfg.zones_total,
+        zone_cells_w=cfg.zone_cells_w,
+        zone_cells_s=cfg.zone_cells_s,
+        zone_cells_pattern=cfg.zone_cells_pattern,
+        traversal=cfg.traversal,
+        buffer_k=cfg.buffer_k,
+        skin_from_buffer=cfg.skin_from_buffer,
+        use_verlet=cfg.use_verlet,
+        verlet_k_steps=cfg.verlet_k_steps,
+        decomposition=cfg.decomposition,
+        sync_mode=cfg.sync_mode,
+        zones_nx=cfg.zones_nx,
+        zones_ny=cfg.zones_ny,
+        zones_nz=cfg.zones_nz,
+        strict_min_zone_width=cfg.strict_min_zone_width,
+        ensemble_kind=cfg.ensemble_kind,
+        thermostat=cfg.thermostat,
+        barostat=cfg.barostat,
+        device=cfg.device,
+    )
