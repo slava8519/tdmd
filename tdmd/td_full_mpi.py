@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import numpy as np
 
@@ -56,6 +56,43 @@ class _TDMPIRuntimeInit:
     backend: object
     cuda_aware_active: bool
     use_async_send: bool
+
+
+_WireRecord = tuple[int, int, int, np.ndarray, int]
+
+
+@dataclass
+class _TDMPICommContext:
+    comm: object
+    prev_rank: int
+    next_rank: int
+    use_async_send: bool
+    batch_size: int
+    box: float
+    cutoff: float
+    deps_provider_mode: str
+    static_rr: bool
+    debug_invariants: bool
+    max_step_lag: int
+    max_pending_delta_atoms: int
+    r: np.ndarray
+    v: np.ndarray
+    zones: list[ZoneRuntime]
+    zones_total: int
+    autom: TDAutomaton1W
+    holder_map: list[int]
+    holder_ver: list[int]
+    req_reply_outbox: dict[int, list[_WireRecord]]
+    holder_reply_outbox: dict[int, list[_WireRecord]]
+    pending_deltas: dict[tuple[int, int, int], list[np.ndarray]]
+    pending_atoms: int
+    geom_aabb_fn: Callable[[int], ZoneGeomAABB]
+    deps_zone_ids_fn: Callable[[int], list[int]]
+    overlap_set_for_send_fn: Callable[[int, int, float, int], set[int]]
+    trace_event_fn: Callable[..., None]
+    lag_value_fn: Callable[[int], int]
+    set_holder_fn: Callable[[int, int], None]
+    validate_halo_geometry_fn: Callable[[int, np.ndarray], None]
 
 
 def _init_td_full_mpi_runtime(
@@ -637,6 +674,492 @@ def _run_td_main_phase(
             )
 
 
+def _update_static_3d_halo_geometry_diag(
+    ctx: _TDMPICommContext,
+    *,
+    zid: int,
+    halo_ids: np.ndarray,
+) -> None:
+    if str(ctx.deps_provider_mode) != "static_3d" or halo_ids.size == 0:
+        return
+    g_z = ctx.geom_aabb_fn(int(ctx.zones[int(zid)].zid))
+    m = mask_in_aabb_pbc(
+        ctx.r,
+        halo_ids.astype(np.int32),
+        g_z.lo,
+        g_z.hi,
+        float(ctx.cutoff),
+        float(ctx.box),
+    )
+    if not bool(m.all()):
+        ctx.autom.diag["hG3"] = ctx.autom.diag.get("hG3", 0) + int((~m).sum())
+
+
+def _cleanup_pending_deltas(ctx: _TDMPICommContext) -> None:
+    """Bound pending delta buffer: drop too-old and overflow."""
+    to_drop = []
+    for (zid, sid, st), parts in ctx.pending_deltas.items():
+        z = ctx.zones[zid]
+        if z.ztype != ZoneType.F and (int(z.step_id) - int(sid)) > ctx.max_step_lag:
+            to_drop.append((zid, sid, st))
+    for key in to_drop:
+        parts = ctx.pending_deltas.pop(key, [])
+        dropped = int(sum(p.size for p in parts))
+        ctx.pending_atoms -= dropped
+        ctx.autom.diag["delta_dropped"] = ctx.autom.diag.get("delta_dropped", 0) + dropped
+
+    if ctx.max_pending_delta_atoms <= 0:
+        return
+    while ctx.pending_atoms > ctx.max_pending_delta_atoms and ctx.pending_deltas:
+        oldest = min(ctx.pending_deltas.keys(), key=lambda k: k[1])
+        parts = ctx.pending_deltas.pop(oldest, [])
+        dropped = int(sum(p.size for p in parts))
+        ctx.pending_atoms -= dropped
+        ctx.autom.diag["delta_dropped_overflow"] = (
+            ctx.autom.diag.get("delta_dropped_overflow", 0) + dropped
+        )
+        ctx.autom.diag["delta_dropped"] = ctx.autom.diag.get("delta_dropped", 0) + dropped
+
+
+def _apply_pending_if_ready(ctx: _TDMPICommContext, *, zid: int) -> None:
+    z = ctx.zones[int(zid)]
+    keys = [
+        k for k in ctx.pending_deltas.keys() if int(k[0]) == int(zid) and int(k[1]) == int(z.step_id)
+    ]
+    if not keys:
+        return
+
+    for key in keys:
+        _, _, subtype = key
+        parts = ctx.pending_deltas.pop(key)
+        if not parts:
+            continue
+        add = (
+            np.concatenate(parts).astype(np.int32)
+            if len(parts) > 1
+            else parts[0].astype(np.int32)
+        )
+        ctx.pending_atoms -= int(add.size)
+        if add.size == 0:
+            continue
+
+        if int(subtype) == DELTA_HALO:
+            if int(z.halo_step_id) != int(z.step_id):
+                z.halo_ids = np.unique(add).astype(np.int32)
+                _update_static_3d_halo_geometry_diag(ctx, zid=int(zid), halo_ids=z.halo_ids)
+                z.halo_step_id = int(z.step_id)
+            else:
+                z.halo_ids = np.unique(np.concatenate([z.halo_ids, add]).astype(np.int32))
+                _update_static_3d_halo_geometry_diag(ctx, zid=int(zid), halo_ids=z.halo_ids)
+            ctx.validate_halo_geometry_fn(int(zid), z.halo_ids)
+            ctx.autom.diag["halo_applied"] = ctx.autom.diag.get("halo_applied", 0) + int(add.size)
+            continue
+
+        z.atom_ids = (
+            add
+            if z.atom_ids.size == 0
+            else np.concatenate([z.atom_ids, add]).astype(np.int32)
+        )
+        if z.ztype == ZoneType.F:
+            z.ztype = ZoneType.D
+        ctx.autom.diag["delta_applied"] = ctx.autom.diag.get("delta_applied", 0) + int(add.size)
+
+
+def _handle_req_record(
+    ctx: _TDMPICommContext,
+    *,
+    src_rank: int,
+    subtype: int,
+    dep_zid: int,
+    ids: np.ndarray,
+) -> None:
+    # Request from src_rank:
+    #   REQ_HALO   (0): request HALO for dependency dep_zid
+    #   REQ_HOLDER (1): request holder-map info for dependency dep_zid
+    ctx.autom.diag["req_rcv"] = ctx.autom.diag.get("req_rcv", 0) + 1
+
+    if int(subtype) == REQ_HOLDER:
+        ver = int(ctx.holder_ver[dep_zid]) if 0 <= dep_zid < ctx.zones_total else -1
+        rec = (REC_HOLDER, 0, dep_zid, np.empty((0,), np.int32), ver)
+        ctx.holder_reply_outbox.setdefault(int(src_rank), []).append(rec)
+        ctx.autom.diag["req_holder_reply"] = ctx.autom.diag.get("req_holder_reply", 0) + 1
+        return
+
+    req_zid = int(ids[0]) if ids.size >= 2 else -1
+    if not (
+        0 <= dep_zid < ctx.zones_total
+        and ctx.zones[dep_zid].ztype != ZoneType.F
+        and ctx.zones[dep_zid].atom_ids.size
+    ):
+        return
+
+    if 0 <= req_zid < ctx.zones_total:
+        if str(ctx.deps_provider_mode) == "static_3d":
+            g = ctx.geom_aabb_fn(int(req_zid))
+            halo_ids = halo_filter_by_receiver_aabb(
+                ctx.r,
+                ctx.zones[dep_zid].atom_ids.astype(np.int32),
+                g.lo,
+                g.hi,
+                ctx.cutoff,
+                ctx.box,
+            )
+        else:
+            halo_ids = halo_filter_by_receiver_p(
+                ctx.r,
+                ctx.zones[dep_zid].atom_ids.astype(np.int32),
+                ctx.zones[req_zid].z0,
+                ctx.zones[req_zid].z1,
+                ctx.cutoff,
+                ctx.box,
+            )
+    else:
+        halo_ids = ctx.zones[dep_zid].atom_ids.astype(np.int32)
+
+    if halo_ids.size:
+        rec = (REC_DELTA, DELTA_HALO, dep_zid, halo_ids.astype(np.int32), int(ctx.zones[dep_zid].step_id))
+        ctx.req_reply_outbox.setdefault(int(src_rank), []).append(rec)
+        ctx.autom.diag["req_reply_sent"] = ctx.autom.diag.get("req_reply_sent", 0) + 1
+
+
+def _handle_delta_record(
+    ctx: _TDMPICommContext,
+    *,
+    subtype: int,
+    zid: int,
+    ids: np.ndarray,
+    step_id: int,
+    state_before,
+) -> None:
+    sid = int(step_id)
+    z = ctx.zones[int(zid)]
+    if int(subtype) == DELTA_HALO and z.ztype == ZoneType.F:
+        # Promote to shadow dependency zone carrying only HALO.
+        z.ztype = ZoneType.P
+        z.step_id = sid
+        z.halo_step_id = sid
+        z.halo_ids = np.empty((0,), np.int32)
+        _update_static_3d_halo_geometry_diag(ctx, zid=int(zid), halo_ids=z.halo_ids)
+        ctx.autom.diag["shadow_promoted"] = ctx.autom.diag.get("shadow_promoted", 0) + 1
+
+    if z.ztype != ZoneType.F and int(z.step_id) == sid:
+        if ids.size:
+            if int(subtype) == DELTA_HALO:
+                if int(z.halo_step_id) != int(z.step_id):
+                    z.halo_ids = np.unique(ids).astype(np.int32)
+                    _update_static_3d_halo_geometry_diag(ctx, zid=int(zid), halo_ids=z.halo_ids)
+                    z.halo_step_id = int(z.step_id)
+                else:
+                    z.halo_ids = np.unique(np.concatenate([z.halo_ids, ids]).astype(np.int32))
+                    _update_static_3d_halo_geometry_diag(ctx, zid=int(zid), halo_ids=z.halo_ids)
+                ctx.validate_halo_geometry_fn(int(zid), z.halo_ids)
+                ctx.autom.diag["halo_applied"] = ctx.autom.diag.get("halo_applied", 0) + int(ids.size)
+                ctx.trace_event_fn(
+                    zid=int(zid),
+                    step_id=int(sid),
+                    event="RECV_DELTA_HALO",
+                    state_before=state_before,
+                    state_after=z.ztype,
+                    halo_ids_count=int(ids.size),
+                    migration_count=0,
+                    lag=ctx.lag_value_fn(int(zid)),
+                )
+            else:
+                z.atom_ids = (
+                    ids
+                    if z.atom_ids.size == 0
+                    else np.concatenate([z.atom_ids, ids]).astype(np.int32)
+                )
+                ctx.autom.diag["delta_applied"] = ctx.autom.diag.get("delta_applied", 0) + int(ids.size)
+                ctx.trace_event_fn(
+                    zid=int(zid),
+                    step_id=int(sid),
+                    event="RECV_DELTA_MIGRATION",
+                    state_before=state_before,
+                    state_after=z.ztype,
+                    halo_ids_count=0,
+                    migration_count=int(ids.size),
+                    lag=ctx.lag_value_fn(int(zid)),
+                )
+        return
+
+    if z.ztype != ZoneType.F and (int(z.step_id) - sid) > ctx.max_step_lag:
+        if int(subtype) == DELTA_HALO:
+            ctx.autom.diag["halo_dropped"] = ctx.autom.diag.get("halo_dropped", 0) + int(ids.size)
+        ctx.autom.diag["delta_dropped"] = ctx.autom.diag.get("delta_dropped", 0) + int(ids.size)
+        return
+
+    ctx.pending_deltas.setdefault((int(zid), sid, int(subtype)), []).append(ids.astype(np.int32))
+    ctx.pending_atoms += int(ids.size)
+    _cleanup_pending_deltas(ctx)
+    if int(subtype) == DELTA_HALO:
+        ctx.autom.diag["halo_deferred"] = ctx.autom.diag.get("halo_deferred", 0) + int(ids.size)
+    else:
+        ctx.autom.diag["delta_deferred"] = ctx.autom.diag.get("delta_deferred", 0) + int(ids.size)
+
+
+def _handle_record(
+    ctx: _TDMPICommContext,
+    *,
+    src_rank: int,
+    rectype: int,
+    subtype: int,
+    zid: int,
+    ids: np.ndarray,
+    rr: np.ndarray,
+    vv: np.ndarray,
+    step_id: int,
+) -> None:
+    state_before = ctx.zones[int(zid)].ztype if 0 <= int(zid) < len(ctx.zones) else None
+    if ids.size:
+        ctx.r[ids] = rr
+        ctx.v[ids] = vv
+
+    if rectype == REC_HOLDER:
+        ver = int(step_id)
+        if ver > int(ctx.holder_ver[int(zid)]):
+            ctx.holder_map[int(zid)] = int(src_rank)
+            ctx.holder_ver[int(zid)] = ver
+        return
+
+    if rectype == REC_REQ:
+        _handle_req_record(
+            ctx,
+            src_rank=int(src_rank),
+            subtype=int(subtype),
+            dep_zid=int(zid),
+            ids=ids,
+        )
+        return
+
+    if rectype == REC_ZONE:
+        ctx.autom.on_recv(zid, ids, step_id)
+        ctx.trace_event_fn(
+            zid=int(zid),
+            step_id=int(step_id),
+            event="RECV_ZONE",
+            state_before=state_before,
+            state_after=ctx.zones[int(zid)].ztype,
+            halo_ids_count=0,
+            migration_count=int(ids.size),
+            lag=ctx.lag_value_fn(int(zid)),
+        )
+        _cleanup_pending_deltas(ctx)
+        _apply_pending_if_ready(ctx, zid=int(zid))
+        return
+
+    _handle_delta_record(
+        ctx,
+        subtype=int(subtype),
+        zid=int(zid),
+        ids=ids,
+        step_id=int(step_id),
+        state_before=state_before,
+    )
+
+
+def _recv_phase(ctx: _TDMPICommContext, *, tag_base: int) -> None:
+    # Forward direction: from prev_rank on tag_base.
+    while ctx.comm.Iprobe(source=ctx.prev_rank, tag=tag_base):
+        payload = recv_payload(ctx.comm, ctx.prev_rank, tag=tag_base)
+        for rectype, subtype, zid, ids, rr, vv, step_id in unpack_records(payload):
+            _handle_record(
+                ctx,
+                src_rank=int(ctx.prev_rank),
+                rectype=int(rectype),
+                subtype=int(subtype),
+                zid=int(zid),
+                ids=ids,
+                rr=rr,
+                vv=vv,
+                step_id=int(step_id),
+            )
+
+    # Backward direction halos: from next_rank on tag_base+2.
+    while ctx.comm.Iprobe(source=ctx.next_rank, tag=tag_base + 2):
+        payload = recv_payload(ctx.comm, ctx.next_rank, tag=tag_base + 2)
+        for rectype, subtype, zid, ids, rr, vv, step_id in unpack_records(payload):
+            _handle_record(
+                ctx,
+                src_rank=int(ctx.next_rank),
+                rectype=int(rectype),
+                subtype=int(subtype),
+                zid=int(zid),
+                ids=ids,
+                rr=rr,
+                vv=vv,
+                step_id=int(step_id),
+            )
+
+
+def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) -> None:
+    # Build per-destination record buckets for direct routing.
+    buckets: dict[int, list[_WireRecord]] = {}
+
+    if ctx.req_reply_outbox:
+        for dest_rank, recs in list(ctx.req_reply_outbox.items()):
+            if recs:
+                buckets.setdefault(int(dest_rank), []).extend(recs)
+        ctx.req_reply_outbox.clear()
+    if ctx.holder_reply_outbox:
+        for dest_rank, recs in list(ctx.holder_reply_outbox.items()):
+            if recs:
+                buckets.setdefault(int(dest_rank), []).extend(recs)
+        ctx.holder_reply_outbox.clear()
+
+    def add_record(dest_rank: int, rec: _WireRecord) -> None:
+        buckets.setdefault(int(dest_rank), []).append(rec)
+
+    batch = ctx.autom.pop_send_batch(batch_size=ctx.batch_size)
+    while batch:
+        for zid in batch:
+            z = ctx.zones[int(zid)]
+            if z.ztype != ZoneType.S:
+                continue
+            z_state_before = z.ztype
+
+            deps = ctx.deps_zone_ids_fn(int(zid))
+            for dep_zid in deps:
+                try:
+                    overlap_ids = ctx.overlap_set_for_send_fn(
+                        int(zid),
+                        int(dep_zid),
+                        float(rc),
+                        int(step),
+                    )
+                except (KeyError, IndexError, ValueError):
+                    overlap_ids = set()
+                ov_ids = (
+                    np.array(list(overlap_ids), dtype=np.int32)
+                    if overlap_ids
+                    else z.atom_ids.astype(np.int32)
+                )
+                if str(ctx.deps_provider_mode) == "static_3d":
+                    g = ctx.geom_aabb_fn(int(dep_zid))
+                    halo_ids = halo_filter_by_receiver_aabb(
+                        ctx.r,
+                        ov_ids,
+                        g.lo,
+                        g.hi,
+                        ctx.cutoff,
+                        ctx.box,
+                    )
+                else:
+                    halo_ids = halo_filter_by_receiver_p(
+                        ctx.r,
+                        ov_ids,
+                        ctx.zones[int(dep_zid)].z0,
+                        ctx.zones[int(dep_zid)].z1,
+                        ctx.cutoff,
+                        ctx.box,
+                    )
+                if halo_ids.size:
+                    dest = ctx.holder_map[int(dep_zid)]
+                    if dest < 0:
+                        dest = ctx.next_rank
+                    add_record(
+                        int(dest),
+                        (REC_DELTA, DELTA_HALO, int(dep_zid), halo_ids, int(z.step_id)),
+                    )
+                    ctx.autom.diag["halo_sent"] = ctx.autom.diag.get("halo_sent", 0) + int(
+                        halo_ids.size
+                    )
+                    ctx.trace_event_fn(
+                        zid=int(zid),
+                        step_id=int(z.step_id),
+                        event="SEND_DELTA_HALO",
+                        state_before=z_state_before,
+                        state_after=z_state_before,
+                        halo_ids_count=int(halo_ids.size),
+                        migration_count=0,
+                        lag=ctx.lag_value_fn(int(zid)),
+                    )
+
+            if ctx.static_rr:
+                z.ztype = ZoneType.D if z.atom_ids.size else ZoneType.F
+                ctx.trace_event_fn(
+                    zid=int(zid),
+                    step_id=int(z.step_id),
+                    event="SEND_ZONE",
+                    state_before=z_state_before,
+                    state_after=z.ztype,
+                    halo_ids_count=0,
+                    migration_count=0,
+                    lag=ctx.lag_value_fn(int(zid)),
+                )
+            else:
+                next_zid = (int(zid) + 1) % ctx.zones_total
+                overlap_next = ctx.overlap_set_for_send_fn(int(zid), int(next_zid), float(rc), int(step))
+                if overlap_next:
+                    mask_send = np.array([int(a) not in overlap_next for a in z.atom_ids], dtype=bool)
+                    send_ids = z.atom_ids[mask_send].astype(np.int32)
+                    keep_ids = z.atom_ids[~mask_send].astype(np.int32)
+                else:
+                    send_ids = z.atom_ids.astype(np.int32)
+                    keep_ids = np.empty((0,), np.int32)
+
+                if ctx.debug_invariants and overlap_next:
+                    if any(int(a) in overlap_next for a in send_ids.tolist()):
+                        ctx.autom.diag["viol_send_overlap"] += 1
+
+                add_record(int(ctx.next_rank), (REC_ZONE, 0, int(zid), send_ids, int(z.step_id)))
+                ctx.set_holder_fn(int(zid), int(ctx.next_rank))
+
+                z.atom_ids = keep_ids
+                z.table = None
+                z.ztype = ZoneType.D if keep_ids.size else ZoneType.F
+                ctx.trace_event_fn(
+                    zid=int(zid),
+                    step_id=int(z.step_id),
+                    event="SEND_ZONE",
+                    state_before=z_state_before,
+                    state_after=z.ztype,
+                    halo_ids_count=0,
+                    migration_count=int(send_ids.size),
+                    lag=ctx.lag_value_fn(int(zid)),
+                )
+
+        batch = ctx.autom.pop_send_batch(batch_size=ctx.batch_size)
+
+    for dest_zid, sid, ids in ctx.autom.iter_outbox_records():
+        if ids.size:
+            dest = ctx.holder_map[int(dest_zid)]
+            if dest < 0:
+                dest = ctx.next_rank
+            add_record(int(dest), (REC_DELTA, DELTA_MIGRATION, int(dest_zid), ids, int(sid)))
+            ctx.trace_event_fn(
+                zid=int(dest_zid),
+                step_id=int(sid),
+                event="SEND_DELTA_MIGRATION",
+                state_before=(ctx.zones[int(dest_zid)].ztype if 0 <= int(dest_zid) < ctx.zones_total else None),
+                state_after=(ctx.zones[int(dest_zid)].ztype if 0 <= int(dest_zid) < ctx.zones_total else None),
+                halo_ids_count=0,
+                migration_count=int(ids.size),
+                lag=ctx.lag_value_fn(int(dest_zid)) if 0 <= int(dest_zid) < ctx.zones_total else 0,
+            )
+    ctx.autom.clear_outbox()
+
+    send_reqs = []
+    send_keepalive = []
+    for dest_rank, recs in buckets.items():
+        if not recs:
+            continue
+        payload = pack_records(recs, ctx.r, ctx.v)
+        if ctx.use_async_send:
+            reqs, refs = post_send_payload(ctx.comm, int(dest_rank), tag=tag_base, payload=payload)
+            send_reqs.extend(reqs)
+            send_keepalive.extend(refs)
+            ctx.autom.diag["async_send_msgs"] = ctx.autom.diag.get("async_send_msgs", 0) + 1
+            ctx.autom.diag["async_send_bytes"] = ctx.autom.diag.get("async_send_bytes", 0) + int(
+                len(payload)
+            )
+        else:
+            send_payload(ctx.comm, int(dest_rank), tag=tag_base, payload=payload)
+    if send_reqs:
+        MPI.Request.Waitall(send_reqs)
+        send_keepalive.clear()
+
+
 def _run_td_full_mpi_1d_legacy(
     r: np.ndarray,
     v: np.ndarray,
@@ -646,53 +1169,54 @@ def _run_td_full_mpi_1d_legacy(
     dt: float,
     cutoff: float,
     n_steps: int,
-    thermo_every: int,
-    cell_size: float,
-    zones_total: int,
-    zone_cells_w: int,
-    zone_cells_s: int,
-    zone_cells_pattern,
-    traversal: str,
-    fast_sync: bool,
-    strict_fast_sync: bool,
-    startup_mode: str,
-    warmup_steps: int,
-    warmup_compute: bool,
-    buffer_k: float,
-    use_verlet: bool,
-    verlet_k_steps: int,
-    skin_from_buffer: bool,
-    formal_core: bool = True,
-    batch_size: int = 4,
-    overlap_mode: str = "table_support",
-    debug_invariants: bool = False,
-    strict_min_zone_width: bool = False,
-    enable_step_id: bool = True,
-    max_step_lag: int = 1,
-    table_max_age: int = 1,
-    max_pending_delta_atoms: int = 200000,
-    require_local_deps: bool = True,
-    require_table_deps: bool = True,
-    require_owner_deps: bool = False,
-    require_owner_ver: bool = True,
-    enable_req_holder: bool = True,
-    holder_gossip: bool = True,
-    deps_provider_mode: str = "dynamic",
-    zones_nx: int = 1,
-    zones_ny: int = 1,
-    zones_nz: int = 1,
-    owner_buffer: float = 0.0,
-    cuda_aware_mpi: bool = False,
-    comm_overlap_isend: bool = False,
-    atom_types: np.ndarray | None = None,
-    ensemble_kind: str = "nve",
-    thermostat: object | None = None,
-    barostat: object | None = None,
-    device: str = "cpu",
+    *,
+    config: TDFullMPIRunConfig,
     output_spec: OutputSpec | None = None,
-    trace_enabled: bool = False,
-    trace_path: str = "td_trace.csv",
 ):
+    thermo_every = config.thermo_every
+    cell_size = config.cell_size
+    zones_total = config.zones_total
+    zone_cells_w = config.zone_cells_w
+    zone_cells_s = config.zone_cells_s
+    zone_cells_pattern = config.zone_cells_pattern
+    traversal = config.traversal
+    fast_sync = config.fast_sync
+    strict_fast_sync = config.strict_fast_sync
+    startup_mode = config.startup_mode
+    warmup_steps = config.warmup_steps
+    warmup_compute = config.warmup_compute
+    buffer_k = config.buffer_k
+    use_verlet = config.use_verlet
+    verlet_k_steps = config.verlet_k_steps
+    skin_from_buffer = config.skin_from_buffer
+    formal_core = config.formal_core
+    batch_size = config.batch_size
+    overlap_mode = config.overlap_mode
+    debug_invariants = config.debug_invariants
+    strict_min_zone_width = config.strict_min_zone_width
+    enable_step_id = config.enable_step_id
+    max_step_lag = config.max_step_lag
+    table_max_age = config.table_max_age
+    max_pending_delta_atoms = config.max_pending_delta_atoms
+    require_local_deps = config.require_local_deps
+    require_table_deps = config.require_table_deps
+    require_owner_deps = config.require_owner_deps
+    require_owner_ver = config.require_owner_ver
+    deps_provider_mode = config.deps_provider_mode
+    zones_nx = config.zones_nx
+    zones_ny = config.zones_ny
+    zones_nz = config.zones_nz
+    owner_buffer = config.owner_buffer
+    cuda_aware_mpi = config.cuda_aware_mpi
+    comm_overlap_isend = config.comm_overlap_isend
+    atom_types = config.atom_types
+    ensemble_kind = config.ensemble_kind
+    thermostat = config.thermostat
+    barostat = config.barostat
+    device = config.device
+    trace_enabled = config.trace_enabled
+    trace_path = config.trace_path
+
     runtime = _init_td_full_mpi_runtime(
         device=str(device),
         ensemble_kind=str(ensemble_kind),
@@ -982,8 +1506,6 @@ def _run_td_full_mpi_1d_legacy(
         {}
     )  # dest_rank -> holder gossip replies
 
-    diag = autom.diag
-
     def _set_holder(zid: int, rk: int):
         if static_rr:
             return
@@ -1082,323 +1604,29 @@ def _run_td_full_mpi_1d_legacy(
         bmean = total_bsum / max(1, total_bcount)
         return r_all, v_all, bmean
 
-    pending_deltas: dict[tuple[int, int, int], list[np.ndarray]] = (
-        {}
-    )  # (zid, step_id, subtype) -> list of ids arrays
-    pending_atoms: int = 0
-
-    def _pending_size() -> int:
-        return pending_atoms
+    pending_deltas: dict[tuple[int, int, int], list[np.ndarray]] = {}
 
     def _validate_halo_geometry(zid: int, halo_ids: np.ndarray):
         if halo_ids.size == 0:
             return
-        z = zones[zid]
+        z = zones[int(zid)]
         z0p = z.z0 - cutoff
         z1p = z.z1 + cutoff
         mask = _within_interval_pbc(r[halo_ids, 2], z0p, z1p, box)
         bad = int((~mask).sum())
         if bad > 0:
-            autom.diag['halo_geo_viol'] = autom.diag.get('halo_geo_viol', 0) + bad
-        # optional support-invariant: if table exists, halo should lie in support(table(zone))
-        if getattr(z, 'table', None) is not None and z.table is not None:
+            autom.diag["halo_geo_viol"] = autom.diag.get("halo_geo_viol", 0) + bad
+        if getattr(z, "table", None) is not None and z.table is not None:
             supp = set(map(int, z.table.support_ids().tolist()))
-            viol = sum(1 for a in halo_ids.tolist() if int(a) not in supp)
+            viol = sum(1 for atom_id in halo_ids.tolist() if int(atom_id) not in supp)
             if viol:
-                autom.diag['halo_support_viol'] = autom.diag.get('halo_support_viol', 0) + int(viol)
-
-    def _cleanup_pending():
-        """Bound pending delta buffer: drop too-old and overflow."""
-        nonlocal pending_atoms
-        to_drop = []
-        for (zid, sid, st), parts in pending_deltas.items():
-            z = zones[zid]
-            if z.ztype != ZoneType.F and (int(z.step_id) - int(sid)) > max_step_lag:
-                to_drop.append((zid, sid, st))
-        for key in to_drop:
-            parts = pending_deltas.pop(key, [])
-            dropped = int(sum(p.size for p in parts))
-            pending_atoms -= dropped
-            autom.diag['delta_dropped'] = autom.diag.get('delta_dropped', 0) + dropped
-        if max_pending_delta_atoms <= 0:
-            return
-        while pending_atoms > max_pending_delta_atoms and pending_deltas:
-            oldest = min(pending_deltas.keys(), key=lambda k: k[1])
-            parts = pending_deltas.pop(oldest, [])
-            dropped = int(sum(p.size for p in parts))
-            pending_atoms -= dropped
-            autom.diag['delta_dropped_overflow'] = (
-                autom.diag.get('delta_dropped_overflow', 0) + dropped
-            )
-            autom.diag['delta_dropped'] = autom.diag.get('delta_dropped', 0) + dropped
-
-    def _apply_pending_if_ready(zid: int):
-        nonlocal pending_atoms
-        z = zones[zid]
-        keys = [k for k in pending_deltas.keys() if k[0] == zid and k[1] == int(z.step_id)]
-        if not keys:
-            return
-        for k in keys:
-            _, _, st = k
-            parts = pending_deltas.pop(k)
-            if not parts:
-                continue
-            add = (
-                np.concatenate(parts).astype(np.int32)
-                if len(parts) > 1
-                else parts[0].astype(np.int32)
-            )
-            pending_atoms -= int(add.size)
-            if add.size == 0:
-                continue
-            if int(st) == DELTA_HALO:
-                if int(z.halo_step_id) != int(z.step_id):
-                    z.halo_ids = np.unique(add).astype(np.int32)
-                    # v4.3: static_3d halo geometric check vs receiver AABB (I4, direct)
-                    if str(deps_provider_mode) == 'static_3d' and z.halo_ids.size > 0:
-                        gZ = _geom_aabb(int(z.zid))
-                        m = mask_in_aabb_pbc(
-                            r, z.halo_ids.astype(np.int32), gZ.lo, gZ.hi, float(cutoff), float(box)
-                        )
-                        if not bool(m.all()):
-                            diag['hG3'] = diag.get('hG3', 0) + int((~m).sum())
-                    z.halo_step_id = int(z.step_id)
-                else:
-                    z.halo_ids = np.unique(np.concatenate([z.halo_ids, add]).astype(np.int32))
-                    # v4.3: static_3d halo geometric check vs receiver AABB (I4, direct)
-                    if str(deps_provider_mode) == 'static_3d' and z.halo_ids.size > 0:
-                        gZ = _geom_aabb(int(z.zid))
-                        m = mask_in_aabb_pbc(
-                            r, z.halo_ids.astype(np.int32), gZ.lo, gZ.hi, float(cutoff), float(box)
-                        )
-                        if not bool(m.all()):
-                            diag['hG3'] = diag.get('hG3', 0) + int((~m).sum())
-                _validate_halo_geometry(zid, z.halo_ids)
-                autom.diag["halo_applied"] = autom.diag.get("halo_applied", 0) + int(add.size)
-            else:
-                z.atom_ids = (
-                    add
-                    if z.atom_ids.size == 0
-                    else np.concatenate([z.atom_ids, add]).astype(np.int32)
-                )
-                if z.ztype == ZoneType.F:
-                    z.ztype = ZoneType.D
-                autom.diag["delta_applied"] = autom.diag.get("delta_applied", 0) + int(add.size)
-
-    def _handle_record(
-        src_rank: int,
-        rectype: int,
-        subtype: int,
-        zid: int,
-        ids: np.ndarray,
-        rr: np.ndarray,
-        vv: np.ndarray,
-        step_id: int,
-    ):
-        nonlocal pending_atoms
-        state_before = zones[zid].ztype if 0 <= int(zid) < len(zones) else None
-        if ids.size:
-            r[ids] = rr
-            v[ids] = vv
-
-        if rectype == REC_HOLDER:
-            # holder gossip update: zid is held by src_rank with version=step_id
-            ver = int(step_id)
-            if ver > int(holder_ver[int(zid)]):
-                holder_map[int(zid)] = int(src_rank)
-                holder_ver[int(zid)] = ver
-            return
-
-        if rectype == REC_REQ:
-            # Request from src_rank.
-            # subtype:
-            #   REQ_HALO   (0): request HALO for dependency zid
-            #   REQ_HOLDER (1): request holder-map info for dependency zid (respond with REC_HOLDER)
-            autom.diag["req_rcv"] = autom.diag.get("req_rcv", 0) + 1
-            dep_zid = int(zid)
-
-            if int(subtype) == REQ_HOLDER:
-                # Respond with current holder knowledge for dep_zid.
-                ver = int(holder_ver[dep_zid]) if 0 <= dep_zid < zones_total else -1
-                rec = (REC_HOLDER, 0, dep_zid, np.empty((0,), np.int32), ver)
-                holder_reply_outbox.setdefault(int(src_rank), []).append(rec)
-                autom.diag["req_holder_reply"] = autom.diag.get("req_holder_reply", 0) + 1
-                return
-
-            # REQ_HALO
-            if ids.size >= 2:
-                req_zid = int(ids[0])
-                _req_step = int(ids[1])  # noqa: F841 – reserved for future lag check
-            else:
-                req_zid = -1
-                _req_step = -1  # noqa: F841
-
-            if (
-                0 <= dep_zid < zones_total
-                and zones[dep_zid].ztype != ZoneType.F
-                and zones[dep_zid].atom_ids.size
-            ):
-                if 0 <= req_zid < zones_total:
-                    if str(deps_provider_mode) == 'static_3d':
-                        g = _geom_aabb(int(req_zid))
-                        halo_ids = halo_filter_by_receiver_aabb(
-                            r, zones[dep_zid].atom_ids.astype(np.int32), g.lo, g.hi, cutoff, box
-                        )
-                    else:
-                        halo_ids = halo_filter_by_receiver_p(
-                            r,
-                            zones[dep_zid].atom_ids.astype(np.int32),
-                            zones[req_zid].z0,
-                            zones[req_zid].z1,
-                            cutoff,
-                            box,
-                        )
-                else:
-                    halo_ids = zones[dep_zid].atom_ids.astype(np.int32)
-                if halo_ids.size:
-                    rec = (
-                        REC_DELTA,
-                        DELTA_HALO,
-                        dep_zid,
-                        halo_ids.astype(np.int32),
-                        int(zones[dep_zid].step_id),
-                    )
-                    req_reply_outbox.setdefault(int(src_rank), []).append(rec)
-                    autom.diag["req_reply_sent"] = autom.diag.get("req_reply_sent", 0) + 1
-            return
-
-        if rectype == REC_ZONE:
-            autom.on_recv(zid, ids, step_id)
-            _trace_event(
-                zid=zid,
-                step_id=int(step_id),
-                event="RECV_ZONE",
-                state_before=state_before,
-                state_after=zones[zid].ztype,
-                halo_ids_count=0,
-                migration_count=int(ids.size),
-                lag=_lag_value(zid),
-            )
-            _cleanup_pending()
-            _apply_pending_if_ready(zid)
-            return
-
-        # DELTA
-        sid = int(step_id)
-        z = zones[zid]
-        if int(subtype) == DELTA_HALO and z.ztype == ZoneType.F:
-            # create shadow dependency zone carrying only HALO
-            z.ztype = ZoneType.P
-            z.step_id = sid
-            z.halo_step_id = sid
-            z.halo_ids = np.empty((0,), np.int32)
-            # v4.3: static_3d halo geometric check vs receiver AABB (I4, direct)
-            if str(deps_provider_mode) == 'static_3d' and z.halo_ids.size > 0:
-                gZ = _geom_aabb(int(z.zid))
-                m = mask_in_aabb_pbc(
-                    r, z.halo_ids.astype(np.int32), gZ.lo, gZ.hi, float(cutoff), float(box)
-                )
-                if not bool(m.all()):
-                    diag['hG3'] = diag.get('hG3', 0) + int((~m).sum())
-            autom.diag['shadow_promoted'] = autom.diag.get('shadow_promoted', 0) + 1
-
-        if z.ztype != ZoneType.F and int(z.step_id) == sid:
-            if ids.size:
-                if int(subtype) == DELTA_HALO:
-                    if int(z.halo_step_id) != int(z.step_id):
-                        z.halo_ids = np.unique(ids).astype(np.int32)
-                        # v4.3: static_3d halo geometric check vs receiver AABB (I4, direct)
-                        if str(deps_provider_mode) == 'static_3d' and z.halo_ids.size > 0:
-                            gZ = _geom_aabb(int(z.zid))
-                            m = mask_in_aabb_pbc(
-                                r,
-                                z.halo_ids.astype(np.int32),
-                                gZ.lo,
-                                gZ.hi,
-                                float(cutoff),
-                                float(box),
-                            )
-                            if not bool(m.all()):
-                                diag['hG3'] = diag.get('hG3', 0) + int((~m).sum())
-                        z.halo_step_id = int(z.step_id)
-                    else:
-                        z.halo_ids = np.unique(np.concatenate([z.halo_ids, ids]).astype(np.int32))
-                        # v4.3: static_3d halo geometric check vs receiver AABB (I4, direct)
-                        if str(deps_provider_mode) == 'static_3d' and z.halo_ids.size > 0:
-                            gZ = _geom_aabb(int(z.zid))
-                            m = mask_in_aabb_pbc(
-                                r,
-                                z.halo_ids.astype(np.int32),
-                                gZ.lo,
-                                gZ.hi,
-                                float(cutoff),
-                                float(box),
-                            )
-                            if not bool(m.all()):
-                                diag['hG3'] = diag.get('hG3', 0) + int((~m).sum())
-                    _validate_halo_geometry(zid, z.halo_ids)
-                    autom.diag["halo_applied"] = autom.diag.get("halo_applied", 0) + int(ids.size)
-                    _trace_event(
-                        zid=zid,
-                        step_id=int(sid),
-                        event="RECV_DELTA_HALO",
-                        state_before=state_before,
-                        state_after=z.ztype,
-                        halo_ids_count=int(ids.size),
-                        migration_count=0,
-                        lag=_lag_value(zid),
-                    )
-                else:
-                    z.atom_ids = (
-                        ids
-                        if z.atom_ids.size == 0
-                        else np.concatenate([z.atom_ids, ids]).astype(np.int32)
-                    )
-                    autom.diag["delta_applied"] = autom.diag.get("delta_applied", 0) + int(ids.size)
-                    _trace_event(
-                        zid=zid,
-                        step_id=int(sid),
-                        event="RECV_DELTA_MIGRATION",
-                        state_before=state_before,
-                        state_after=z.ztype,
-                        halo_ids_count=0,
-                        migration_count=int(ids.size),
-                        lag=_lag_value(zid),
-                    )
-            return
-
-        if z.ztype != ZoneType.F and (int(z.step_id) - sid) > max_step_lag:
-            if int(subtype) == DELTA_HALO:
-                autom.diag["halo_dropped"] = autom.diag.get("halo_dropped", 0) + int(ids.size)
-            autom.diag["delta_dropped"] = autom.diag.get("delta_dropped", 0) + int(ids.size)
-            return
-
-        pending_deltas.setdefault((zid, sid, int(subtype)), []).append(ids.astype(np.int32))
-        pending_atoms += int(ids.size)
-        _cleanup_pending()
-        if int(subtype) == DELTA_HALO:
-            autom.diag["halo_deferred"] = autom.diag.get("halo_deferred", 0) + int(ids.size)
-        else:
-            autom.diag["delta_deferred"] = autom.diag.get("delta_deferred", 0) + int(ids.size)
-
-    def recv_phase(tag_base: int):
-        # Forward direction: from prev_rank on tag_base
-        while comm.Iprobe(source=prev_rank, tag=tag_base):
-            payload = recv_payload(comm, prev_rank, tag=tag_base)
-            for rectype, subtype, zid, ids, rr, vv, step_id in unpack_records(payload):
-                _handle_record(prev_rank, rectype, subtype, zid, ids, rr, vv, step_id)
-
-        # Backward direction halos: from next_rank on tag_base+2
-        while comm.Iprobe(source=next_rank, tag=tag_base + 2):
-            payload = recv_payload(comm, next_rank, tag=tag_base + 2)
-            for rectype, subtype, zid, ids, rr, vv, step_id in unpack_records(payload):
-                _handle_record(next_rank, rectype, subtype, zid, ids, rr, vv, step_id)
+                autom.diag["halo_support_viol"] = autom.diag.get("halo_support_viol", 0) + int(viol)
 
     def overlap_set_for_send(zid: int, next_zid: int, rc: float, step: int) -> set:
         if zones[zid].atom_ids.size == 0:
             return set()
         if overlap_mode == "geometric_rc":
-            if str(deps_provider_mode) == 'static_3d':
+            if str(deps_provider_mode) == "static_3d":
                 # 3D: compute overlap via receiver AABB+cutoff (support region)
                 gR = _geom_aabb(int(next_zid))
                 ov = overlap_filter_by_receiver_aabb(
@@ -1430,164 +1658,44 @@ def _run_td_full_mpi_1d_legacy(
             map(int, np.intersect1d(zones[zid].atom_ids, support, assume_unique=False).tolist())
         )
 
-    def send_phase(tag_base: int, rc: float, step: int):
-        # Build per-destination record buckets for direct routing
-        buckets: dict[int, list[tuple[int, int, int, np.ndarray, int]]] = {}
+    comm_ctx = _TDMPICommContext(
+        comm=comm,
+        prev_rank=prev_rank,
+        next_rank=next_rank,
+        use_async_send=bool(use_async_send),
+        batch_size=int(batch_size),
+        box=float(box),
+        cutoff=float(cutoff),
+        deps_provider_mode=str(deps_provider_mode),
+        static_rr=bool(static_rr),
+        debug_invariants=bool(debug_invariants),
+        max_step_lag=int(max_step_lag),
+        max_pending_delta_atoms=int(max_pending_delta_atoms),
+        r=r,
+        v=v,
+        zones=zones,
+        zones_total=int(zones_total),
+        autom=autom,
+        holder_map=holder_map,
+        holder_ver=holder_ver,
+        req_reply_outbox=req_reply_outbox,
+        holder_reply_outbox=holder_reply_outbox,
+        pending_deltas=pending_deltas,
+        pending_atoms=0,
+        geom_aabb_fn=_geom_aabb,
+        deps_zone_ids_fn=deps_zone_ids,
+        overlap_set_for_send_fn=overlap_set_for_send,
+        trace_event_fn=_trace_event,
+        lag_value_fn=_lag_value,
+        set_holder_fn=_set_holder,
+        validate_halo_geometry_fn=_validate_halo_geometry,
+    )
 
-        # flush pending replies to REQ
-        if req_reply_outbox:
-            for dr, recs in list(req_reply_outbox.items()):
-                if recs:
-                    buckets.setdefault(int(dr), []).extend(recs)
-            req_reply_outbox.clear()
-        if holder_reply_outbox:
-            for dr, recs in list(holder_reply_outbox.items()):
-                if recs:
-                    buckets.setdefault(int(dr), []).extend(recs)
-            holder_reply_outbox.clear()
+    def recv_phase(tag_base: int) -> None:
+        _recv_phase(comm_ctx, tag_base=int(tag_base))
 
-        def add_record(dest_rank: int, rec):
-            buckets.setdefault(int(dest_rank), []).append(rec)
-
-        batch = autom.pop_send_batch(batch_size=batch_size)
-        while batch:
-            for zid in batch:
-                z = zones[zid]
-                if z.ztype != ZoneType.S:
-                    continue
-                z_state_before = z.ztype
-
-                # deps-based halo: send to current holders of deps zones (direct)
-                deps = deps_zone_ids(zid)
-                for dep_zid in deps:
-                    try:
-                        ov = overlap_set_for_send(zid, dep_zid, rc=rc, step=step)
-                    except (KeyError, IndexError, ValueError):
-                        ov = set()
-                    ov_ids = (
-                        np.array(list(ov), dtype=np.int32) if ov else z.atom_ids.astype(np.int32)
-                    )
-                    if str(deps_provider_mode) == 'static_3d':
-                        g = _geom_aabb(int(dep_zid))
-                        halo_ids = halo_filter_by_receiver_aabb(r, ov_ids, g.lo, g.hi, cutoff, box)
-                    else:
-                        halo_ids = halo_filter_by_receiver_p(
-                            r, ov_ids, zones[dep_zid].z0, zones[dep_zid].z1, cutoff, box
-                        )
-                    if halo_ids.size:
-                        dest = holder_map[int(dep_zid)]
-                        if dest < 0:
-                            dest = next_rank  # fallback
-                        add_record(
-                            dest, (REC_DELTA, DELTA_HALO, int(dep_zid), halo_ids, int(z.step_id))
-                        )
-                        autom.diag['halo_sent'] = autom.diag.get('halo_sent', 0) + int(
-                            halo_ids.size
-                        )
-                        _trace_event(
-                            zid=zid,
-                            step_id=int(z.step_id),
-                            event="SEND_DELTA_HALO",
-                            state_before=z_state_before,
-                            state_after=z_state_before,
-                            halo_ids_count=int(halo_ids.size),
-                            migration_count=0,
-                            lag=_lag_value(zid),
-                        )
-
-                if static_rr:
-                    # Static ownership: keep zone local, only halos/deltas are routed.
-                    z.ztype = ZoneType.D if z.atom_ids.size else ZoneType.F
-                    _trace_event(
-                        zid=zid,
-                        step_id=int(z.step_id),
-                        event="SEND_ZONE",
-                        state_before=z_state_before,
-                        state_after=z.ztype,
-                        halo_ids_count=0,
-                        migration_count=0,
-                        lag=_lag_value(zid),
-                    )
-                else:
-                    # Ownership pipeline: computed zone state goes to next_rank (as before)
-                    next_zid = (zid + 1) % zones_total
-                    overlap_next = overlap_set_for_send(zid, next_zid, rc=rc, step=step)
-                    if overlap_next:
-                        mask_send = np.array(
-                            [int(a) not in overlap_next for a in z.atom_ids], dtype=bool
-                        )
-                        send_ids = z.atom_ids[mask_send].astype(np.int32)
-                        keep_ids = z.atom_ids[~mask_send].astype(np.int32)
-                    else:
-                        send_ids = z.atom_ids.astype(np.int32)
-                        keep_ids = np.empty((0,), np.int32)
-
-                    if debug_invariants and overlap_next:
-                        if any(int(a) in overlap_next for a in send_ids.tolist()):
-                            autom.diag["viol_send_overlap"] += 1
-
-                    # Send zone state to next_rank (pipeline)
-                    add_record(next_rank, (REC_ZONE, 0, int(zid), send_ids, int(z.step_id)))
-                    _set_holder(zid, next_rank)
-
-                    # commit local keep
-                    z.atom_ids = keep_ids
-                    z.table = None
-                    z.ztype = ZoneType.D if keep_ids.size else ZoneType.F
-                    _trace_event(
-                        zid=zid,
-                        step_id=int(z.step_id),
-                        event="SEND_ZONE",
-                        state_before=z_state_before,
-                        state_after=z.ztype,
-                        halo_ids_count=0,
-                        migration_count=int(send_ids.size),
-                        lag=_lag_value(zid),
-                    )
-
-            batch = autom.pop_send_batch(batch_size=batch_size)
-
-        # outbox (migration) deltas: route to current holder of destination zone (direct)
-        for dest_zid, sid, ids in autom.iter_outbox_records():
-            if ids.size:
-                dest = holder_map[int(dest_zid)]
-                if dest < 0:
-                    dest = next_rank
-                add_record(dest, (REC_DELTA, DELTA_MIGRATION, int(dest_zid), ids, int(sid)))
-                _trace_event(
-                    zid=dest_zid,
-                    step_id=int(sid),
-                    event="SEND_DELTA_MIGRATION",
-                    state_before=(
-                        zones[dest_zid].ztype if 0 <= int(dest_zid) < zones_total else None
-                    ),
-                    state_after=zones[dest_zid].ztype if 0 <= int(dest_zid) < zones_total else None,
-                    halo_ids_count=0,
-                    migration_count=int(ids.size),
-                    lag=_lag_value(dest_zid) if 0 <= int(dest_zid) < zones_total else 0,
-                )
-        autom.clear_outbox()
-
-        # flush all buckets
-        send_reqs = []
-        send_keepalive = []
-        for dest_rank, recs in buckets.items():
-            if not recs:
-                continue
-            payload = pack_records(recs, r, v)
-            if use_async_send:
-                reqs, refs = post_send_payload(comm, int(dest_rank), tag=tag_base, payload=payload)
-                send_reqs.extend(reqs)
-                send_keepalive.extend(refs)
-                autom.diag["async_send_msgs"] = autom.diag.get("async_send_msgs", 0) + 1
-                autom.diag["async_send_bytes"] = autom.diag.get("async_send_bytes", 0) + int(
-                    len(payload)
-                )
-            else:
-                send_payload(comm, int(dest_rank), tag=tag_base, payload=payload)
-        if send_reqs:
-            MPI.Request.Waitall(send_reqs)
-            send_keepalive.clear()
+    def send_phase(tag_base: int, rc: float, step: int) -> None:
+        _send_phase(comm_ctx, tag_base=int(tag_base), rc=float(rc), step=int(step))
 
     if output_enabled:
         update_buffers(step=0)
@@ -1704,50 +1812,6 @@ def run_td_full_mpi_1d(
         dt=dt,
         cutoff=cutoff,
         n_steps=n_steps,
-        thermo_every=cfg.thermo_every,
-        cell_size=cfg.cell_size,
-        zones_total=cfg.zones_total,
-        zone_cells_w=cfg.zone_cells_w,
-        zone_cells_s=cfg.zone_cells_s,
-        zone_cells_pattern=cfg.zone_cells_pattern,
-        traversal=cfg.traversal,
-        fast_sync=cfg.fast_sync,
-        strict_fast_sync=cfg.strict_fast_sync,
-        startup_mode=cfg.startup_mode,
-        warmup_steps=cfg.warmup_steps,
-        warmup_compute=cfg.warmup_compute,
-        buffer_k=cfg.buffer_k,
-        use_verlet=cfg.use_verlet,
-        verlet_k_steps=cfg.verlet_k_steps,
-        skin_from_buffer=cfg.skin_from_buffer,
-        formal_core=cfg.formal_core,
-        batch_size=cfg.batch_size,
-        overlap_mode=cfg.overlap_mode,
-        debug_invariants=cfg.debug_invariants,
-        strict_min_zone_width=cfg.strict_min_zone_width,
-        enable_step_id=cfg.enable_step_id,
-        max_step_lag=cfg.max_step_lag,
-        table_max_age=cfg.table_max_age,
-        max_pending_delta_atoms=cfg.max_pending_delta_atoms,
-        require_local_deps=cfg.require_local_deps,
-        require_table_deps=cfg.require_table_deps,
-        require_owner_deps=cfg.require_owner_deps,
-        require_owner_ver=cfg.require_owner_ver,
-        enable_req_holder=cfg.enable_req_holder,
-        holder_gossip=cfg.holder_gossip,
-        deps_provider_mode=cfg.deps_provider_mode,
-        zones_nx=cfg.zones_nx,
-        zones_ny=cfg.zones_ny,
-        zones_nz=cfg.zones_nz,
-        owner_buffer=cfg.owner_buffer,
-        cuda_aware_mpi=cfg.cuda_aware_mpi,
-        comm_overlap_isend=cfg.comm_overlap_isend,
-        atom_types=cfg.atom_types,
-        ensemble_kind=cfg.ensemble_kind,
-        thermostat=cfg.thermostat,
-        barostat=cfg.barostat,
-        device=cfg.device,
+        config=cfg,
         output_spec=output_spec,
-        trace_enabled=cfg.trace_enabled,
-        trace_path=cfg.trace_path,
     )
