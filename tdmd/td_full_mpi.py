@@ -1178,6 +1178,486 @@ def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) 
         send_keepalive.clear()
 
 
+@dataclass
+class _TDMPISimState:
+    """Mutable simulation state shared across helper functions."""
+
+    box: float
+    skin_global: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Helpers extracted from _run_td_full_mpi_1d_legacy closures
+# ---------------------------------------------------------------------------
+
+
+def _trace_event_impl(
+    trace: TDTraceLogger | None,
+    autom: TDAutomaton1W,
+    *,
+    zid: int,
+    step_id: int,
+    event: str,
+    state_before=None,
+    state_after=None,
+    halo_ids_count: int = 0,
+    migration_count: int = 0,
+    lag: int = 0,
+) -> None:
+    if trace is None:
+        return
+    trace.log(
+        step_id=int(step_id),
+        zone_id=int(zid),
+        event=str(event),
+        state_before=state_before,
+        state_after=state_after,
+        halo_ids_count=int(halo_ids_count),
+        migration_count=int(migration_count),
+        lag=int(lag),
+        invariant_flags=format_invariant_flags(autom.diag),
+    )
+
+
+def _lag_value_impl(
+    autom: TDAutomaton1W,
+    zones: list[ZoneRuntime],
+    zid: int,
+) -> int:
+    try:
+        deps, _, _ = autom._deps(int(zid))
+    except (KeyError, IndexError, ValueError):
+        deps = []
+    if autom.deps_table_func is not None:
+        try:
+            deps = list(autom.deps_table_func(int(zid)))
+        except (KeyError, IndexError, ValueError):
+            deps = list(deps)
+    zt = zones[int(zid)].step_id
+    lags = []
+    for did in deps:
+        dz = zones[int(did)]
+        if dz.ztype != ZoneType.F:
+            lags.append(int(zt - dz.step_id))
+    return max(lags) if lags else 0
+
+
+def _start_compute_with_trace_impl(
+    trace: TDTraceLogger | None,
+    autom: TDAutomaton1W,
+    zones: list[ZoneRuntime],
+    *,
+    r: np.ndarray,
+    rc: float,
+    skin_global: float,
+    step: int,
+    verlet_k_steps: int,
+):
+    pre = [z.ztype for z in zones] if trace is not None else None
+    zid = autom.start_compute(
+        r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps
+    )
+    if zid is not None and trace is not None and pre is not None:
+        _trace_event_impl(
+            trace,
+            autom,
+            zid=zid,
+            step_id=int(zones[zid].step_id),
+            event="START_COMPUTE",
+            state_before=pre[zid],
+            state_after=zones[zid].ztype,
+            halo_ids_count=int(zones[zid].halo_ids.size),
+            migration_count=0,
+            lag=_lag_value_impl(autom, zones, zid),
+        )
+        for did in autom._locked_donors.get(zid, []):
+            _trace_event_impl(
+                trace,
+                autom,
+                zid=did,
+                step_id=int(zones[did].step_id),
+                event="LOCK_DONOR",
+                state_before=pre[did],
+                state_after=zones[did].ztype,
+                halo_ids_count=int(zones[did].halo_ids.size),
+                migration_count=0,
+                lag=_lag_value_impl(autom, zones, did),
+            )
+    return zid
+
+
+def _finish_compute_with_trace_impl(
+    trace: TDTraceLogger | None,
+    autom: TDAutomaton1W,
+    zones: list[ZoneRuntime],
+    atom_types,
+    *,
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    dt: float,
+    potential,
+    cutoff: float,
+    rc: float,
+    skin_global: float,
+    step: int,
+    verlet_k_steps: int,
+    enable_step_id: bool = True,
+):
+    pre = [z.ztype for z in zones] if trace is not None else None
+    zid = autom.compute_step_for_work_zone(
+        r=r,
+        v=v,
+        mass=mass,
+        dt=dt,
+        potential=potential,
+        cutoff=cutoff,
+        rc=rc,
+        skin_global=skin_global,
+        step=step,
+        verlet_k_steps=verlet_k_steps,
+        atom_types=atom_types,
+        enable_step_id=enable_step_id,
+    )
+    if zid is not None and trace is not None and pre is not None:
+        _trace_event_impl(
+            trace,
+            autom,
+            zid=zid,
+            step_id=int(zones[zid].step_id),
+            event="FINISH_COMPUTE",
+            state_before=pre[zid],
+            state_after=zones[zid].ztype,
+            halo_ids_count=0,
+            migration_count=int(autom.diag.get("migrations", 0)),
+            lag=_lag_value_impl(autom, zones, zid),
+        )
+        for did, pstate in enumerate(pre):
+            if pstate == ZoneType.P and zones[did].ztype == ZoneType.D:
+                _trace_event_impl(
+                    trace,
+                    autom,
+                    zid=did,
+                    step_id=int(zones[did].step_id),
+                    event="RELEASE_DONOR",
+                    state_before=pstate,
+                    state_after=zones[did].ztype,
+                    halo_ids_count=int(zones[did].halo_ids.size),
+                    migration_count=0,
+                    lag=_lag_value_impl(autom, zones, did),
+                )
+    return zid
+
+
+def _build_deps_provider_3d(
+    deps_mode: str,
+    autom: TDAutomaton1W,
+    *,
+    zones_nx: int,
+    zones_ny: int,
+    zones_nz: int,
+    box: float,
+    cutoff: float,
+    mpi_size: int,
+):
+    if deps_mode != "static_3d":
+        return None
+
+    deps_provider_3d = DepsProvider3DBlock(
+        nx=int(zones_nx),
+        ny=int(zones_ny),
+        nz=int(zones_nz),
+        box=(float(box), float(box), float(box)),
+        cutoff=float(cutoff),
+        mpi_size=int(mpi_size),
+    )
+
+    class _GeomProvider:
+        def __init__(self, base):
+            self.base = base
+
+        def geom(self, zid: int) -> ZoneGeomAABB:
+            lo, hi = self.base.geom(int(zid))
+            return ZoneGeomAABB(np.asarray(lo, dtype=float), np.asarray(hi, dtype=float))
+
+    autom.geom_provider = _GeomProvider(deps_provider_3d)
+    return deps_provider_3d
+
+
+def _geom_aabb_impl(deps_provider_3d, zid: int) -> ZoneGeomAABB:
+    if deps_provider_3d is None:
+        raise RuntimeError("static_3d required for AABB geometry")
+    lo, hi = deps_provider_3d.geom(int(zid))
+    return ZoneGeomAABB(np.asarray(lo, dtype=float), np.asarray(hi, dtype=float))
+
+
+def _deps_zone_ids_impl(
+    deps_provider_3d,
+    zones: list[ZoneRuntime],
+    cutoff: float,
+    sim: _TDMPISimState,
+    zid: int,
+) -> list[int]:
+    if deps_provider_3d is not None:
+        return [int(d) for d in deps_provider_3d.deps_table(int(zid))]
+    z = zones[int(zid)]
+    deps = zones_overlapping_range_pbc(z.z0 - cutoff, z.z1 + cutoff, sim.box, zones)
+    return [int(d) for d in deps if int(d) != int(zid)]
+
+
+def _owner_deps_zone_ids_impl(
+    deps_provider_3d,
+    zones: list[ZoneRuntime],
+    cutoff: float,
+    owner_buffer: float,
+    sim: _TDMPISimState,
+    zid: int,
+) -> list[int]:
+    if deps_provider_3d is not None:
+        return [int(d) for d in deps_provider_3d.deps_owner(int(zid))]
+    z = zones[int(zid)]
+    buf = float(owner_buffer) if owner_buffer and owner_buffer > 0 else float(cutoff)
+    if owner_buffer <= 0:
+        buf = max(buf, float(getattr(z, "buffer", 0.0)))
+    deps = zones_overlapping_range_pbc(z.z0 - buf, z.z1 + buf, sim.box, zones)
+    return [int(d) for d in deps if int(d) != int(zid)]
+
+
+def _init_holder_map(
+    static_rr: bool,
+    zones_total: int,
+    zones: list[ZoneRuntime],
+    comm,
+    rank: int,
+    size: int,
+) -> tuple[list[int], list[int], int]:
+    if static_rr:
+        holder_map = [int(zid) % int(size) for zid in range(zones_total)]
+        holder_ver = [0 for _ in range(zones_total)]
+        return holder_map, holder_ver, 0
+    local_have = [z.zid for z in zones if z.ztype != ZoneType.F]
+    all_have = comm.allgather(local_have)
+    holder_map = [-1 for _ in range(zones_total)]
+    holder_ver = [-1 for _ in range(zones_total)]
+    for rrk, zlist in enumerate(all_have):
+        for zid in zlist:
+            holder_map[int(zid)] = int(rrk)
+            holder_ver[int(zid)] = 0
+    return holder_map, holder_ver, 0
+
+
+def _update_buffers_impl(
+    zones: list[ZoneRuntime],
+    v: np.ndarray,
+    dt: float,
+    buffer_k: float,
+    skin_from_buffer: bool,
+    max_step_lag: int,
+    autom: TDAutomaton1W,
+    sim: _TDMPISimState,
+    step: int,
+) -> None:
+    sim.skin_global = 0.0
+    for z in zones:
+        if z.ztype == ZoneType.F or z.atom_ids.size == 0:
+            z.buffer = 0.0
+            z.skin = 0.0
+            continue
+        b, sk = compute_zone_buffer_skin(
+            v,
+            z.atom_ids,
+            dt,
+            buffer_k,
+            skin_from_buffer=skin_from_buffer,
+            lag_steps=max_step_lag,
+        )
+        z.buffer = b
+        z.skin = sk
+        if max_step_lag > 0:
+            speeds = np.linalg.norm(v[z.atom_ids], axis=1)
+            vmax = float(speeds.max()) if speeds.size else 0.0
+            required = vmax * dt * float(max_step_lag + 1)
+            if b + FLOAT_EQ_ATOL < required:
+                autom.diag["viol_buffer"] = autom.diag.get("viol_buffer", 0) + 1
+        sim.skin_global = max(sim.skin_global, sk)
+
+
+def _scale_zone_geometry_impl(
+    zones: list[ZoneRuntime],
+    autom: TDAutomaton1W,
+    cutoff: float,
+    lam: float,
+    new_box: float,
+) -> None:
+    if abs(float(lam) - 1.0) <= FLOAT_EQ_ATOL:
+        autom.box = float(new_box)
+        autom.zwidth = autom.box / max(1, len(zones))
+        return
+    for z in zones:
+        z.z0 = float(z.z0) * float(lam)
+        z.z1 = float(z.z1) * float(lam)
+    widths = [float(z.z1 - z.z0) for z in zones if z.n_cells > 0 and z.z1 > z.z0]
+    if widths and (min(widths) + GEOM_EPSILON < float(cutoff)):
+        raise ValueError("NPT scaling violated zone width >= cutoff in td_full_mpi layout")
+    autom.box = float(new_box)
+    autom.zwidth = autom.box / max(1, len(zones))
+
+
+def _apply_ensemble_impl(
+    ensemble,
+    zones: list[ZoneRuntime],
+    autom: TDAutomaton1W,
+    sim: _TDMPISimState,
+    *,
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    potential,
+    cutoff: float,
+    atom_types,
+    dt: float,
+    step: int,
+) -> None:
+    new_box, _lam_t, lam_b = apply_ensemble_step(
+        step=int(step),
+        ensemble=ensemble,
+        r=r,
+        v=v,
+        mass=mass,
+        box=float(sim.box),
+        potential=potential,
+        cutoff=cutoff,
+        atom_types=atom_types,
+        dt=dt,
+    )
+    if ensemble.kind == "npt":
+        _scale_zone_geometry_impl(zones, autom, cutoff, lam_b, new_box)
+        sim.box = float(new_box)
+
+
+def _output_due_impl(
+    output_enabled: bool,
+    out_traj_every: int,
+    out_metrics_every: int,
+    step: int,
+):
+    if not output_enabled:
+        return False, False, False
+    due_traj = (out_traj_every > 0) and (step % out_traj_every == 0)
+    due_metrics = (out_metrics_every > 0) and (step % out_metrics_every == 0)
+    return (due_traj or due_metrics), due_traj, due_metrics
+
+
+def _gather_for_output_impl(
+    zones: list[ZoneRuntime],
+    comm,
+    r: np.ndarray,
+    v: np.ndarray,
+    rank: int,
+):
+    owned = [z.atom_ids for z in zones if z.ztype != ZoneType.F and z.atom_ids.size]
+    owned_ids = np.concatenate(owned).astype(np.int32) if owned else np.empty((0,), np.int32)
+    ids_list = comm.gather(owned_ids, root=0)
+    r_list = comm.gather(r[owned_ids] if owned_ids.size else np.empty((0, 3), float), root=0)
+    v_list = comm.gather(v[owned_ids] if owned_ids.size else np.empty((0, 3), float), root=0)
+    bsum = float(sum(z.buffer for z in zones if z.atom_ids.size))
+    bcount = int(sum(1 for z in zones if z.atom_ids.size))
+    bsum_list = comm.gather(bsum, root=0)
+    bcount_list = comm.gather(bcount, root=0)
+    if rank != 0:
+        return None, None, 0.0
+    r_all = np.zeros_like(r)
+    v_all = np.zeros_like(v)
+    if ids_list is not None:
+        for ids, rr, vv in zip(ids_list, r_list, v_list):
+            if ids is None or len(ids) == 0:
+                continue
+            r_all[ids] = rr
+            v_all[ids] = vv
+    total_bsum = float(sum(bsum_list)) if bsum_list is not None else 0.0
+    total_bcount = int(sum(bcount_list)) if bcount_list is not None else 0
+    bmean = total_bsum / max(1, total_bcount)
+    return r_all, v_all, bmean
+
+
+def _validate_halo_geometry_impl(
+    zones: list[ZoneRuntime],
+    r: np.ndarray,
+    cutoff: float,
+    sim: _TDMPISimState,
+    autom: TDAutomaton1W,
+    zid: int,
+    halo_ids: np.ndarray,
+) -> None:
+    if halo_ids.size == 0:
+        return
+    z = zones[int(zid)]
+    z0p = z.z0 - cutoff
+    z1p = z.z1 + cutoff
+    mask = _within_interval_pbc(r[halo_ids, 2], z0p, z1p, sim.box)
+    bad = int((~mask).sum())
+    if bad > 0:
+        autom.diag["halo_geo_viol"] = autom.diag.get("halo_geo_viol", 0) + bad
+    if getattr(z, "table", None) is not None and z.table is not None:
+        supp = set(map(int, z.table.support_ids().tolist()))
+        viol = sum(1 for atom_id in halo_ids.tolist() if int(atom_id) not in supp)
+        if viol:
+            autom.diag["halo_support_viol"] = autom.diag.get("halo_support_viol", 0) + int(viol)
+
+
+def _overlap_set_for_send_impl(
+    zones: list[ZoneRuntime],
+    r: np.ndarray,
+    overlap_mode: str,
+    deps_provider_mode: str,
+    deps_provider_3d,
+    sim: _TDMPISimState,
+    use_verlet: bool,
+    verlet_k_steps: int,
+    autom: TDAutomaton1W,
+    zid: int,
+    next_zid: int,
+    rc: float,
+    step: int,
+) -> set:
+    if zones[zid].atom_ids.size == 0:
+        return set()
+    if overlap_mode == "geometric_rc":
+        if str(deps_provider_mode) == "static_3d":
+            gR = _geom_aabb_impl(deps_provider_3d, int(next_zid))
+            ov = overlap_filter_by_receiver_aabb(
+                r, zones[zid].atom_ids.astype(np.int32), gR, rc, sim.box
+            )
+            return set(map(int, ov.tolist()))
+        ov = halo_filter_by_receiver_p(
+            r,
+            zones[zid].atom_ids.astype(np.int32),
+            zones[next_zid].z0,
+            zones[next_zid].z1,
+            rc,
+            sim.box,
+        )
+        return set(map(int, ov.tolist()))
+
+    autom.ensure_table(
+        next_zid,
+        r=r,
+        rc=rc,
+        skin_global=(sim.skin_global if use_verlet else 0.0),
+        step=step,
+        verlet_k_steps=(verlet_k_steps if use_verlet else 1),
+    )
+    support = autom.table_support(next_zid)
+    if support.size == 0:
+        return set()
+    return set(map(int, np.intersect1d(zones[zid].atom_ids, support, assume_unique=False).tolist()))
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator: _run_td_full_mpi_1d_legacy (thin wiring only)
+# ---------------------------------------------------------------------------
+
+
 def _run_td_full_mpi_1d_legacy(
     r: np.ndarray,
     v: np.ndarray,
@@ -1191,58 +1671,15 @@ def _run_td_full_mpi_1d_legacy(
     config: TDFullMPIRunConfig,
     output_spec: OutputSpec | None = None,
 ):
-    thermo_every = config.thermo_every
-    cell_size = config.cell_size
-    zones_total = config.zones_total
-    zone_cells_w = config.zone_cells_w
-    zone_cells_s = config.zone_cells_s
-    zone_cells_pattern = config.zone_cells_pattern
-    traversal = config.traversal
-    fast_sync = config.fast_sync
-    strict_fast_sync = config.strict_fast_sync
-    startup_mode = config.startup_mode
-    warmup_steps = config.warmup_steps
-    warmup_compute = config.warmup_compute
-    buffer_k = config.buffer_k
-    use_verlet = config.use_verlet
-    verlet_k_steps = config.verlet_k_steps
-    skin_from_buffer = config.skin_from_buffer
-    formal_core = config.formal_core
-    batch_size = config.batch_size
-    overlap_mode = config.overlap_mode
-    debug_invariants = config.debug_invariants
-    strict_min_zone_width = config.strict_min_zone_width
-    enable_step_id = config.enable_step_id
-    max_step_lag = config.max_step_lag
-    table_max_age = config.table_max_age
-    max_pending_delta_atoms = config.max_pending_delta_atoms
-    require_local_deps = config.require_local_deps
-    require_table_deps = config.require_table_deps
-    require_owner_deps = config.require_owner_deps
-    require_owner_ver = config.require_owner_ver
-    deps_provider_mode = config.deps_provider_mode
-    zones_nx = config.zones_nx
-    zones_ny = config.zones_ny
-    zones_nz = config.zones_nz
-    owner_buffer = config.owner_buffer
-    cuda_aware_mpi = config.cuda_aware_mpi
-    comm_overlap_isend = config.comm_overlap_isend
-    atom_types = config.atom_types
-    ensemble_kind = config.ensemble_kind
-    thermostat = config.thermostat
-    barostat = config.barostat
-    device = config.device
-    trace_enabled = config.trace_enabled
-    trace_path = config.trace_path
-
+    # --- MPI / backend / ensemble bootstrap ---
     runtime = _init_td_full_mpi_runtime(
-        device=str(device),
-        ensemble_kind=str(ensemble_kind),
-        thermostat=thermostat,
-        barostat=barostat,
-        cuda_aware_mpi=bool(cuda_aware_mpi),
-        comm_overlap_isend=bool(comm_overlap_isend),
-        batch_size=int(batch_size),
+        device=str(config.device),
+        ensemble_kind=str(config.ensemble_kind),
+        thermostat=config.thermostat,
+        barostat=config.barostat,
+        cuda_aware_mpi=bool(config.cuda_aware_mpi),
+        comm_overlap_isend=bool(config.comm_overlap_isend),
+        batch_size=int(config.batch_size),
     )
     batch_size = int(runtime.batch_size)
     comm = runtime.comm
@@ -1253,261 +1690,104 @@ def _run_td_full_mpi_1d_legacy(
     ensemble = runtime.ensemble
     use_async_send = bool(runtime.use_async_send)
 
-    atom_types = normalize_atom_types(atom_types, n_atoms=r.shape[0])
+    atom_types = normalize_atom_types(config.atom_types, n_atoms=r.shape[0])
 
     trace = _init_td_trace(
-        trace_enabled=bool(trace_enabled),
-        trace_path=str(trace_path),
+        trace_enabled=bool(config.trace_enabled),
+        trace_path=str(config.trace_path),
         rank=rank,
         size=size,
     )
-
     output, output_enabled, out_traj_every, out_metrics_every = _init_td_output(
         output_spec,
         rank=rank,
     )
 
-    deps_mode = str(deps_provider_mode)
+    # --- validation ---
+    deps_mode = str(config.deps_provider_mode)
     static_rr = deps_mode == "static_rr"
-    if static_rr and startup_mode != "scatter_zones":
+    if static_rr and config.startup_mode != "scatter_zones":
         raise RuntimeError("static_rr requires startup_mode=scatter_zones (static ownership)")
-
-    if strict_fast_sync:
-        if not (fast_sync and zones_total == 2 * size and startup_mode == "scatter_zones"):
+    if config.strict_fast_sync:
+        if not (
+            config.fast_sync
+            and config.zones_total == 2 * size
+            and config.startup_mode == "scatter_zones"
+        ):
             raise RuntimeError(
                 "strict_fast_sync requires fast_sync=true, zones_total=2P, startup_mode=scatter_zones"
             )
 
+    # --- zones + automaton ---
     zones, autom = _build_zones_and_automaton(
         box=float(box),
-        cell_size=float(cell_size),
-        zones_total=int(zones_total),
-        zone_cells_pattern=zone_cells_pattern,
-        zone_cells_w=int(zone_cells_w),
-        zone_cells_s=int(zone_cells_s),
+        cell_size=float(config.cell_size),
+        zones_total=int(config.zones_total),
+        zone_cells_pattern=config.zone_cells_pattern,
+        zone_cells_w=int(config.zone_cells_w),
+        zone_cells_s=int(config.zone_cells_s),
         cutoff=float(cutoff),
-        strict_min_zone_width=bool(strict_min_zone_width),
+        strict_min_zone_width=bool(config.strict_min_zone_width),
         rank=rank,
         r=r,
         v=v,
         comm=comm,
         size=size,
-        startup_mode=str(startup_mode),
-        traversal=str(traversal),
-        formal_core=bool(formal_core),
-        debug_invariants=bool(debug_invariants),
-        max_step_lag=int(max_step_lag),
-        table_max_age=int(table_max_age),
+        startup_mode=str(config.startup_mode),
+        traversal=str(config.traversal),
+        formal_core=bool(config.formal_core),
+        debug_invariants=bool(config.debug_invariants),
+        max_step_lag=int(config.max_step_lag),
+        table_max_age=int(config.table_max_age),
     )
 
-    require_table_deps = bool(require_table_deps or require_local_deps)
+    # --- mutable simulation state (replaces nonlocal box / skin_global) ---
+    sim = _TDMPISimState(box=float(box))
 
-    def _trace_event(
-        *,
-        zid: int,
-        step_id: int,
-        event: str,
-        state_before=None,
-        state_after=None,
-        halo_ids_count: int = 0,
-        migration_count: int = 0,
-        lag: int = 0,
-    ):
-        if trace is None:
-            return
-        trace.log(
-            step_id=int(step_id),
-            zone_id=int(zid),
-            event=str(event),
-            state_before=state_before,
-            state_after=state_after,
-            halo_ids_count=int(halo_ids_count),
-            migration_count=int(migration_count),
-            lag=int(lag),
-            invariant_flags=format_invariant_flags(autom.diag),
-        )
+    # --- 3D deps provider ---
+    deps_provider_3d = _build_deps_provider_3d(
+        deps_mode,
+        autom,
+        zones_nx=int(config.zones_nx),
+        zones_ny=int(config.zones_ny),
+        zones_nz=int(config.zones_nz),
+        box=float(box),
+        cutoff=float(cutoff),
+        mpi_size=size,
+    )
 
-    def _lag_value(zid: int) -> int:
-        try:
-            deps, _, _ = autom._deps(int(zid))
-        except (KeyError, IndexError, ValueError):
-            deps = []
-        if autom.deps_table_func is not None:
-            try:
-                deps = list(autom.deps_table_func(int(zid)))
-            except (KeyError, IndexError, ValueError):
-                deps = list(deps)
-        zt = zones[int(zid)].step_id
-        lags = []
-        for did in deps:
-            dz = zones[int(did)]
-            if dz.ztype != ZoneType.F:
-                lags.append(int(zt - dz.step_id))
-        return max(lags) if lags else 0
-
-    def _start_compute_with_trace(
-        r: np.ndarray, rc: float, skin_global: float, step: int, verlet_k_steps: int
-    ):
-        pre = [z.ztype for z in zones] if trace is not None else None
-        zid = autom.start_compute(
-            r=r, rc=rc, skin_global=skin_global, step=step, verlet_k_steps=verlet_k_steps
-        )
-        if zid is not None and trace is not None and pre is not None:
-            _trace_event(
-                zid=zid,
-                step_id=int(zones[zid].step_id),
-                event="START_COMPUTE",
-                state_before=pre[zid],
-                state_after=zones[zid].ztype,
-                halo_ids_count=int(zones[zid].halo_ids.size),
-                migration_count=0,
-                lag=_lag_value(zid),
-            )
-            for did in autom._locked_donors.get(zid, []):
-                _trace_event(
-                    zid=did,
-                    step_id=int(zones[did].step_id),
-                    event="LOCK_DONOR",
-                    state_before=pre[did],
-                    state_after=zones[did].ztype,
-                    halo_ids_count=int(zones[did].halo_ids.size),
-                    migration_count=0,
-                    lag=_lag_value(did),
-                )
-        return zid
-
-    def _finish_compute_with_trace(
-        r: np.ndarray,
-        v: np.ndarray,
-        mass: Union[float, np.ndarray],
-        dt: float,
-        potential,
-        cutoff: float,
-        rc: float,
-        skin_global: float,
-        step: int,
-        verlet_k_steps: int,
-        enable_step_id: bool = True,
-    ):
-        pre = [z.ztype for z in zones] if trace is not None else None
-        zid = autom.compute_step_for_work_zone(
-            r=r,
-            v=v,
-            mass=mass,
-            dt=dt,
-            potential=potential,
-            cutoff=cutoff,
-            rc=rc,
-            skin_global=skin_global,
-            step=step,
-            verlet_k_steps=verlet_k_steps,
-            atom_types=atom_types,
-            enable_step_id=enable_step_id,
-        )
-        if zid is not None and trace is not None and pre is not None:
-            _trace_event(
-                zid=zid,
-                step_id=int(zones[zid].step_id),
-                event="FINISH_COMPUTE",
-                state_before=pre[zid],
-                state_after=zones[zid].ztype,
-                halo_ids_count=0,
-                migration_count=int(autom.diag.get("migrations", 0)),
-                lag=_lag_value(zid),
-            )
-            for did, pstate in enumerate(pre):
-                if pstate == ZoneType.P and zones[did].ztype == ZoneType.D:
-                    _trace_event(
-                        zid=did,
-                        step_id=int(zones[did].step_id),
-                        event="RELEASE_DONOR",
-                        state_before=pstate,
-                        state_after=zones[did].ztype,
-                        halo_ids_count=int(zones[did].halo_ids.size),
-                        migration_count=0,
-                        lag=_lag_value(did),
-                    )
-        return zid
-
-    deps_provider_3d = None
-    if deps_mode == "static_3d":
-        deps_provider_3d = DepsProvider3DBlock(
-            nx=int(zones_nx),
-            ny=int(zones_ny),
-            nz=int(zones_nz),
-            box=(float(box), float(box), float(box)),
-            cutoff=float(cutoff),
-            mpi_size=int(size),
-        )
-
-        class _GeomProvider:
-            def __init__(self, base):
-                self.base = base
-
-            def geom(self, zid: int) -> ZoneGeomAABB:
-                lo, hi = self.base.geom(int(zid))
-                return ZoneGeomAABB(np.asarray(lo, dtype=float), np.asarray(hi, dtype=float))
-
-        autom.geom_provider = _GeomProvider(deps_provider_3d)
-
-    def _geom_aabb(zid: int) -> ZoneGeomAABB:
-        if deps_provider_3d is None:
-            raise RuntimeError("static_3d required for AABB geometry")
-        lo, hi = deps_provider_3d.geom(int(zid))
-        return ZoneGeomAABB(np.asarray(lo, dtype=float), np.asarray(hi, dtype=float))
-
-    def deps_zone_ids(zid: int) -> list[int]:
-        if deps_provider_3d is not None:
-            return [int(d) for d in deps_provider_3d.deps_table(int(zid))]
-        z = zones[int(zid)]
-        deps = zones_overlapping_range_pbc(z.z0 - cutoff, z.z1 + cutoff, box, zones)
-        return [int(d) for d in deps if int(d) != int(zid)]
-
-    def owner_deps_zone_ids(zid: int) -> list[int]:
-        if deps_provider_3d is not None:
-            return [int(d) for d in deps_provider_3d.deps_owner(int(zid))]
-        z = zones[int(zid)]
-        buf = float(owner_buffer) if owner_buffer and owner_buffer > 0 else float(cutoff)
-        if owner_buffer <= 0:
-            buf = max(buf, float(getattr(z, "buffer", 0.0)))
-        deps = zones_overlapping_range_pbc(z.z0 - buf, z.z1 + buf, box, zones)
-        return [int(d) for d in deps if int(d) != int(zid)]
-
-    # v2.9: dynamic holder map for direct routing of HALO/DELTA
-    # holder_map[zid] = rank that currently holds (non-F) state for that zone.
-    if static_rr:
-        holder_map = [int(zid) % int(size) for zid in range(zones_total)]
-        holder_ver = [0 for _ in range(zones_total)]
-        holder_epoch = 0
-    else:
-        # Initialized once using allgather; then updated locally on REC_ZONE sends/receives.
-        local_have = [z.zid for z in zones if z.ztype != ZoneType.F]
-        all_have = comm.allgather(local_have)
-        holder_map = [-1 for _ in range(zones_total)]
-        holder_ver = [-1 for _ in range(zones_total)]
-        holder_epoch = 0
-        for rrk, zlist in enumerate(all_have):
-            for zid in zlist:
-                holder_map[int(zid)] = int(rrk)
-                holder_ver[int(zid)] = 0
-
-    # deps_table: all zones intersecting p-neighborhood within cutoff
+    # --- deps wiring ---
+    require_table_deps = bool(config.require_table_deps or config.require_local_deps)
     autom.set_deps_funcs(
-        table_func=lambda zid: deps_zone_ids(int(zid)),
-        owner_func=lambda zid: owner_deps_zone_ids(int(zid)),
+        table_func=lambda zid: _deps_zone_ids_impl(deps_provider_3d, zones, cutoff, sim, int(zid)),
+        owner_func=lambda zid: _owner_deps_zone_ids_impl(
+            deps_provider_3d, zones, cutoff, config.owner_buffer, sim, int(zid)
+        ),
     )
-    if static_rr and require_owner_deps:
+
+    # --- holder map ---
+    holder_map, holder_ver, holder_epoch = _init_holder_map(
+        static_rr,
+        int(config.zones_total),
+        zones,
+        comm,
+        rank,
+        size,
+    )
+
+    # --- deps predicates ---
+    if static_rr and config.require_owner_deps:
         owner_pred = lambda did: holder_map[int(did)] != -1
     else:
         owner_pred = lambda did: (
             (
                 (holder_map[int(did)] != -1)
                 and (
-                    (not require_owner_ver)
-                    or (holder_ver[int(did)] >= (holder_epoch - (2 * max_step_lag + 2)))
+                    (not config.require_owner_ver)
+                    or (holder_ver[int(did)] >= (holder_epoch - (2 * config.max_step_lag + 2)))
                 )
             )
-            if require_owner_deps
+            if config.require_owner_deps
             else True
         )
     autom.set_deps_preds(
@@ -1517,182 +1797,108 @@ def _run_td_full_mpi_1d_legacy(
         owner_pred=owner_pred,
     )
 
-    req_reply_outbox: dict[int, list[tuple[int, int, int, np.ndarray, int]]] = (
-        {}
-    )  # dest_rank -> records
-    holder_reply_outbox: dict[int, list[tuple[int, int, int, np.ndarray, int]]] = (
-        {}
-    )  # dest_rank -> holder gossip replies
+    # --- outbox / pending state ---
+    req_reply_outbox: dict[int, list[tuple[int, int, int, np.ndarray, int]]] = {}
+    holder_reply_outbox: dict[int, list[tuple[int, int, int, np.ndarray, int]]] = {}
+    pending_deltas: dict[tuple[int, int, int], list[np.ndarray]] = {}
+
+    # --- thin closure adapters (bind top-level helpers to local state) ---
+    def _trace_event(**kw):
+        _trace_event_impl(trace, autom, **kw)
+
+    def _lag_value(zid: int) -> int:
+        return _lag_value_impl(autom, zones, zid)
+
+    def _start_compute_with_trace(**kw):
+        return _start_compute_with_trace_impl(trace, autom, zones, **kw)
+
+    def _finish_compute_with_trace(**kw):
+        return _finish_compute_with_trace_impl(trace, autom, zones, atom_types, **kw)
+
+    def _geom_aabb(zid: int) -> ZoneGeomAABB:
+        return _geom_aabb_impl(deps_provider_3d, zid)
+
+    def deps_zone_ids(zid: int) -> list[int]:
+        return _deps_zone_ids_impl(deps_provider_3d, zones, cutoff, sim, zid)
 
     def _set_holder(zid: int, rk: int):
         if static_rr:
             return
         holder_map[int(zid)] = int(rk)
 
-    skin_global = 0.0
-
     def update_buffers(step: int):
-        nonlocal skin_global
-        skin_global = 0.0
-        for z in zones:
-            if z.ztype == ZoneType.F or z.atom_ids.size == 0:
-                z.buffer = 0.0
-                z.skin = 0.0
-                continue
-            b, sk = compute_zone_buffer_skin(
-                v,
-                z.atom_ids,
-                dt,
-                buffer_k,
-                skin_from_buffer=skin_from_buffer,
-                lag_steps=max_step_lag,
-            )
-            z.buffer = b
-            z.skin = sk
-            # diagnostic: buffer sufficiency for linear drift
-            if max_step_lag > 0:
-                speeds = np.linalg.norm(v[z.atom_ids], axis=1)
-                vmax = float(speeds.max()) if speeds.size else 0.0
-                required = vmax * dt * float(max_step_lag + 1)
-                if b + FLOAT_EQ_ATOL < required:
-                    autom.diag["viol_buffer"] = autom.diag.get("viol_buffer", 0) + 1
-            skin_global = max(skin_global, sk)
-
-    def _scale_zone_geometry(lam: float, new_box: float) -> None:
-        if abs(float(lam) - 1.0) <= FLOAT_EQ_ATOL:
-            autom.box = float(new_box)
-            autom.zwidth = autom.box / max(1, len(zones))
-            return
-        for z in zones:
-            z.z0 = float(z.z0) * float(lam)
-            z.z1 = float(z.z1) * float(lam)
-        widths = [float(z.z1 - z.z0) for z in zones if z.n_cells > 0 and z.z1 > z.z0]
-        if widths and (min(widths) + GEOM_EPSILON < float(cutoff)):
-            raise ValueError("NPT scaling violated zone width >= cutoff in td_full_mpi layout")
-        autom.box = float(new_box)
-        autom.zwidth = autom.box / max(1, len(zones))
+        _update_buffers_impl(
+            zones,
+            v,
+            dt,
+            config.buffer_k,
+            config.skin_from_buffer,
+            config.max_step_lag,
+            autom,
+            sim,
+            step,
+        )
 
     def _apply_ensemble(step: int):
-        nonlocal box
-        new_box, _lam_t, lam_b = apply_ensemble_step(
-            step=int(step),
-            ensemble=ensemble,
+        _apply_ensemble_impl(
+            ensemble,
+            zones,
+            autom,
+            sim,
             r=r,
             v=v,
             mass=mass,
-            box=float(box),
             potential=potential,
             cutoff=cutoff,
             atom_types=atom_types,
             dt=dt,
+            step=step,
         )
-        if ensemble.kind == "npt":
-            _scale_zone_geometry(lam_b, new_box)
-            box = float(new_box)
 
     def _output_due(step: int):
-        if not output_enabled:
-            return False, False, False
-        due_traj = (out_traj_every > 0) and (step % out_traj_every == 0)
-        due_metrics = (out_metrics_every > 0) and (step % out_metrics_every == 0)
-        return (due_traj or due_metrics), due_traj, due_metrics
+        return _output_due_impl(output_enabled, out_traj_every, out_metrics_every, step)
 
     def _gather_for_output():
-        owned = [z.atom_ids for z in zones if z.ztype != ZoneType.F and z.atom_ids.size]
-        owned_ids = np.concatenate(owned).astype(np.int32) if owned else np.empty((0,), np.int32)
-        ids_list = comm.gather(owned_ids, root=0)
-        r_list = comm.gather(r[owned_ids] if owned_ids.size else np.empty((0, 3), float), root=0)
-        v_list = comm.gather(v[owned_ids] if owned_ids.size else np.empty((0, 3), float), root=0)
-        bsum = float(sum(z.buffer for z in zones if z.atom_ids.size))
-        bcount = int(sum(1 for z in zones if z.atom_ids.size))
-        bsum_list = comm.gather(bsum, root=0)
-        bcount_list = comm.gather(bcount, root=0)
-        if rank != 0:
-            return None, None, 0.0
-        r_all = np.zeros_like(r)
-        v_all = np.zeros_like(v)
-        if ids_list is not None:
-            for ids, rr, vv in zip(ids_list, r_list, v_list):
-                if ids is None or len(ids) == 0:
-                    continue
-                r_all[ids] = rr
-                v_all[ids] = vv
-        total_bsum = float(sum(bsum_list)) if bsum_list is not None else 0.0
-        total_bcount = int(sum(bcount_list)) if bcount_list is not None else 0
-        bmean = total_bsum / max(1, total_bcount)
-        return r_all, v_all, bmean
-
-    pending_deltas: dict[tuple[int, int, int], list[np.ndarray]] = {}
+        return _gather_for_output_impl(zones, comm, r, v, rank)
 
     def _validate_halo_geometry(zid: int, halo_ids: np.ndarray):
-        if halo_ids.size == 0:
-            return
-        z = zones[int(zid)]
-        z0p = z.z0 - cutoff
-        z1p = z.z1 + cutoff
-        mask = _within_interval_pbc(r[halo_ids, 2], z0p, z1p, box)
-        bad = int((~mask).sum())
-        if bad > 0:
-            autom.diag["halo_geo_viol"] = autom.diag.get("halo_geo_viol", 0) + bad
-        if getattr(z, "table", None) is not None and z.table is not None:
-            supp = set(map(int, z.table.support_ids().tolist()))
-            viol = sum(1 for atom_id in halo_ids.tolist() if int(atom_id) not in supp)
-            if viol:
-                autom.diag["halo_support_viol"] = autom.diag.get("halo_support_viol", 0) + int(viol)
+        _validate_halo_geometry_impl(zones, r, cutoff, sim, autom, zid, halo_ids)
 
     def overlap_set_for_send(zid: int, next_zid: int, rc: float, step: int) -> set:
-        if zones[zid].atom_ids.size == 0:
-            return set()
-        if overlap_mode == "geometric_rc":
-            if str(deps_provider_mode) == "static_3d":
-                # 3D: compute overlap via receiver AABB+cutoff (support region)
-                gR = _geom_aabb(int(next_zid))
-                ov = overlap_filter_by_receiver_aabb(
-                    r, zones[zid].atom_ids.astype(np.int32), gR, rc, box
-                )
-                return set(map(int, ov.tolist()))
-            ov = halo_filter_by_receiver_p(
-                r,
-                zones[zid].atom_ids.astype(np.int32),
-                zones[next_zid].z0,
-                zones[next_zid].z1,
-                rc,
-                box,
-            )
-            return set(map(int, ov.tolist()))
-
-        autom.ensure_table(
+        return _overlap_set_for_send_impl(
+            zones,
+            r,
+            config.overlap_mode,
+            config.deps_provider_mode,
+            deps_provider_3d,
+            sim,
+            config.use_verlet,
+            config.verlet_k_steps,
+            autom,
+            zid,
             next_zid,
-            r=r,
-            rc=rc,
-            skin_global=(skin_global if use_verlet else 0.0),
-            step=step,
-            verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-        )
-        support = autom.table_support(next_zid)
-        if support.size == 0:
-            return set()
-        return set(
-            map(int, np.intersect1d(zones[zid].atom_ids, support, assume_unique=False).tolist())
+            rc,
+            step,
         )
 
+    # --- comm context ---
     comm_ctx = _TDMPICommContext(
         comm=comm,
         prev_rank=prev_rank,
         next_rank=next_rank,
         use_async_send=bool(use_async_send),
         batch_size=int(batch_size),
-        box=float(box),
+        box=float(sim.box),
         cutoff=float(cutoff),
-        deps_provider_mode=str(deps_provider_mode),
+        deps_provider_mode=str(config.deps_provider_mode),
         static_rr=bool(static_rr),
-        debug_invariants=bool(debug_invariants),
-        max_step_lag=int(max_step_lag),
-        max_pending_delta_atoms=int(max_pending_delta_atoms),
+        debug_invariants=bool(config.debug_invariants),
+        max_step_lag=int(config.max_step_lag),
+        max_pending_delta_atoms=int(config.max_pending_delta_atoms),
         r=r,
         v=v,
         zones=zones,
-        zones_total=int(zones_total),
+        zones_total=int(config.zones_total),
         autom=autom,
         holder_map=holder_map,
         holder_ver=holder_ver,
@@ -1715,6 +1921,7 @@ def _run_td_full_mpi_1d_legacy(
     def send_phase(tag_base: int, rc: float, step: int) -> None:
         _send_phase(comm_ctx, tag_base=int(tag_base), rc=float(rc), step=int(step))
 
+    # --- initial output ---
     if output_enabled:
         update_buffers(step=0)
         _write_td_output_step(
@@ -1724,21 +1931,22 @@ def _run_td_full_mpi_1d_legacy(
             gather_fn=_gather_for_output,
             output=output,
             rank=rank,
-            box=float(box),
+            box=float(sim.box),
         )
 
+    # --- warmup ---
     _run_td_warmup_phase(
-        warmup_steps=warmup_steps,
-        warmup_compute=bool(warmup_compute),
+        warmup_steps=config.warmup_steps,
+        warmup_compute=bool(config.warmup_compute),
         rank=rank,
-        formal_core=bool(formal_core),
+        formal_core=bool(config.formal_core),
         batch_size=int(batch_size),
-        overlap_mode=str(overlap_mode),
-        enable_step_id=bool(enable_step_id),
-        max_step_lag=int(max_step_lag),
-        table_max_age=int(table_max_age),
+        overlap_mode=str(config.overlap_mode),
+        enable_step_id=bool(config.enable_step_id),
+        max_step_lag=int(config.max_step_lag),
+        table_max_age=int(config.table_max_age),
         update_buffers_fn=update_buffers,
-        get_skin_global_fn=lambda: skin_global,
+        get_skin_global_fn=lambda: sim.skin_global,
         cutoff=float(cutoff),
         recv_phase_fn=recv_phase,
         can_start_compute_fn=autom.can_start_compute,
@@ -1746,8 +1954,8 @@ def _run_td_full_mpi_1d_legacy(
         finish_compute_fn=_finish_compute_with_trace,
         send_phase_fn=send_phase,
         comm=comm,
-        use_verlet=bool(use_verlet),
-        verlet_k_steps=int(verlet_k_steps),
+        use_verlet=bool(config.use_verlet),
+        verlet_k_steps=int(config.verlet_k_steps),
         r=r,
         v=v,
         mass=mass,
@@ -1755,11 +1963,12 @@ def _run_td_full_mpi_1d_legacy(
         potential=potential,
     )
 
+    # --- main simulation ---
     _run_td_main_phase(
         n_steps=int(n_steps),
         rank=rank,
         update_buffers_fn=update_buffers,
-        get_skin_global_fn=lambda: skin_global,
+        get_skin_global_fn=lambda: sim.skin_global,
         cutoff=float(cutoff),
         recv_phase_fn=recv_phase,
         can_start_compute_fn=autom.can_start_compute,
@@ -1771,22 +1980,23 @@ def _run_td_full_mpi_1d_legacy(
         output_due_fn=_output_due,
         gather_fn=_gather_for_output,
         output=output,
-        box_ref_fn=lambda: box,
-        thermo_every=int(thermo_every),
+        box_ref_fn=lambda: sim.box,
+        thermo_every=int(config.thermo_every),
         v=v,
         mass=mass,
         r=r,
         zones=zones,
         autom=autom,
         batch_size=int(batch_size),
-        use_verlet=bool(use_verlet),
-        verlet_k_steps=int(verlet_k_steps),
+        use_verlet=bool(config.use_verlet),
+        verlet_k_steps=int(config.verlet_k_steps),
         dt=float(dt),
         potential=potential,
         cutoff_runtime=float(cutoff),
-        enable_step_id=bool(enable_step_id),
+        enable_step_id=bool(config.enable_step_id),
     )
 
+    # --- cleanup ---
     if output is not None:
         output.close()
     if trace is not None:
