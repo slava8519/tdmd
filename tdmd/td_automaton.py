@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -79,7 +79,7 @@ class TDAutomaton1W:
         self.send_queue: List[int] = []
         self.outbox: Dict[int, Dict[int, List[int]]] = {}  # dest_zid -> step_id -> atom ids
 
-        self.diag = {
+        self.diag: Dict[str, Any] = {
             "viol_w_gt1": 0,
             "viol_send_overlap": 0,
             "viol_lag": 0,
@@ -125,7 +125,7 @@ class TDAutomaton1W:
 
         keep_src: List[int] = []
         for aid in src.atom_ids.tolist():
-            dest = self.zone_id_for_z(r[int(aid), 2])
+            dest = self.zone_id_for_z(float(r[int(aid), 2]))
             if dest == source_zid:
                 keep_src.append(int(aid))
                 continue
@@ -162,7 +162,7 @@ class TDAutomaton1W:
         z = self.zones[zid]
         z0p = z.z0 - self.cutoff
         z1p = z.z1 + self.cutoff
-        deps = zones_overlapping_range_pbc(z0p, z1p, self.box, self.zones)
+        deps = zones_overlapping_range_pbc(z0p, z1p, self.box, self.zones)  # type: ignore[arg-type]
         return deps, z0p, z1p
 
     def set_deps_local_pred(self, pred):
@@ -390,7 +390,7 @@ class TDAutomaton1W:
             if z.ztype == ZoneType.D and z.atom_ids.size:
                 deps, _, _ = self._deps(zid)
                 deps_table = deps
-                deps_owner = []
+                deps_owner: List[int] = []
                 if self.deps_owner_func is not None:
                     deps_owner = list(self.deps_owner_func(int(zid)))
                 if self.deps_table_func is not None:
@@ -415,7 +415,7 @@ class TDAutomaton1W:
             if z.ztype == ZoneType.D and z.atom_ids.size:
                 deps, _, _ = self._deps(zid)
                 deps_table = deps
-                deps_owner = []
+                deps_owner: List[int] = []
                 if self.deps_owner_func is not None:
                     deps_owner = list(self.deps_owner_func(int(zid)))
                 if self.deps_table_func is not None:

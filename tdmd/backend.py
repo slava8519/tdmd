@@ -17,7 +17,7 @@ class ComputeBackend:
 
 def _detect_cupy() -> tuple[object | None, str]:
     try:
-        import cupy as cp  # type: ignore
+        import cupy as cp  # noqa: F811
     except Exception as exc:
         # CuPy can fail to import for many reasons beyond ImportError
         # (e.g., missing/invalid CUDA runtime libraries). Treat any failure
@@ -84,7 +84,7 @@ def to_numpy(x):
     if isinstance(x, np.ndarray):
         return x
     try:
-        import cupy as cp  # type: ignore
+        import cupy as cp  # noqa: F811
     except Exception:
         return np.asarray(x)
     if isinstance(x, cp.ndarray):

@@ -34,6 +34,10 @@ repos:
             tdmd/observer.py,
             tdmd/force_dispatch.py,
             tdmd/cli_parser.py,
+            tdmd/constants.py,
+            tdmd/zones.py,
+            tdmd/backend.py,
+            tdmd/td_automaton.py,
           ]
         pass_filenames: false
         additional_dependencies:
