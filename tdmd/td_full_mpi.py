@@ -145,7 +145,9 @@ def _init_td_full_mpi_runtime(
                     flush=True,
                 )
         except (RuntimeError, AttributeError) as exc:
-            print(f"[backend rank={rank}] cuda setup failed ({exc}); using host staging", flush=True)
+            print(
+                f"[backend rank={rank}] cuda setup failed ({exc}); using host staging", flush=True
+            )
     else:
         reason = f" ({backend.reason})" if backend.reason else ""
         print(f"[backend rank={rank}] device=cpu{reason}", flush=True)
@@ -724,7 +726,9 @@ def _cleanup_pending_deltas(ctx: _TDMPICommContext) -> None:
 def _apply_pending_if_ready(ctx: _TDMPICommContext, *, zid: int) -> None:
     z = ctx.zones[int(zid)]
     keys = [
-        k for k in ctx.pending_deltas.keys() if int(k[0]) == int(zid) and int(k[1]) == int(z.step_id)
+        k
+        for k in ctx.pending_deltas.keys()
+        if int(k[0]) == int(zid) and int(k[1]) == int(z.step_id)
     ]
     if not keys:
         return
@@ -735,9 +739,7 @@ def _apply_pending_if_ready(ctx: _TDMPICommContext, *, zid: int) -> None:
         if not parts:
             continue
         add = (
-            np.concatenate(parts).astype(np.int32)
-            if len(parts) > 1
-            else parts[0].astype(np.int32)
+            np.concatenate(parts).astype(np.int32) if len(parts) > 1 else parts[0].astype(np.int32)
         )
         ctx.pending_atoms -= int(add.size)
         if add.size == 0:
@@ -756,9 +758,7 @@ def _apply_pending_if_ready(ctx: _TDMPICommContext, *, zid: int) -> None:
             continue
 
         z.atom_ids = (
-            add
-            if z.atom_ids.size == 0
-            else np.concatenate([z.atom_ids, add]).astype(np.int32)
+            add if z.atom_ids.size == 0 else np.concatenate([z.atom_ids, add]).astype(np.int32)
         )
         if z.ztype == ZoneType.F:
             z.ztype = ZoneType.D
@@ -817,7 +817,13 @@ def _handle_req_record(
         halo_ids = ctx.zones[dep_zid].atom_ids.astype(np.int32)
 
     if halo_ids.size:
-        rec = (REC_DELTA, DELTA_HALO, dep_zid, halo_ids.astype(np.int32), int(ctx.zones[dep_zid].step_id))
+        rec = (
+            REC_DELTA,
+            DELTA_HALO,
+            dep_zid,
+            halo_ids.astype(np.int32),
+            int(ctx.zones[dep_zid].step_id),
+        )
         ctx.req_reply_outbox.setdefault(int(src_rank), []).append(rec)
         ctx.autom.diag["req_reply_sent"] = ctx.autom.diag.get("req_reply_sent", 0) + 1
 
@@ -853,7 +859,9 @@ def _handle_delta_record(
                     z.halo_ids = np.unique(np.concatenate([z.halo_ids, ids]).astype(np.int32))
                     _update_static_3d_halo_geometry_diag(ctx, zid=int(zid), halo_ids=z.halo_ids)
                 ctx.validate_halo_geometry_fn(int(zid), z.halo_ids)
-                ctx.autom.diag["halo_applied"] = ctx.autom.diag.get("halo_applied", 0) + int(ids.size)
+                ctx.autom.diag["halo_applied"] = ctx.autom.diag.get("halo_applied", 0) + int(
+                    ids.size
+                )
                 ctx.trace_event_fn(
                     zid=int(zid),
                     step_id=int(sid),
@@ -870,7 +878,9 @@ def _handle_delta_record(
                     if z.atom_ids.size == 0
                     else np.concatenate([z.atom_ids, ids]).astype(np.int32)
                 )
-                ctx.autom.diag["delta_applied"] = ctx.autom.diag.get("delta_applied", 0) + int(ids.size)
+                ctx.autom.diag["delta_applied"] = ctx.autom.diag.get("delta_applied", 0) + int(
+                    ids.size
+                )
                 ctx.trace_event_fn(
                     zid=int(zid),
                     step_id=int(sid),
@@ -1089,9 +1099,13 @@ def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) 
                 )
             else:
                 next_zid = (int(zid) + 1) % ctx.zones_total
-                overlap_next = ctx.overlap_set_for_send_fn(int(zid), int(next_zid), float(rc), int(step))
+                overlap_next = ctx.overlap_set_for_send_fn(
+                    int(zid), int(next_zid), float(rc), int(step)
+                )
                 if overlap_next:
-                    mask_send = np.array([int(a) not in overlap_next for a in z.atom_ids], dtype=bool)
+                    mask_send = np.array(
+                        [int(a) not in overlap_next for a in z.atom_ids], dtype=bool
+                    )
                     send_ids = z.atom_ids[mask_send].astype(np.int32)
                     keep_ids = z.atom_ids[~mask_send].astype(np.int32)
                 else:
@@ -1131,8 +1145,12 @@ def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) 
                 zid=int(dest_zid),
                 step_id=int(sid),
                 event="SEND_DELTA_MIGRATION",
-                state_before=(ctx.zones[int(dest_zid)].ztype if 0 <= int(dest_zid) < ctx.zones_total else None),
-                state_after=(ctx.zones[int(dest_zid)].ztype if 0 <= int(dest_zid) < ctx.zones_total else None),
+                state_before=(
+                    ctx.zones[int(dest_zid)].ztype if 0 <= int(dest_zid) < ctx.zones_total else None
+                ),
+                state_after=(
+                    ctx.zones[int(dest_zid)].ztype if 0 <= int(dest_zid) < ctx.zones_total else None
+                ),
                 halo_ids_count=0,
                 migration_count=int(ids.size),
                 lag=ctx.lag_value_fn(int(dest_zid)) if 0 <= int(dest_zid) < ctx.zones_total else 0,
