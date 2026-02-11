@@ -1916,9 +1916,13 @@ def _run_td_full_mpi_1d_legacy(
     )
 
     def recv_phase(tag_base: int) -> None:
+        # Keep communication geometry aligned with the current box (NPT can rescale it).
+        comm_ctx.box = float(sim.box)
         _recv_phase(comm_ctx, tag_base=int(tag_base))
 
     def send_phase(tag_base: int, rc: float, step: int) -> None:
+        # Keep communication geometry aligned with the current box (NPT can rescale it).
+        comm_ctx.box = float(sim.box)
         _send_phase(comm_ctx, tag_base=int(tag_base), rc=float(rc), step=int(step))
 
     # --- initial output ---

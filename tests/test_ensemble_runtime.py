@@ -250,3 +250,68 @@ def test_td_full_mpi_rejects_npt_for_multi_rank(monkeypatch):
             thermostat={"kind": "berendsen", "params": {"t_target": 1.0, "tau": 0.1}},
             barostat={"kind": "berendsen", "params": {"p_target": 0.0, "tau": 1.0}},
         )
+
+
+def test_td_full_mpi_npt_propagates_rescaled_box_to_comm_context(monkeypatch):
+    boxes_seen: list[float] = []
+    original_send_phase = td_full_mpi._send_phase
+
+    def _spy_send_phase(ctx, *, tag_base: int, rc: float, step: int):
+        boxes_seen.append(float(ctx.box))
+        return original_send_phase(ctx, tag_base=tag_base, rc=rc, step=step)
+
+    def _fake_apply_ensemble_step(
+        *,
+        step: int,
+        ensemble,
+        r: np.ndarray,
+        v: np.ndarray,
+        mass,
+        box: float,
+        potential,
+        cutoff: float,
+        atom_types,
+        dt: float,
+    ):
+        # Deterministic growth to make box propagation visible across steps.
+        return float(box) * 1.01, 1.0, 1.01
+
+    monkeypatch.setattr(td_full_mpi, "_send_phase", _spy_send_phase)
+    monkeypatch.setattr(td_full_mpi, "apply_ensemble_step", _fake_apply_ensemble_step)
+
+    r, v = _tiny_state()
+    pot = make_potential("table", {"file": "examples/interop/table_zero.table", "keyword": "ZERO"})
+    td_full_mpi.run_td_full_mpi_1d(
+        r=r,
+        v=v,
+        mass=1.0,
+        box=10.0,
+        potential=pot,
+        dt=0.005,
+        cutoff=2.5,
+        n_steps=3,
+        thermo_every=0,
+        cell_size=1.0,
+        zones_total=1,
+        zone_cells_w=1,
+        zone_cells_s=1,
+        zone_cells_pattern=None,
+        traversal="forward",
+        fast_sync=False,
+        strict_fast_sync=False,
+        startup_mode="scatter_zones",
+        warmup_steps=0,
+        warmup_compute=False,
+        buffer_k=1.2,
+        use_verlet=False,
+        verlet_k_steps=1,
+        skin_from_buffer=True,
+        ensemble_kind="npt",
+        thermostat={"kind": "berendsen", "params": {"t_target": 1.0, "tau": 0.1}},
+        barostat={"kind": "berendsen", "params": {"p_target": 0.0, "tau": 1.0}},
+    )
+
+    assert len(boxes_seen) == 3
+    assert boxes_seen[0] == pytest.approx(10.0)
+    assert boxes_seen[1] == pytest.approx(10.1)
+    assert boxes_seen[2] == pytest.approx(10.201)
