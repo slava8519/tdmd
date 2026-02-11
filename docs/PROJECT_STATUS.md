@@ -15,7 +15,8 @@ TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD au
   `cli_parser`, `constants`, `zones`, `backend`, `td_automaton`.
 - **Named constants** (`tdmd/constants.py`): `NUMERICAL_ZERO`, `FLOAT_EQ_ATOL`, `GEOM_EPSILON`
   replace 30+ magic numbers across force kernels, geometry checks, and float comparisons.
-- **Exception handling**: all `except Exception` narrowed to specific types across the codebase.
+- **Exception handling**: broad catches are minimized; optional-backend detection paths
+  intentionally keep broad fallback handling to preserve CPU-safe execution.
 - **`run_td_local` restructure**: 700-line god-function split into `_TDLocalCtx` dataclass +
   4 execution paths (`_run_sync_global`, `_run_sync_1d_zones`, `_run_async_3d`, `_run_async_1d`).
 - **Test suite**: 169 tests (28 added for `constants` and `zones` modules).
