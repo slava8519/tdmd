@@ -24,6 +24,18 @@ class VerifyResult:
     details: dict
 
 
+@dataclass
+class _VerifyTaskArtifacts:
+    rA: np.ndarray
+    vA: np.ndarray
+    rB: np.ndarray
+    vB: np.ndarray
+    obsA: list[tuple[int, dict]]
+    obsB: list[tuple[int, dict]]
+    dr_time: list[float]
+    dv_time: list[float]
+
+
 def _details_payload(
     *,
     common,
@@ -84,6 +96,242 @@ def _details_payload(
         "invariants": invariants,
         "violations": violations,
     }
+
+
+def _collect_verify_task_artifacts(
+    *,
+    potential,
+    r0: np.ndarray,
+    v0: np.ndarray,
+    box: float,
+    mass: Union[float, np.ndarray],
+    dt: float,
+    cutoff: float,
+    atom_types: np.ndarray | None,
+    cell_size: float,
+    zones_total: int,
+    zone_cells_w: int,
+    zone_cells_s: int,
+    zone_cells_pattern,
+    traversal: str,
+    buffer_k: float,
+    skin_from_buffer: bool,
+    use_verlet: bool,
+    verlet_k_steps: int,
+    steps: int,
+    observer_every: int,
+    decomposition: str,
+    zones_nx: int,
+    zones_ny: int,
+    zones_nz: int,
+    sync_mode: bool,
+    device: str,
+    strict_min_zone_width: bool,
+    ensemble_kind: str,
+    thermostat: object | None,
+    barostat: object | None,
+    chaos_mode: bool,
+    chaos_seed: int,
+    chaos_delay_prob: float,
+) -> _VerifyTaskArtifacts:
+    from .serial import run_serial
+    from .td_local import run_td_local
+
+    obsA: list[tuple[int, dict]] = []
+    posA: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    obsB: list[tuple[int, dict]] = []
+    dr_time: list[float] = []
+    dv_time: list[float] = []
+
+    def obsA_cb(step, r, v, box_cur=None):
+        box_use = float(box if box_cur is None else box_cur)
+        obsA.append(
+            (
+                int(step),
+                compute_observables(r, v, mass, box_use, potential, cutoff, atom_types=atom_types),
+            )
+        )
+        posA[int(step)] = (r.copy(), v.copy())
+
+    def obsB_cb(step, r, v, box_cur=None):
+        box_use = float(box if box_cur is None else box_cur)
+        obsB.append(
+            (
+                int(step),
+                compute_observables(r, v, mass, box_use, potential, cutoff, atom_types=atom_types),
+            )
+        )
+        key = int(step)
+        if key in posA:
+            rA_step, vA_step = posA[key]
+            dr_step = np.sqrt(((rA_step - r) ** 2).sum(axis=1))
+            dv_step = np.sqrt(((vA_step - v) ** 2).sum(axis=1))
+            dr_time.append(float(dr_step.max()) if dr_step.size else 0.0)
+            dv_time.append(float(dv_step.max()) if dv_step.size else 0.0)
+
+    rA = r0.copy()
+    vA = v0.copy()
+    rB = r0.copy()
+    vB = v0.copy()
+
+    run_serial(
+        rA,
+        vA,
+        mass,
+        box,
+        potential,
+        dt,
+        cutoff,
+        steps,
+        thermo_every=0,
+        observer=obsA_cb,
+        observer_every=observer_every,
+        atom_types=atom_types,
+        ensemble_kind=ensemble_kind,
+        thermostat=thermostat,
+        barostat=barostat,
+        device=device,
+    )
+
+    run_td_local(
+        rB,
+        vB,
+        mass,
+        box,
+        potential,
+        dt,
+        cutoff,
+        steps,
+        observer=obsB_cb,
+        observer_every=observer_every,
+        atom_types=atom_types,
+        cell_size=cell_size,
+        zones_total=zones_total,
+        zone_cells_w=zone_cells_w,
+        zone_cells_s=zone_cells_s,
+        zone_cells_pattern=zone_cells_pattern,
+        traversal=traversal,
+        buffer_k=buffer_k,
+        skin_from_buffer=skin_from_buffer,
+        use_verlet=use_verlet,
+        verlet_k_steps=verlet_k_steps,
+        chaos_mode=bool(chaos_mode),
+        chaos_seed=int(chaos_seed),
+        chaos_delay_prob=float(chaos_delay_prob),
+        decomposition=str(decomposition),
+        zones_nx=int(zones_nx),
+        zones_ny=int(zones_ny),
+        zones_nz=int(zones_nz),
+        sync_mode=bool(sync_mode),
+        ensemble_kind=ensemble_kind,
+        thermostat=thermostat,
+        barostat=barostat,
+        device=device,
+        strict_min_zone_width=bool(strict_min_zone_width),
+    )
+
+    return _VerifyTaskArtifacts(
+        rA=rA,
+        vA=vA,
+        rB=rB,
+        vB=vB,
+        obsA=obsA,
+        obsB=obsB,
+        dr_time=dr_time,
+        dv_time=dv_time,
+    )
+
+
+def _verify_task_result_from_artifacts(
+    *,
+    artifacts: _VerifyTaskArtifacts,
+    case_name: str,
+    steps: int,
+    tol_dr: float,
+    tol_dv: float,
+    tol_dE: float,
+    tol_dT: float,
+    tol_dP: float,
+) -> VerifyResult:
+    dr = np.sqrt(((artifacts.rA - artifacts.rB) ** 2).sum(axis=1))
+    dv = np.sqrt(((artifacts.vA - artifacts.vB) ** 2).sum(axis=1))
+    max_dr = float(dr.max()) if dr.size else 0.0
+    max_dv = float(dv.max()) if dv.size else 0.0
+
+    stepsA = {int(s): o for (s, o) in artifacts.obsA}
+    stepsB = {int(s): o for (s, o) in artifacts.obsB}
+    common = sorted(set(stepsA.keys()) & set(stepsB.keys()))
+    dE = [abs(stepsA[s]["E"] - stepsB[s]["E"]) for s in common]
+    dT = [abs(stepsA[s]["T"] - stepsB[s]["T"]) for s in common]
+    dP = [abs(stepsA[s]["P"] - stepsB[s]["P"]) for s in common]
+    max_dE = max(dE) if dE else float("inf")
+    max_dT = max(dT) if dT else float("inf")
+    max_dP = max(dP) if dP else float("inf")
+    final_dE = float(dE[-1]) if dE else float("inf")
+    final_dT = float(dT[-1]) if dT else float("inf")
+    final_dP = float(dP[-1]) if dP else float("inf")
+    rms_dE = float(np.sqrt(np.mean(np.square(dE)))) if dE else float("inf")
+    rms_dT = float(np.sqrt(np.mean(np.square(dT)))) if dT else float("inf")
+    rms_dP = float(np.sqrt(np.mean(np.square(dP)))) if dP else float("inf")
+
+    ok = (
+        (max_dr <= tol_dr)
+        and (max_dv <= tol_dv)
+        and (max_dE <= tol_dE)
+        and (max_dT <= tol_dT)
+        and (max_dP <= tol_dP)
+    )
+
+    invariants = {"hG3": 0, "hV3": 0, "tG3": 0}
+    final_dr = float(artifacts.dr_time[-1]) if artifacts.dr_time else float(max_dr)
+    final_dv = float(artifacts.dv_time[-1]) if artifacts.dv_time else float(max_dv)
+    rms_dr = (
+        float(np.sqrt(np.mean(np.square(artifacts.dr_time))))
+        if artifacts.dr_time
+        else (float(np.sqrt(np.mean(np.square(dr)))) if dr.size else 0.0)
+    )
+    rms_dv = (
+        float(np.sqrt(np.mean(np.square(artifacts.dv_time))))
+        if artifacts.dv_time
+        else (float(np.sqrt(np.mean(np.square(dv)))) if dv.size else 0.0)
+    )
+    details = _details_payload(
+        common=common,
+        mapA=stepsA,
+        mapB=stepsB,
+        max_dr=max_dr,
+        max_dv=max_dv,
+        max_dE=float(max_dE),
+        max_dT=float(max_dT),
+        max_dP=float(max_dP),
+        final_dr=final_dr,
+        final_dv=final_dv,
+        final_dE=final_dE,
+        final_dT=final_dT,
+        final_dP=final_dP,
+        rms_dr=rms_dr,
+        rms_dv=rms_dv,
+        rms_dE=rms_dE,
+        rms_dT=rms_dT,
+        rms_dP=rms_dP,
+        tol_dr=tol_dr,
+        tol_dv=tol_dv,
+        tol_dE=tol_dE,
+        tol_dT=tol_dT,
+        tol_dP=tol_dP,
+        invariants=invariants,
+    )
+    return VerifyResult(
+        case=case_name,
+        steps=int(steps),
+        max_dr=max_dr,
+        max_dv=max_dv,
+        max_dE=float(max_dE),
+        max_dT=float(max_dT),
+        max_dP=float(max_dP),
+        ok=bool(ok),
+        details=details,
+    )
 
 
 def run_verify_v2(
@@ -567,76 +815,14 @@ def _run_verify_task_legacy(
     case_name: str = "interop_task",
 ) -> VerifyResult:
     """Verify serial vs TD-local on an explicit task-defined initial state."""
-    from .serial import run_serial
-    from .td_local import run_td_local
-
-    obsA = []
-    posA = {}
-    obsB = []
-    dr_time: list[float] = []
-    dv_time: list[float] = []
-
-    def obsA_cb(step, r, v, box_cur=None):
-        box_use = float(box if box_cur is None else box_cur)
-        obsA.append(
-            (
-                int(step),
-                compute_observables(r, v, mass, box_use, potential, cutoff, atom_types=atom_types),
-            )
-        )
-        posA[int(step)] = (r.copy(), v.copy())
-
-    def obsB_cb(step, r, v, box_cur=None):
-        box_use = float(box if box_cur is None else box_cur)
-        obsB.append(
-            (
-                int(step),
-                compute_observables(r, v, mass, box_use, potential, cutoff, atom_types=atom_types),
-            )
-        )
-        key = int(step)
-        if key in posA:
-            rA_step, vA_step = posA[key]
-            dr_step = np.sqrt(((rA_step - r) ** 2).sum(axis=1))
-            dv_step = np.sqrt(((vA_step - v) ** 2).sum(axis=1))
-            dr_time.append(float(dr_step.max()) if dr_step.size else 0.0)
-            dv_time.append(float(dv_step.max()) if dv_step.size else 0.0)
-
-    rA = r0.copy()
-    vA = v0.copy()
-    rB = r0.copy()
-    vB = v0.copy()
-
-    run_serial(
-        rA,
-        vA,
-        mass,
-        box,
-        potential,
-        dt,
-        cutoff,
-        steps,
-        thermo_every=0,
-        observer=obsA_cb,
-        observer_every=observer_every,
-        atom_types=atom_types,
-        ensemble_kind=ensemble_kind,
-        thermostat=thermostat,
-        barostat=barostat,
-        device=device,
-    )
-
-    run_td_local(
-        rB,
-        vB,
-        mass,
-        box,
-        potential,
-        dt,
-        cutoff,
-        steps,
-        observer=obsB_cb,
-        observer_every=observer_every,
+    artifacts = _collect_verify_task_artifacts(
+        potential=potential,
+        r0=r0,
+        v0=v0,
+        box=box,
+        mass=mass,
+        dt=dt,
+        cutoff=cutoff,
         atom_types=atom_types,
         cell_size=cell_size,
         zones_total=zones_total,
@@ -648,99 +834,31 @@ def _run_verify_task_legacy(
         skin_from_buffer=skin_from_buffer,
         use_verlet=use_verlet,
         verlet_k_steps=verlet_k_steps,
-        chaos_mode=bool(chaos_mode),
-        chaos_seed=int(chaos_seed),
-        chaos_delay_prob=float(chaos_delay_prob),
+        steps=int(steps),
+        observer_every=int(observer_every),
         decomposition=str(decomposition),
         zones_nx=int(zones_nx),
         zones_ny=int(zones_ny),
         zones_nz=int(zones_nz),
         sync_mode=bool(sync_mode),
-        ensemble_kind=ensemble_kind,
+        device=str(device),
+        strict_min_zone_width=bool(strict_min_zone_width),
+        ensemble_kind=str(ensemble_kind),
         thermostat=thermostat,
         barostat=barostat,
-        device=device,
-        strict_min_zone_width=bool(strict_min_zone_width),
+        chaos_mode=bool(chaos_mode),
+        chaos_seed=int(chaos_seed),
+        chaos_delay_prob=float(chaos_delay_prob),
     )
-
-    dr = np.sqrt(((rA - rB) ** 2).sum(axis=1))
-    dv = np.sqrt(((vA - vB) ** 2).sum(axis=1))
-    max_dr = float(dr.max()) if dr.size else 0.0
-    max_dv = float(dv.max()) if dv.size else 0.0
-
-    stepsA = {int(s): o for (s, o) in obsA}
-    stepsB = {int(s): o for (s, o) in obsB}
-    common = sorted(set(stepsA.keys()) & set(stepsB.keys()))
-    dE = [abs(stepsA[s]["E"] - stepsB[s]["E"]) for s in common]
-    dT = [abs(stepsA[s]["T"] - stepsB[s]["T"]) for s in common]
-    dP = [abs(stepsA[s]["P"] - stepsB[s]["P"]) for s in common]
-    max_dE = max(dE) if dE else float("inf")
-    max_dT = max(dT) if dT else float("inf")
-    max_dP = max(dP) if dP else float("inf")
-    final_dE = float(dE[-1]) if dE else float("inf")
-    final_dT = float(dT[-1]) if dT else float("inf")
-    final_dP = float(dP[-1]) if dP else float("inf")
-    rms_dE = float(np.sqrt(np.mean(np.square(dE)))) if dE else float("inf")
-    rms_dT = float(np.sqrt(np.mean(np.square(dT)))) if dT else float("inf")
-    rms_dP = float(np.sqrt(np.mean(np.square(dP)))) if dP else float("inf")
-
-    ok = (
-        (max_dr <= tol_dr)
-        and (max_dv <= tol_dv)
-        and (max_dE <= tol_dE)
-        and (max_dT <= tol_dT)
-        and (max_dP <= tol_dP)
-    )
-
-    invariants = {"hG3": 0, "hV3": 0, "tG3": 0}
-    final_dr = float(dr_time[-1]) if dr_time else float(max_dr)
-    final_dv = float(dv_time[-1]) if dv_time else float(max_dv)
-    rms_dr = (
-        float(np.sqrt(np.mean(np.square(dr_time))))
-        if dr_time
-        else (float(np.sqrt(np.mean(np.square(dr)))) if dr.size else 0.0)
-    )
-    rms_dv = (
-        float(np.sqrt(np.mean(np.square(dv_time))))
-        if dv_time
-        else (float(np.sqrt(np.mean(np.square(dv)))) if dv.size else 0.0)
-    )
-    details = _details_payload(
-        common=common,
-        mapA=stepsA,
-        mapB=stepsB,
-        max_dr=max_dr,
-        max_dv=max_dv,
-        max_dE=float(max_dE),
-        max_dT=float(max_dT),
-        max_dP=float(max_dP),
-        final_dr=final_dr,
-        final_dv=final_dv,
-        final_dE=final_dE,
-        final_dT=final_dT,
-        final_dP=final_dP,
-        rms_dr=rms_dr,
-        rms_dv=rms_dv,
-        rms_dE=rms_dE,
-        rms_dT=rms_dT,
-        rms_dP=rms_dP,
-        tol_dr=tol_dr,
-        tol_dv=tol_dv,
-        tol_dE=tol_dE,
-        tol_dT=tol_dT,
-        tol_dP=tol_dP,
-        invariants=invariants,
-    )
-    return VerifyResult(
-        case=case_name,
+    return _verify_task_result_from_artifacts(
+        artifacts=artifacts,
+        case_name=str(case_name),
         steps=int(steps),
-        max_dr=max_dr,
-        max_dv=max_dv,
-        max_dE=float(max_dE),
-        max_dT=float(max_dT),
-        max_dP=float(max_dP),
-        ok=bool(ok),
-        details=details,
+        tol_dr=float(tol_dr),
+        tol_dv=float(tol_dv),
+        tol_dE=float(tol_dE),
+        tol_dT=float(tol_dT),
+        tol_dP=float(tol_dP),
     )
 
 

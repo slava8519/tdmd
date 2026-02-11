@@ -44,6 +44,204 @@ class TDStats:
     size: int
 
 
+@dataclass(frozen=True)
+class _TDMPIRuntimeInit:
+    batch_size: int
+    comm: object
+    rank: int
+    size: int
+    prev_rank: int
+    next_rank: int
+    ensemble: object
+    backend: object
+    cuda_aware_active: bool
+    use_async_send: bool
+
+
+def _init_td_full_mpi_runtime(
+    *,
+    device: str,
+    ensemble_kind: str,
+    thermostat: object | None,
+    barostat: object | None,
+    cuda_aware_mpi: bool,
+    comm_overlap_isend: bool,
+    batch_size: int,
+) -> _TDMPIRuntimeInit:
+    if MPI is None:
+        raise RuntimeError("mpi4py required")
+    if not MPI.Is_initialized():
+        MPI.Init()
+    batch = int(batch_size)
+    if batch < 1:
+        raise ValueError("batch_size/time_block_k must be >= 1")
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    prev_rank = (rank - 1) % size
+    next_rank = (rank + 1) % size
+
+    ensemble = build_ensemble_spec(
+        kind=ensemble_kind,
+        thermostat=thermostat,
+        barostat=barostat,
+        source="td_full_mpi",
+    )
+    if ensemble.kind == "npt" and int(size) > 1:
+        raise ValueError(
+            "td_full_mpi NPT currently requires single-rank launch (MPI size=1) to avoid "
+            "cross-rank barostat synchronization/barrier semantics"
+        )
+
+    backend = resolve_backend(str(device).strip().lower() or "auto")
+    if backend.device == "cuda":
+        cp = backend.xp
+        local_rank = local_rank_from_env()
+        try:
+            ndev = int(cp.cuda.runtime.getDeviceCount())
+            if ndev > 0:
+                dev = cuda_device_for_local_rank(local_rank, ndev)
+                cp.cuda.Device(dev).use()
+                print(
+                    f"[backend rank={rank}] device=cuda local_rank={local_rank} cuda_dev={dev}",
+                    flush=True,
+                )
+        except (RuntimeError, AttributeError) as exc:
+            print(f"[backend rank={rank}] cuda setup failed ({exc}); using host staging", flush=True)
+    else:
+        reason = f" ({backend.reason})" if backend.reason else ""
+        print(f"[backend rank={rank}] device=cpu{reason}", flush=True)
+
+    cuda_aware_active = bool(cuda_aware_mpi and (backend.device == "cuda"))
+    use_async_send = bool(comm_overlap_isend or cuda_aware_active)
+    if rank == 0 and bool(cuda_aware_mpi) and not cuda_aware_active:
+        print(
+            "[backend] cuda_aware_mpi requested but inactive (requires CUDA backend); using host-staging",
+            flush=True,
+        )
+
+    return _TDMPIRuntimeInit(
+        batch_size=batch,
+        comm=comm,
+        rank=rank,
+        size=size,
+        prev_rank=prev_rank,
+        next_rank=next_rank,
+        ensemble=ensemble,
+        backend=backend,
+        cuda_aware_active=cuda_aware_active,
+        use_async_send=use_async_send,
+    )
+
+
+def _init_td_trace(*, trace_enabled: bool, trace_path: str, rank: int, size: int):
+    trace = None
+    if trace_enabled:
+        trace_file = trace_path
+        if size > 1:
+            base, ext = os.path.splitext(trace_path)
+            if rank != 0:
+                trace_file = f"{base}_rank{rank}{ext or '.csv'}"
+        trace = TDTraceLogger(trace_file, rank=rank, enabled=True)
+    return trace
+
+
+def _init_td_output(output_spec: OutputSpec | None, *, rank: int):
+    output = None
+    output_enabled = False
+    out_traj_every = 0
+    out_metrics_every = 0
+    if output_spec is not None:
+        out_traj_every = int(output_spec.traj_every) if output_spec.traj_every else 0
+        out_metrics_every = int(output_spec.metrics_every) if output_spec.metrics_every else 0
+        output_enabled = (out_traj_every > 0) or (out_metrics_every > 0)
+    if output_spec is not None and rank == 0:
+        output = make_output_bundle(output_spec)
+    return output, output_enabled, out_traj_every, out_metrics_every
+
+
+def _build_zones_and_automaton(
+    *,
+    box: float,
+    cell_size: float,
+    zones_total: int,
+    zone_cells_pattern,
+    zone_cells_w: int,
+    zone_cells_s: int,
+    cutoff: float,
+    strict_min_zone_width: bool,
+    rank: int,
+    r: np.ndarray,
+    v: np.ndarray,
+    comm,
+    size: int,
+    startup_mode: str,
+    traversal: str,
+    formal_core: bool,
+    debug_invariants: bool,
+    max_step_lag: int,
+    table_max_age: int,
+):
+    layout = ZoneLayout1DCells(
+        box=box,
+        cell_size=cell_size,
+        zones_total=zones_total,
+        pattern_cells=zone_cells_pattern,
+        zone_cells_w=zone_cells_w,
+        zone_cells_s=zone_cells_s,
+        min_zone_width=float(cutoff),
+        strict_min_width=bool(strict_min_zone_width),
+    )
+    zones_geom = layout.build()
+    if rank == 0:
+        widths = [float(z.z1 - z.z0) for z in zones_geom if z.n_cells > 0 and z.z1 > z.z0]
+        if widths:
+            wmin = min(widths)
+            wmax = max(widths)
+            print(
+                f"[info] zone_geom: zones_total={zones_total} width[min,max]=({wmin:.6g},{wmax:.6g}) "
+                f"min_zone_width={float(cutoff):.6g} strict={bool(strict_min_zone_width)}",
+                flush=True,
+            )
+    zones = [
+        ZoneRuntime(
+            zid=z.zid,
+            z0=z.z0,
+            z1=z.z1,
+            ztype=ZoneType.F,
+            atom_ids=np.empty((0,), np.int32),
+            n_cells=int(getattr(z, "n_cells", 1)),
+            step_id=0,
+        )
+        for z in zones_geom
+    ]
+
+    if rank == 0:
+        assign_atoms_to_zones(r, zones_geom, box)
+        for z in zones:
+            z.atom_ids = zones_geom[z.zid].atom_ids
+            z.ztype = ZoneType.D if z.atom_ids.size else ZoneType.F
+
+    startup_distribute_zones(comm, rank, size, zones, r, v, startup_mode=startup_mode)
+    comm.Barrier()
+
+    bins_cache = PersistentZoneLocalZBinsCache()
+    order = traversal_order(zones_total, traversal, rank)
+    autom = TDAutomaton1W(
+        zones_runtime=zones,
+        box=box,
+        cutoff=cutoff,
+        bins_cache=bins_cache,
+        traversal_order=order,
+        formal_core=formal_core,
+        debug_invariants=debug_invariants,
+        max_step_lag=max_step_lag,
+        table_max_age=table_max_age,
+    )
+    return zones, autom
+
+
 # ------------------ unified wire format (v2.2) ------------------
 # payload = int32 nrec, then each record:
 #   int32 rectype (0=ZONE_STATE, 1=DELTA, 2=HOLDER_UPDATE, 3=REQ)
@@ -241,6 +439,204 @@ def startup_distribute_zones(
             z.ztype = ZoneType.F
 
 
+def _write_td_output_step(
+    *,
+    step: int,
+    output_enabled: bool,
+    output_due_fn,
+    gather_fn,
+    output,
+    rank: int,
+    box: float,
+) -> None:
+    if not output_enabled:
+        return
+    due, due_traj, due_metrics = output_due_fn(step)
+    if not due:
+        return
+    r_all, v_all, bmean = gather_fn()
+    if rank == 0 and output is not None and r_all is not None and v_all is not None:
+        if due_traj and output.traj is not None:
+            output.traj.write(step, r_all, v_all, box_value=(float(box), float(box), float(box)))
+        if due_metrics and output.metrics is not None:
+            output.metrics.write(step, r_all, v_all, buffer_value=bmean, box_value=float(box))
+
+
+def _run_td_warmup_phase(
+    *,
+    warmup_steps: int,
+    warmup_compute: bool,
+    rank: int,
+    formal_core: bool,
+    batch_size: int,
+    overlap_mode: str,
+    enable_step_id: bool,
+    max_step_lag: int,
+    table_max_age: int,
+    update_buffers_fn,
+    get_skin_global_fn,
+    cutoff: float,
+    recv_phase_fn,
+    can_start_compute_fn,
+    start_compute_fn,
+    finish_compute_fn,
+    send_phase_fn,
+    comm,
+    use_verlet: bool,
+    verlet_k_steps: int,
+    r: np.ndarray,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    dt: float,
+    potential,
+) -> None:
+    wsteps = max(0, int(warmup_steps))
+    if wsteps > 0 and rank == 0:
+        print(
+            f"[info] warmup: steps={wsteps} compute={warmup_compute} formal_core={formal_core} "
+            f"batch_size={batch_size} overlap_mode={overlap_mode} step_id={enable_step_id} "
+            f"max_lag={max_step_lag} table_max_age={table_max_age}",
+            flush=True,
+        )
+
+    for w in range(1, wsteps + 1):
+        update_buffers_fn(step=w)
+        rc = float(cutoff) + float(get_skin_global_fn())
+        if (rank % 2) == 0:
+            recv_phase_fn(tag_base=7000 + 10 * w)
+            if warmup_compute:
+                if can_start_compute_fn():
+                    start_compute_fn(
+                        r=r,
+                        rc=rc,
+                        skin_global=(float(get_skin_global_fn()) if use_verlet else 0.0),
+                        step=w,
+                        verlet_k_steps=(int(verlet_k_steps) if use_verlet else 1),
+                    )
+                finish_compute_fn(
+                    r=r,
+                    v=v,
+                    mass=mass,
+                    dt=dt,
+                    potential=potential,
+                    cutoff=cutoff,
+                    rc=rc,
+                    skin_global=(float(get_skin_global_fn()) if use_verlet else 0.0),
+                    step=w,
+                    verlet_k_steps=(int(verlet_k_steps) if use_verlet else 1),
+                    enable_step_id=bool(enable_step_id),
+                )
+            send_phase_fn(tag_base=7000 + 10 * w, rc=rc, step=w)
+        else:
+            send_phase_fn(tag_base=7000 + 10 * w, rc=rc, step=w)
+            recv_phase_fn(tag_base=7000 + 10 * w)
+        comm.Barrier()
+
+
+def _run_td_main_phase(
+    *,
+    n_steps: int,
+    rank: int,
+    update_buffers_fn,
+    get_skin_global_fn,
+    cutoff: float,
+    recv_phase_fn,
+    can_start_compute_fn,
+    start_compute_fn,
+    finish_compute_fn,
+    send_phase_fn,
+    apply_ensemble_fn,
+    output_enabled: bool,
+    output_due_fn,
+    gather_fn,
+    output,
+    box_ref_fn,
+    thermo_every: int,
+    v: np.ndarray,
+    mass: Union[float, np.ndarray],
+    r: np.ndarray,
+    zones: list[ZoneRuntime],
+    autom: TDAutomaton1W,
+    batch_size: int,
+    use_verlet: bool,
+    verlet_k_steps: int,
+    dt: float,
+    potential,
+    cutoff_runtime: float,
+    enable_step_id: bool,
+) -> None:
+    for step in range(1, int(n_steps) + 1):
+        s = 1000 + step
+        update_buffers_fn(step=s)
+        rc = float(cutoff) + float(get_skin_global_fn())
+
+        if (rank % 2) == 0:
+            recv_phase_fn(tag_base=6000)
+
+        if can_start_compute_fn():
+            start_compute_fn(
+                r=r,
+                rc=rc,
+                skin_global=(float(get_skin_global_fn()) if use_verlet else 0.0),
+                step=s,
+                verlet_k_steps=(int(verlet_k_steps) if use_verlet else 1),
+            )
+        finish_compute_fn(
+            r=r,
+            v=v,
+            mass=mass,
+            dt=dt,
+            potential=potential,
+            cutoff=cutoff_runtime,
+            rc=rc,
+            skin_global=(float(get_skin_global_fn()) if use_verlet else 0.0),
+            step=s,
+            verlet_k_steps=(int(verlet_k_steps) if use_verlet else 1),
+            enable_step_id=bool(enable_step_id),
+        )
+
+        send_phase_fn(tag_base=6000, rc=rc, step=s)
+
+        if (rank % 2) != 0:
+            recv_phase_fn(tag_base=6000)
+
+        apply_ensemble_fn(step)
+        _write_td_output_step(
+            step=step,
+            output_enabled=output_enabled,
+            output_due_fn=output_due_fn,
+            gather_fn=gather_fn,
+            output=output,
+            rank=rank,
+            box=float(box_ref_fn()),
+        )
+
+        if thermo_every and (step % int(thermo_every) == 0) and rank == 0:
+            ke = kinetic_energy(v, mass)
+            T = temperature_from_ke(ke, r.shape[0])
+            bmean = float(np.mean([zz.buffer for zz in zones]))
+            q = len(autom.send_queue)
+            try:
+                autom.record_wfg_sample()
+            except (AttributeError, KeyError, IndexError):
+                pass
+            diag = autom.diag
+            sb = int(diag.get("send_batches", 0))
+            sb_total = int(diag.get("send_batch_zones_total", 0))
+            sb_max = int(diag.get("send_batch_size_max", 0))
+            sb_avg = (float(sb_total) / float(sb)) if sb > 0 else 0.0
+            steps_live = [z.step_id for z in zones if z.ztype != ZoneType.F]
+            spread = (max(steps_live) - min(steps_live)) if steps_live else 0
+            print(
+                f"[step={step}] T={T:.3f} skin={float(get_skin_global_fn()):.4f} <b>={bmean:.4f} sendQ={q} rc={rc:.4f} "
+                f"mig={diag['migrations']} out={diag.get('outbox_atoms',0)} lagV={diag['viol_lag']} bufV={diag.get('viol_buffer',0)} dA={diag.get('delta_applied',0)} dD={diag.get('delta_deferred',0)} hS={diag.get('halo_sent',0)} hA={diag.get('halo_applied',0)} hD={diag.get('halo_deferred',0)} hG={diag.get('halo_geo_viol',0)} hV={diag.get('halo_support_viol',0)} dX={diag.get('delta_dropped',0)} hX={diag.get('halo_dropped',0)} dO={diag.get('delta_dropped_overflow',0)} "
+                f"tblAgeReb={diag['table_rebuild_age']} violW={diag['viol_w_gt1']} violO={diag['viol_send_overlap']} "
+                f"zone_step_spread={spread} reqS={diag.get('req_sent',0)} reqR={diag.get('req_rcv',0)} reqHS={diag.get('req_holder_sent',0)} reqHR={diag.get('req_holder_reply',0)} sh={diag.get('shadow_promoted',0)} wT={diag.get('wait_table',0)} wO={diag.get('wait_owner',0)} wOU={diag.get('wait_owner_unknown',0)} wOS={diag.get('wait_owner_stale',0)} "
+                f"tbK={batch_size} sb={sb} sbAvg={sb_avg:.2f} sbMax={sb_max} asyncS={diag.get('async_send_msgs',0)} asyncB={diag.get('async_send_bytes',0)} wfgS={diag.get('wfg_samples',0)} wfgC={diag.get('wfg_cycles',0)} wfgO={diag.get('wfg_max_outdeg',0)}",
+                flush=True,
+            )
+
+
 def _run_td_full_mpi_1d_legacy(
     r: np.ndarray,
     v: np.ndarray,
@@ -297,79 +693,37 @@ def _run_td_full_mpi_1d_legacy(
     trace_enabled: bool = False,
     trace_path: str = "td_trace.csv",
 ):
-    if MPI is None:
-        raise RuntimeError("mpi4py required")
-    if not MPI.Is_initialized():
-        MPI.Init()
-    batch_size = int(batch_size)
-    if batch_size < 1:
-        raise ValueError("batch_size/time_block_k must be >= 1")
-
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
-    prev_rank = (rank - 1) % size
-    next_rank = (rank + 1) % size
-    ensemble = build_ensemble_spec(
-        kind=ensemble_kind,
+    runtime = _init_td_full_mpi_runtime(
+        device=str(device),
+        ensemble_kind=str(ensemble_kind),
         thermostat=thermostat,
         barostat=barostat,
-        source="td_full_mpi",
+        cuda_aware_mpi=bool(cuda_aware_mpi),
+        comm_overlap_isend=bool(comm_overlap_isend),
+        batch_size=int(batch_size),
     )
-    if ensemble.kind == "npt" and int(size) > 1:
-        raise ValueError(
-            "td_full_mpi NPT currently requires single-rank launch (MPI size=1) to avoid "
-            "cross-rank barostat synchronization/barrier semantics"
-        )
-    backend = resolve_backend(str(device).strip().lower() or "auto")
-    if backend.device == "cuda":
-        cp = backend.xp
-        local_rank = local_rank_from_env()
-        try:
-            ndev = int(cp.cuda.runtime.getDeviceCount())
-            if ndev > 0:
-                dev = cuda_device_for_local_rank(local_rank, ndev)
-                cp.cuda.Device(dev).use()
-                print(
-                    f"[backend rank={rank}] device=cuda local_rank={local_rank} cuda_dev={dev}",
-                    flush=True,
-                )
-        except (RuntimeError, AttributeError) as exc:
-            print(
-                f"[backend rank={rank}] cuda setup failed ({exc}); using host staging", flush=True
-            )
-    else:
-        reason = f" ({backend.reason})" if backend.reason else ""
-        print(f"[backend rank={rank}] device=cpu{reason}", flush=True)
-    cuda_aware_active = bool(cuda_aware_mpi and (backend.device == "cuda"))
-    use_async_send = bool(comm_overlap_isend or cuda_aware_active)
-    if rank == 0 and bool(cuda_aware_mpi) and not cuda_aware_active:
-        print(
-            "[backend] cuda_aware_mpi requested but inactive (requires CUDA backend); using host-staging",
-            flush=True,
-        )
+    batch_size = int(runtime.batch_size)
+    comm = runtime.comm
+    rank = int(runtime.rank)
+    size = int(runtime.size)
+    prev_rank = int(runtime.prev_rank)
+    next_rank = int(runtime.next_rank)
+    ensemble = runtime.ensemble
+    use_async_send = bool(runtime.use_async_send)
 
     atom_types = normalize_atom_types(atom_types, n_atoms=r.shape[0])
 
-    trace = None
-    if trace_enabled:
-        trace_file = trace_path
-        if size > 1:
-            base, ext = os.path.splitext(trace_path)
-            if rank != 0:
-                trace_file = f"{base}_rank{rank}{ext or '.csv'}"
-        trace = TDTraceLogger(trace_file, rank=rank, enabled=True)
+    trace = _init_td_trace(
+        trace_enabled=bool(trace_enabled),
+        trace_path=str(trace_path),
+        rank=rank,
+        size=size,
+    )
 
-    output = None
-    output_enabled = False
-    out_traj_every = 0
-    out_metrics_every = 0
-    if output_spec is not None:
-        out_traj_every = int(output_spec.traj_every) if output_spec.traj_every else 0
-        out_metrics_every = int(output_spec.metrics_every) if output_spec.metrics_every else 0
-        output_enabled = (out_traj_every > 0) or (out_metrics_every > 0)
-    if output_spec is not None and rank == 0:
-        output = make_output_bundle(output_spec)
+    output, output_enabled, out_traj_every, out_metrics_every = _init_td_output(
+        output_spec,
+        rank=rank,
+    )
 
     deps_mode = str(deps_provider_mode)
     static_rr = deps_mode == "static_rr"
@@ -382,61 +736,26 @@ def _run_td_full_mpi_1d_legacy(
                 "strict_fast_sync requires fast_sync=true, zones_total=2P, startup_mode=scatter_zones"
             )
 
-    layout = ZoneLayout1DCells(
-        box=box,
-        cell_size=cell_size,
-        zones_total=zones_total,
-        pattern_cells=zone_cells_pattern,
-        zone_cells_w=zone_cells_w,
-        zone_cells_s=zone_cells_s,
-        min_zone_width=float(cutoff),
-        strict_min_width=bool(strict_min_zone_width),
-    )
-    zones_geom = layout.build()
-    if rank == 0:
-        widths = [float(z.z1 - z.z0) for z in zones_geom if z.n_cells > 0 and z.z1 > z.z0]
-        if widths:
-            wmin = min(widths)
-            wmax = max(widths)
-            print(
-                f"[info] zone_geom: zones_total={zones_total} width[min,max]=({wmin:.6g},{wmax:.6g}) "
-                f"min_zone_width={float(cutoff):.6g} strict={bool(strict_min_zone_width)}",
-                flush=True,
-            )
-    zones = [
-        ZoneRuntime(
-            zid=z.zid,
-            z0=z.z0,
-            z1=z.z1,
-            ztype=ZoneType.F,
-            atom_ids=np.empty((0,), np.int32),
-            n_cells=int(getattr(z, "n_cells", 1)),
-            step_id=0,
-        )
-        for z in zones_geom
-    ]
-
-    if rank == 0:
-        assign_atoms_to_zones(r, zones_geom, box)
-        for z in zones:
-            z.atom_ids = zones_geom[z.zid].atom_ids
-            z.ztype = ZoneType.D if z.atom_ids.size else ZoneType.F
-
-    startup_distribute_zones(comm, rank, size, zones, r, v, startup_mode=startup_mode)
-    comm.Barrier()
-
-    bins_cache = PersistentZoneLocalZBinsCache()
-    order = traversal_order(zones_total, traversal, rank)
-    autom = TDAutomaton1W(
-        zones_runtime=zones,
-        box=box,
-        cutoff=cutoff,
-        bins_cache=bins_cache,
-        traversal_order=order,
-        formal_core=formal_core,
-        debug_invariants=debug_invariants,
-        max_step_lag=max_step_lag,
-        table_max_age=table_max_age,
+    zones, autom = _build_zones_and_automaton(
+        box=float(box),
+        cell_size=float(cell_size),
+        zones_total=int(zones_total),
+        zone_cells_pattern=zone_cells_pattern,
+        zone_cells_w=int(zone_cells_w),
+        zone_cells_s=int(zone_cells_s),
+        cutoff=float(cutoff),
+        strict_min_zone_width=bool(strict_min_zone_width),
+        rank=rank,
+        r=r,
+        v=v,
+        comm=comm,
+        size=size,
+        startup_mode=str(startup_mode),
+        traversal=str(traversal),
+        formal_core=bool(formal_core),
+        debug_invariants=bool(debug_invariants),
+        max_step_lag=int(max_step_lag),
+        table_max_age=int(table_max_age),
     )
 
     require_table_deps = bool(require_table_deps or require_local_deps)
@@ -1270,137 +1589,77 @@ def _run_td_full_mpi_1d_legacy(
             MPI.Request.Waitall(send_reqs)
             send_keepalive.clear()
 
-    warmup_steps = max(0, int(warmup_steps))
-    if warmup_steps > 0 and rank == 0:
-        print(
-            f"[info] warmup: steps={warmup_steps} compute={warmup_compute} formal_core={formal_core} "
-            f"batch_size={batch_size} overlap_mode={overlap_mode} step_id={enable_step_id} "
-            f"max_lag={max_step_lag} table_max_age={table_max_age}",
-            flush=True,
-        )
-
     if output_enabled:
         update_buffers(step=0)
-        due, due_traj, due_metrics = _output_due(0)
-        if due:
-            r_all, v_all, bmean = _gather_for_output()
-            if rank == 0 and output is not None and r_all is not None and v_all is not None:
-                if due_traj and output.traj is not None:
-                    output.traj.write(
-                        0, r_all, v_all, box_value=(float(box), float(box), float(box))
-                    )
-                if due_metrics and output.metrics is not None:
-                    output.metrics.write(0, r_all, v_all, buffer_value=bmean, box_value=float(box))
-
-    for w in range(1, warmup_steps + 1):
-        update_buffers(step=w)
-        rc = cutoff + skin_global
-        if (rank % 2) == 0:
-            recv_phase(tag_base=7000 + 10 * w)
-            if warmup_compute:
-                if autom.can_start_compute():
-                    _start_compute_with_trace(
-                        r=r,
-                        rc=rc,
-                        skin_global=(skin_global if use_verlet else 0.0),
-                        step=w,
-                        verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-                    )
-                _finish_compute_with_trace(
-                    r=r,
-                    v=v,
-                    mass=mass,
-                    dt=dt,
-                    potential=potential,
-                    cutoff=cutoff,
-                    rc=rc,
-                    skin_global=(skin_global if use_verlet else 0.0),
-                    step=w,
-                    verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-                    enable_step_id=enable_step_id,
-                )
-            send_phase(tag_base=7000 + 10 * w, rc=rc, step=w)
-        else:
-            send_phase(tag_base=7000 + 10 * w, rc=rc, step=w)
-            recv_phase(tag_base=7000 + 10 * w)
-        comm.Barrier()
-
-    for step in range(1, n_steps + 1):
-        s = 1000 + step
-        update_buffers(step=s)
-        rc = cutoff + skin_global
-
-        if (rank % 2) == 0:
-            recv_phase(tag_base=6000)
-
-        if autom.can_start_compute():
-            _start_compute_with_trace(
-                r=r,
-                rc=rc,
-                skin_global=(skin_global if use_verlet else 0.0),
-                step=s,
-                verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-            )
-        _finish_compute_with_trace(
-            r=r,
-            v=v,
-            mass=mass,
-            dt=dt,
-            potential=potential,
-            cutoff=cutoff,
-            rc=rc,
-            skin_global=(skin_global if use_verlet else 0.0),
-            step=s,
-            verlet_k_steps=(verlet_k_steps if use_verlet else 1),
-            enable_step_id=enable_step_id,
+        _write_td_output_step(
+            step=0,
+            output_enabled=output_enabled,
+            output_due_fn=_output_due,
+            gather_fn=_gather_for_output,
+            output=output,
+            rank=rank,
+            box=float(box),
         )
 
-        send_phase(tag_base=6000, rc=rc, step=s)
+    _run_td_warmup_phase(
+        warmup_steps=warmup_steps,
+        warmup_compute=bool(warmup_compute),
+        rank=rank,
+        formal_core=bool(formal_core),
+        batch_size=int(batch_size),
+        overlap_mode=str(overlap_mode),
+        enable_step_id=bool(enable_step_id),
+        max_step_lag=int(max_step_lag),
+        table_max_age=int(table_max_age),
+        update_buffers_fn=update_buffers,
+        get_skin_global_fn=lambda: skin_global,
+        cutoff=float(cutoff),
+        recv_phase_fn=recv_phase,
+        can_start_compute_fn=autom.can_start_compute,
+        start_compute_fn=_start_compute_with_trace,
+        finish_compute_fn=_finish_compute_with_trace,
+        send_phase_fn=send_phase,
+        comm=comm,
+        use_verlet=bool(use_verlet),
+        verlet_k_steps=int(verlet_k_steps),
+        r=r,
+        v=v,
+        mass=mass,
+        dt=float(dt),
+        potential=potential,
+    )
 
-        if (rank % 2) != 0:
-            recv_phase(tag_base=6000)
-
-        _apply_ensemble(step)
-
-        if output_enabled:
-            due, due_traj, due_metrics = _output_due(step)
-            if due:
-                r_all, v_all, bmean = _gather_for_output()
-                if rank == 0 and output is not None and r_all is not None and v_all is not None:
-                    if due_traj and output.traj is not None:
-                        output.traj.write(
-                            step, r_all, v_all, box_value=(float(box), float(box), float(box))
-                        )
-                    if due_metrics and output.metrics is not None:
-                        output.metrics.write(
-                            step, r_all, v_all, buffer_value=bmean, box_value=float(box)
-                        )
-
-        if thermo_every and (step % thermo_every == 0) and rank == 0:
-            ke = kinetic_energy(v, mass)
-            T = temperature_from_ke(ke, r.shape[0])
-            bmean = float(np.mean([zz.buffer for zz in zones]))
-            q = len(autom.send_queue)
-            # Local WFG diagnostics (no global sync)
-            try:
-                autom.record_wfg_sample()
-            except (AttributeError, KeyError, IndexError):
-                pass
-            diag = autom.diag
-            sb = int(diag.get("send_batches", 0))
-            sb_total = int(diag.get("send_batch_zones_total", 0))
-            sb_max = int(diag.get("send_batch_size_max", 0))
-            sb_avg = (float(sb_total) / float(sb)) if sb > 0 else 0.0
-            steps_live = [z.step_id for z in zones if z.ztype != ZoneType.F]
-            spread = (max(steps_live) - min(steps_live)) if steps_live else 0
-            print(
-                f"[step={step}] T={T:.3f} skin={skin_global:.4f} <b>={bmean:.4f} sendQ={q} rc={rc:.4f} "
-                f"mig={diag['migrations']} out={diag.get('outbox_atoms',0)} lagV={diag['viol_lag']} bufV={diag.get('viol_buffer',0)} dA={diag.get('delta_applied',0)} dD={diag.get('delta_deferred',0)} hS={diag.get('halo_sent',0)} hA={diag.get('halo_applied',0)} hD={diag.get('halo_deferred',0)} hG={diag.get('halo_geo_viol',0)} hV={diag.get('halo_support_viol',0)} dX={diag.get('delta_dropped',0)} hX={diag.get('halo_dropped',0)} dO={diag.get('delta_dropped_overflow',0)} "
-                f"tblAgeReb={diag['table_rebuild_age']} violW={diag['viol_w_gt1']} violO={diag['viol_send_overlap']} "
-                f"zone_step_spread={spread} reqS={diag.get('req_sent',0)} reqR={diag.get('req_rcv',0)} reqHS={diag.get('req_holder_sent',0)} reqHR={diag.get('req_holder_reply',0)} sh={diag.get('shadow_promoted',0)} wT={diag.get('wait_table',0)} wO={diag.get('wait_owner',0)} wOU={diag.get('wait_owner_unknown',0)} wOS={diag.get('wait_owner_stale',0)} "
-                f"tbK={batch_size} sb={sb} sbAvg={sb_avg:.2f} sbMax={sb_max} asyncS={diag.get('async_send_msgs',0)} asyncB={diag.get('async_send_bytes',0)} wfgS={diag.get('wfg_samples',0)} wfgC={diag.get('wfg_cycles',0)} wfgO={diag.get('wfg_max_outdeg',0)}",
-                flush=True,
-            )
+    _run_td_main_phase(
+        n_steps=int(n_steps),
+        rank=rank,
+        update_buffers_fn=update_buffers,
+        get_skin_global_fn=lambda: skin_global,
+        cutoff=float(cutoff),
+        recv_phase_fn=recv_phase,
+        can_start_compute_fn=autom.can_start_compute,
+        start_compute_fn=_start_compute_with_trace,
+        finish_compute_fn=_finish_compute_with_trace,
+        send_phase_fn=send_phase,
+        apply_ensemble_fn=_apply_ensemble,
+        output_enabled=bool(output_enabled),
+        output_due_fn=_output_due,
+        gather_fn=_gather_for_output,
+        output=output,
+        box_ref_fn=lambda: box,
+        thermo_every=int(thermo_every),
+        v=v,
+        mass=mass,
+        r=r,
+        zones=zones,
+        autom=autom,
+        batch_size=int(batch_size),
+        use_verlet=bool(use_verlet),
+        verlet_k_steps=int(verlet_k_steps),
+        dt=float(dt),
+        potential=potential,
+        cutoff_runtime=float(cutoff),
+        enable_step_id=bool(enable_step_id),
+    )
 
     if output is not None:
         output.close()
