@@ -88,7 +88,8 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
 ## Strict-Gate Plan (CUDA Cycle)
 - Existing strict GPU gates remain mandatory throughout migration:
   - `gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`,
-  - `gpu_smoke_hw` (CUDA hardware-strict lane).
+  - `gpu_smoke_hw` (CUDA hardware-strict lane),
+  - `gpu_perf_smoke` (CUDA transfer/kernel perf smoke lane).
 - No-fallback acceptance rule remains mandatory for hardware-strict lanes.
 
 ## Post-Baseline Hardening (PR-H02)

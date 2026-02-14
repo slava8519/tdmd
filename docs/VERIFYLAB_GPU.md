@@ -29,9 +29,14 @@ Cross-mode guarantees and gate ownership are documented in `docs/MODE_CONTRACTS.
   - `gpu_smoke_hw`
   - `gpu_interop_smoke_hw`
   - `gpu_metal_smoke_hw`
+  - `gpu_perf_smoke`
   - command pattern:
     ```bash
     python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke_hw --strict
+    ```
+  - perf smoke command:
+    ```bash
+    python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_perf_smoke --strict
     ```
 
 ## Stage Notes
@@ -78,6 +83,11 @@ python scripts/bench_mpi_transport_matrix.py --profile examples/cluster/cluster_
 Generate comparative CPU-vs-GPU-track timing and parity report:
 ```bash
 python scripts/profile_gpu_backend.py --config examples/td_1d_morse.yaml --out-csv results/gpu_profile.csv --out-md results/gpu_profile.md
+```
+
+Transfer/kernel perf smoke helper:
+```bash
+python scripts/bench_gpu_perf_smoke.py --out-json results/gpu_perf_smoke.summary.json --strict
 ```
 
 ## Portability-Cycle Gate Plan

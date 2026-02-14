@@ -269,6 +269,17 @@ PRESETS = {
         require_effective_cuda=True,
         task_path="examples/interop/task_eam_alloy_uniform_mass.yaml",
     ),
+    "gpu_perf_smoke": dict(
+        gpu_perf_mode=True,
+        device="cuda",
+        require_effective_cuda=True,
+        timeout=180,
+        n_atoms=65536,
+        delta_count=256,
+        repeats=9,
+        max_delta_over_full=0.65,
+        max_transfer_over_kernel=4.0,
+    ),
     "mpi_overlap_smoke": dict(
         mpi_overlap_mode=True,
         mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
@@ -823,6 +834,73 @@ def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, obj
     return summary
 
 
+def _run_gpu_perf_smoke(*, preset: dict, out_dir: str) -> dict[str, object]:
+    timeout = int(preset.get("timeout", 180))
+    out_json = os.path.join(out_dir, "gpu_perf_smoke.summary.json")
+    cmd = [
+        sys.executable,
+        "scripts/bench_gpu_perf_smoke.py",
+        "--n-atoms",
+        str(int(preset.get("n_atoms", 65536))),
+        "--delta-count",
+        str(int(preset.get("delta_count", 256))),
+        "--repeats",
+        str(int(preset.get("repeats", 9))),
+        "--max-delta-over-full",
+        str(float(preset.get("max_delta_over_full", 0.65))),
+        "--max-transfer-over-kernel",
+        str(float(preset.get("max_transfer_over_kernel", 4.0))),
+        "--out-json",
+        out_json,
+        "--strict",
+    ]
+    timed_out = False
+    proc_rc = 1
+    proc_out = ""
+    proc_err = ""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
+        proc_rc = int(proc.returncode)
+        proc_out = str(proc.stdout or "")
+        proc_err = str(proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc_rc = 124
+        proc_out = str(getattr(exc, "stdout", "") or "")
+        proc_err = str(getattr(exc, "stderr", "") or "")
+
+    summary: dict[str, object] = {
+        "n": 1,
+        "total": 1,
+        "ok": 0,
+        "fail": 1,
+        "ok_all": False,
+        "worst": {},
+        "by_case": {},
+        "rows": [],
+        "external_script": "scripts/bench_gpu_perf_smoke.py",
+        "external_returncode": int(proc_rc),
+        "external_timed_out": bool(timed_out),
+        "external_stdout": proc_out,
+        "external_stderr": proc_err,
+        "external_artifacts": {"json": out_json},
+    }
+    if os.path.exists(out_json):
+        try:
+            with open(out_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                summary.update(loaded)
+        except Exception as exc:
+            summary["parse_error"] = str(exc)
+    summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
+    summary["ok"] = int(bool(summary.get("ok_all", False)))
+    summary["fail"] = int(not bool(summary.get("ok_all", False)))
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("yaml", help="Path to YAML config (examples/*.yaml)")
@@ -891,6 +969,9 @@ def main():
     elif bool(p.get("materials_property_mode", False)):
         mode_summary = _run_materials_property_gate(preset=p, out_dir=out_dir)
         mode_kind = "materials_property"
+    elif bool(p.get("gpu_perf_mode", False)):
+        mode_summary = _run_gpu_perf_smoke(preset=p, out_dir=out_dir)
+        mode_kind = "gpu_perf"
     elif bool(p.get("task_mode", False)):
         task_path = args.task or str(p.get("task_path", "examples/interop/task.yaml"))
         rows = sweep_verify_task(

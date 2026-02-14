@@ -79,6 +79,10 @@ Visualization contract strict lane:
 ```bash
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset viz_smoke --strict
 ```
+CUDA perf smoke (transfer/kernel latency gate):
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_perf_smoke --strict
+```
 
 ## CI Smoke
 - CI/unit tests use the config-defined random system (`cfg_system`) for a **single-step** serial vs TD-local check.
@@ -174,6 +178,8 @@ For each row in `metrics.csv`:
 - `gpu_smoke_hw`: current hardware-strict GPU gate (`require_effective_cuda`), fails on CUDA fallback.
 - `gpu_interop_smoke_hw`: current hardware-strict interop GPU gate (`require_effective_cuda`), fails on CUDA fallback.
 - `gpu_metal_smoke_hw`: current hardware-strict materials GPU gate (`require_effective_cuda`), fails on CUDA fallback.
+- `gpu_perf_smoke`: hardware-strict CUDA perf smoke (`require_effective_cuda`) reporting
+  `h2d_full_ms`, `h2d_delta_ms`, `kernel_ms`, `d2h_ms`, `delta_over_full`, `transfer_over_kernel`.
 - `mpi_overlap_smoke`: strict TD-MPI A/B overlap verification (`comm_overlap_isend` off/on) for ranks 2 and 4.
 - `mpi_overlap_cudaaware_smoke`: strict TD-MPI A/B overlap verification with `cuda_aware_mpi=true` for overlap-on branch.
 - `cluster_scale_smoke`: profile-driven strict strong/weak scaling gate (`scripts/bench_cluster_scale.py`).
