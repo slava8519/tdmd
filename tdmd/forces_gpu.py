@@ -279,6 +279,26 @@ def _interp_with_grad_cp(cp, x, y, q):
     return val, grad
 
 
+def _interp_with_grad_table_cp(cp, x, table, table_idx, q):
+    """Piecewise-linear interpolation for row-indexed tables on device."""
+    qq = q
+    n = int(x.size)
+    idx = cp.searchsorted(x, qq, side="right") - 1
+    idx = cp.clip(idx, 0, n - 2)
+    x0 = x[idx]
+    x1 = x[idx + 1]
+    y0 = table[table_idx, idx]
+    y1 = table[table_idx, idx + 1]
+    dx = x1 - x0
+    t = (qq - x0) / dx
+    val = y0 + t * (y1 - y0)
+    grad = (y1 - y0) / dx
+    m = (qq >= x[0]) & (qq <= x[-1])
+    val = cp.where(m, val, 0.0)
+    grad = cp.where(m, grad, 0.0)
+    return val, grad
+
+
 def _pair_mats_lj(cp, pot: LennardJones, types_i, types_j):
     ni = int(types_i.size)
     nj = int(types_j.size)
@@ -740,28 +760,21 @@ def forces_on_targets_pair_backend(
         phi = cp.asarray(np.asarray(potential.phi_table, dtype=np.float64))
         nelem = int(embed.shape[0])
 
-        rho_acc = cp.zeros((n,), dtype=cp.float64)
-        drho_col = cp.zeros((n, n), dtype=cp.float64)
-        drho_row = cp.zeros((n, n), dtype=cp.float64)
-        for ej in range(nelem):
-            rho_e, drho_e = _interp_with_grad_cp(cp, grid_r, density[ej], rc)
-            mask_col = (elem[None, :] == int(ej)) & m
-            mask_row = (elem[:, None] == int(ej)) & m
-            rho_acc = rho_acc + cp.sum(cp.where(mask_col, rho_e, 0.0), axis=1)
-            drho_col = cp.where(mask_col, drho_e, drho_col)
-            drho_row = cp.where(mask_row, drho_e, drho_row)
+        idx_j = cp.broadcast_to(elem[None, :], (n, n))
+        idx_i = cp.broadcast_to(elem[:, None], (n, n))
+        rho_j, drho_col = _interp_with_grad_table_cp(cp, grid_r, density, idx_j, rc)
+        rho_i, drho_row = _interp_with_grad_table_cp(cp, grid_r, density, idx_i, rc)
+        rho_j = cp.where(m, rho_j, 0.0)
+        drho_col = cp.where(m, drho_col, 0.0)
+        drho_row = cp.where(m, drho_row, 0.0)
+        rho_acc = cp.sum(rho_j, axis=1)
 
-        dF = cp.zeros((n,), dtype=cp.float64)
-        for ei in range(nelem):
-            _F, dF_e = _interp_with_grad_cp(cp, grid_rho, embed[ei], rho_acc)
-            dF = cp.where(elem == int(ei), dF_e, dF)
+        _F, dF = _interp_with_grad_table_cp(cp, grid_rho, embed, elem, rho_acc)
 
-        dphi = cp.zeros((n, n), dtype=cp.float64)
-        for ei in range(nelem):
-            for ej in range(nelem):
-                _phi_ij, dphi_ij = _interp_with_grad_cp(cp, grid_r, phi[ei, ej], rc)
-                mask_ij = (elem[:, None] == int(ei)) & (elem[None, :] == int(ej)) & m
-                dphi = cp.where(mask_ij, dphi_ij, dphi)
+        phi_flat = phi.reshape(nelem * nelem, -1)
+        phi_idx = idx_i * nelem + idx_j
+        _phi, dphi = _interp_with_grad_table_cp(cp, grid_r, phi_flat, phi_idx, rc)
+        dphi = cp.where(m, dphi, 0.0)
 
         dEdr = dphi + dF[:, None] * drho_col + dF[None, :] * drho_row
         coef_c = cp.where(m, -dEdr / (rc + NUMERICAL_ZERO), 0.0)
