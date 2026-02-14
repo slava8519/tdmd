@@ -116,3 +116,9 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - `cluster_scale_smoke`,
   - `cluster_stability_smoke`.
 - These lanes validate overlap/cuda-aware transport behavior under profile-controlled conditions and do not alter TD automaton or backend semantics.
+
+## CUDA Cycle Progress (PR-C06, incremental)
+- Added TD-MPI compute-path GPU refinement hook in `tdmd/td_full_mpi.py`:
+  - work-zone force callback uses GPU force dispatch when backend is CUDA,
+  - automatic fallback to wrapped CPU potential keeps reference semantics.
+- This integration does not change TD automaton transitions or communication ordering.

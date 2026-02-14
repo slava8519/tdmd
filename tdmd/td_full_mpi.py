@@ -21,6 +21,7 @@ from .constants import FLOAT_EQ_ATOL, GEOM_EPSILON
 from .deps_provider import ZoneGeomAABB
 from .deps_provider_3d import DepsProvider3DBlock
 from .ensembles import apply_ensemble_step, build_ensemble_spec
+from .force_dispatch import try_gpu_forces_on_targets
 from .geom_pbc import mask_in_aabb_pbc
 from .output import OutputSpec, make_output_bundle
 from .overlap_cells import overlap_atoms_src_in_next_zonecells
@@ -59,6 +60,63 @@ class _TDMPIRuntimeInit:
 
 
 _WireRecord = tuple[int, int, int, np.ndarray, int]
+
+
+class _GPUPotentialRefinement:
+    """GPU refinement wrapper for force callbacks in TD-MPI compute path.
+
+    Contract:
+    - CPU path remains reference semantics.
+    - On CUDA backend, try GPU force path first.
+    - If GPU path is unavailable for a call, fall back to wrapped CPU potential.
+    """
+
+    def __init__(self, base_potential, backend):
+        self._base = base_potential
+        self._backend = backend
+
+    def __getattr__(self, name: str):
+        return getattr(self._base, name)
+
+    def forces_on_targets(
+        self,
+        *,
+        r: np.ndarray,
+        box: float,
+        cutoff: float,
+        atom_types: np.ndarray,
+        target_ids: np.ndarray,
+        candidate_ids: np.ndarray,
+    ) -> np.ndarray:
+        f_gpu = try_gpu_forces_on_targets(
+            r=r,
+            box=float(box),
+            cutoff=float(cutoff),
+            rc=float(cutoff),
+            potential=self._base,
+            target_ids=np.asarray(target_ids, dtype=np.int32),
+            candidate_ids=np.asarray(candidate_ids, dtype=np.int32),
+            atom_types=np.asarray(atom_types, dtype=np.int32),
+            backend=self._backend,
+        )
+        if f_gpu is not None:
+            return np.asarray(f_gpu, dtype=float)
+        return self._base.forces_on_targets(
+            r=r,
+            box=float(box),
+            cutoff=float(cutoff),
+            atom_types=np.asarray(atom_types, dtype=np.int32),
+            target_ids=np.asarray(target_ids, dtype=np.int32),
+            candidate_ids=np.asarray(candidate_ids, dtype=np.int32),
+        )
+
+
+def _wrap_potential_for_gpu_refinement(*, potential, backend):
+    if str(getattr(backend, "device", "cpu")) != "cuda":
+        return potential
+    if not hasattr(potential, "forces_on_targets"):
+        return potential
+    return _GPUPotentialRefinement(potential, backend)
 
 
 @dataclass
@@ -1691,6 +1749,9 @@ def _run_td_full_mpi_1d_legacy(
     use_async_send = bool(runtime.use_async_send)
 
     atom_types = normalize_atom_types(config.atom_types, n_atoms=r.shape[0])
+    potential_compute = _wrap_potential_for_gpu_refinement(
+        potential=potential, backend=runtime.backend
+    )
 
     trace = _init_td_trace(
         trace_enabled=bool(config.trace_enabled),
@@ -1964,7 +2025,7 @@ def _run_td_full_mpi_1d_legacy(
         v=v,
         mass=mass,
         dt=float(dt),
-        potential=potential,
+        potential=potential_compute,
     )
 
     # --- main simulation ---
@@ -1995,7 +2056,7 @@ def _run_td_full_mpi_1d_legacy(
         use_verlet=bool(config.use_verlet),
         verlet_k_steps=int(config.verlet_k_steps),
         dt=float(dt),
-        potential=potential,
+        potential=potential_compute,
         cutoff_runtime=float(cutoff),
         enable_step_id=bool(config.enable_step_id),
     )
