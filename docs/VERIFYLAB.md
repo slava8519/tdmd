@@ -1,6 +1,6 @@
 # VerifyLab
 
-Portability planning reference: `docs/PORTABILITY_KOKKOS_PLAN.md` (PR-K01..PR-K10).
+CUDA planning reference: `docs/CUDA_EXECUTION_PLAN.md` (PR-C01..PR-C08).
 
 How to run:
 ```bash
@@ -174,7 +174,6 @@ For each row in `metrics.csv`:
 - `gpu_smoke_hw`: current hardware-strict GPU gate (`require_effective_cuda`), fails on CUDA fallback.
 - `gpu_interop_smoke_hw`: current hardware-strict interop GPU gate (`require_effective_cuda`), fails on CUDA fallback.
 - `gpu_metal_smoke_hw`: current hardware-strict materials GPU gate (`require_effective_cuda`), fails on CUDA fallback.
-  - portability-cycle target is backend-agnostic hardware-strict policy (`require_effective_gpu`) with compatibility alias support.
 - `mpi_overlap_smoke`: strict TD-MPI A/B overlap verification (`comm_overlap_isend` off/on) for ranks 2 and 4.
 - `mpi_overlap_cudaaware_smoke`: strict TD-MPI A/B overlap verification with `cuda_aware_mpi=true` for overlap-on branch.
 - `cluster_scale_smoke`: profile-driven strict strong/weak scaling gate (`scripts/bench_cluster_scale.py`).
@@ -204,22 +203,18 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `fallback_from_cuda`,
   - `reason`,
   - `warnings`.
-- portability-cycle target payload extends with:
-  - `effective_gpu_api` (`cuda|hip|none`),
-  - `fallback_from_gpu`.
 - MPI overlap presets additionally persist per-rank overlap artifacts:
   - `results/<run_id>/mpi_overlap_n2.csv`,
   - `results/<run_id>/mpi_overlap_n2.md`,
   - `results/<run_id>/mpi_overlap_n4.csv`,
   - `results/<run_id>/mpi_overlap_n4.md`.
 
-## Portability-Cycle VerifyLab Plan (PR-K01..PR-K10)
-- Keep all existing strict gates mandatory during migration to prevent semantic drift.
-- Add vendor-specific hardware-strict lanes once backend support lands:
-  - `gpu_cuda_smoke_hw`,
-  - `gpu_hip_smoke_hw`.
-- Add cross-vendor parity lane:
-  - `gpu_portability_smoke`.
+## CUDA-Cycle VerifyLab Plan (PR-C01..PR-C08)
+- Keep all existing strict gates mandatory during CUDA kernel migration/hardening.
+- Keep hardware-strict CUDA policy unchanged:
+  - `gpu_smoke_hw`,
+  - `gpu_interop_smoke_hw`,
+  - `gpu_metal_smoke_hw`.
 - Acceptance policy remains unchanged:
   - hardware-strict GPU lanes fail on any CPU fallback.
 

@@ -1,27 +1,24 @@
-# GPU PR Plan (for Codex)
+# GPU PR Plan (CUDA-Only)
 
-Each PR must keep `pytest -q` green. GPU work MUST NOT change TD semantics.
+This file is the compact PR queue for GPU work.
+Source of truth (full details): `docs/CUDA_EXECUTION_PLAN.md`.
 
-## PR-0: Backend abstraction (no GPU yet)
-- Add `tdmd/backends/base.py` (ZoneComputeBackend).
-- Add `tdmd/backends/cpu.py` (CPUBackend).
-- Wire td_local + td_full_mpi compute path via backend.
-- Tests: backend equivalence + verify v2 smoke.
+## Current Direction
+- Backend target: NVIDIA CUDA only.
+- Primary implementation stack: `numba-cuda`.
+- Plan B after stabilization: `CuPy RawKernel` or C++/CUDA extension.
 
-## PR-1: GPU scaffold (feature-gated)
-- Add `tdmd/backends/gpu.py` placeholder (import-safe).
-- Config flag `backend: cpu|gpu` (default cpu).
+## Active PR Queue
+- PR-C01: CUDA governance refresh (docs/prompts only).
+- PR-C02: Numba-CUDA backend scaffold (no kernel migration yet).
+- PR-C03: Numba-CUDA LJ/Morse kernels (`serial`/`td_local`).
+- PR-C04: Numba-CUDA table + EAM/eam-alloy kernels.
+- PR-C05: TD-local hardening + longrun envelope.
+- PR-C06: TD-MPI CUDA mapping + overlap hardening.
+- PR-C07: Plan B performance track (RawKernel or C++/CUDA extension).
+- PR-C08: consolidation (docs/ops/playbook).
 
-## PR-2: Single-zone GPU correctness
-- Implement GPU forces/energy for one work zone.
-- verify v2 GPU-vs-CPU regression case.
-
-## PR-3: Overlap + verifylab integration
-- Async kernel + host state machine.
-- Export timing + contention metrics; compare Pareto.
-
-
-See `docs/GPU_BACKEND_API.md` for the strict backend contract.
-
-
-Data layout: see `docs/PR0_DATA_CONTRACT.md` (PR-0 golden SoA contract).
+## Invariants
+- Preserve TD semantics (`F/D/P/W/S`) and formal-core invariant `W<=1`.
+- CPU remains formal reference behavior.
+- Hardware-strict CUDA validation treats CPU fallback as failure.

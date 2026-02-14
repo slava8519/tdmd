@@ -12,10 +12,11 @@ TDMD-TD implements a strict **Time Decomposition (TD)** molecular dynamics metho
 - Risk burndown `v2` (`docs/RISK_BURNDOWN_PLAN_V2.md`) is completed:
   - cluster performance/stability validation lanes are implemented,
   - expanded materials property-level references and strict gates are implemented.
-- Next active cycle is **GPU portability (NVIDIA + AMD) via Kokkos**:
-  - planning/governance source: `docs/PORTABILITY_KOKKOS_PLAN.md`,
-  - execution order: `PR-K01..PR-K10`,
-  - until cycle completion, runtime GPU implementation remains CUDA-first with strict no-fallback hardware gates.
+- Next active cycle is **CUDA execution**:
+  - planning/governance source: `docs/CUDA_EXECUTION_PLAN.md`,
+  - execution order: `PR-C01..PR-C08`,
+  - primary stack for near-term PRs: `numba-cuda`,
+  - plan B after strict stabilization: `CuPy RawKernel` or C++/CUDA extension.
 - Current governance reference for mode guarantees and strict gates: `docs/MODE_CONTRACTS.md`.
 - Universal visualization/analysis contract (`PR-VZ01..PR-VZ08`) is implemented.
   Ongoing work is maintenance/refinement under `docs/VISUALIZATION.md`.
@@ -41,7 +42,7 @@ TDMD-TD implements a strict **Time Decomposition (TD)** molecular dynamics metho
    - if task goal explicitly validates GPU backend/hardware path, CPU fallback is not considered success.
 
 ## Agent: Orchestrator
-- Maintains `docs/ROADMAP.md`, `docs/TODO.md`, `docs/RISK_BURNDOWN_PLAN.md`, `docs/RISK_BURNDOWN_PLAN_V2.md`, `docs/PORTABILITY_KOKKOS_PLAN.md`, and `docs/VISUALIZATION.md`.
+- Maintains `docs/ROADMAP.md`, `docs/TODO.md`, `docs/RISK_BURNDOWN_PLAN.md`, `docs/RISK_BURNDOWN_PLAN_V2.md`, `docs/CUDA_EXECUTION_PLAN.md`, and `docs/VISUALIZATION.md`.
 - Splits work into PR-sized tasks in critical order (verification -> CPU materials -> TD integration -> GPU).
 - Enforces CI discipline, reproducibility, and strict gates.
 - Assigns tasks to other agents.
@@ -58,10 +59,9 @@ Scope: scientific verification & regression.
   - `gpu_smoke`,
   - `gpu_interop_smoke`,
   - `gpu_metal_smoke`.
-- Must deliver portability-cycle strict presets (per `docs/PORTABILITY_KOKKOS_PLAN.md`):
-  - backend-agnostic hardware-strict policy (`require_effective_gpu`),
-  - vendor lanes (`gpu_cuda_smoke_hw`, `gpu_hip_smoke_hw`),
-  - cross-vendor parity lane (`gpu_portability_smoke`).
+- Must deliver CUDA-cycle strict presets (per `docs/CUDA_EXECUTION_PLAN.md`):
+  - hardware-strict CUDA policy (`gpu_smoke_hw` rejects CPU fallback),
+  - baseline strict GPU lanes (`gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`).
 - Must maintain strict post-hardening gates:
   - `longrun_envelope_ci`,
   - materials parity pack (`scripts/materials_parity_pack.py --strict`),
@@ -105,13 +105,13 @@ Scope: accelerator implementation without semantic drift.
 - Must preserve CPU equivalence (within documented tolerances) and avoid new global barriers.
 - Must provide profiling artifacts and deterministic testability guidance.
 - Must expose/propagate fallback diagnostics so CI can distinguish real CUDA execution from CPU fallback.
-- Must lead Kokkos portability implementation for NVIDIA+AMD while preserving CPU-reference semantics and current strict-gate policy.
+- Must lead CUDA implementation/hardening (numba-cuda primary stack) while preserving CPU-reference semantics and current strict-gate policy.
 
 ## Agent: Visualization & Analysis Engineer
 Scope: universal output contract, post-processing, rendering adapters.
 - Owns: `tdmd/io/{trajectory,metrics}.py`, output schema manifests, and visualization scripts under `scripts/viz_*`.
 - Must keep visualization as a passive observability layer (no feedback into integrator/automaton decisions).
-- Must preserve mode/backend portability (`serial`/`td_local`/`td_full_mpi`, CPU/GPU).
+- Must preserve mode/backend compatibility (`serial`/`td_local`/`td_full_mpi`, CPU/GPU).
 - Must provide reproducible pipelines for external tools (OVITO/VMD/ParaView) via scripted presets.
 - Must define versioned output schema and backward-compatibility policy.
 
@@ -125,7 +125,7 @@ Scope: universal output contract, post-processing, rendering adapters.
 - GPU changes additionally require:
   - `docs/GPU_BACKEND.md`
   - `docs/VERIFYLAB_GPU.md`
-- If risk status/ownership changes: update `docs/RISK_BURNDOWN_PLAN.md`, active cycle plan (`docs/RISK_BURNDOWN_PLAN_V2.md`), and portability cycle plan (`docs/PORTABILITY_KOKKOS_PLAN.md`).
+- If risk status/ownership changes: update `docs/RISK_BURNDOWN_PLAN.md`, active cycle plan (`docs/RISK_BURNDOWN_PLAN_V2.md`), and CUDA execution plan (`docs/CUDA_EXECUTION_PLAN.md`).
 
 ## Acceptance Criteria
 A task is complete only if:
@@ -146,12 +146,10 @@ A task is complete only if:
   - `scripts/run_verifylab_matrix.py --preset gpu_smoke --strict` passes,
   - `scripts/run_verifylab_matrix.py --preset gpu_interop_smoke --strict` passes,
   - `scripts/run_verifylab_matrix.py --preset gpu_metal_smoke --strict` passes,
-- for GPU portability-track tasks (`PR-K01+`):
+- for CUDA-cycle tasks (`PR-C01+`):
   - all baseline GPU strict gates above still pass,
-  - hardware-strict policy is backend-agnostic (`require_effective_gpu`),
-  - CUDA-lane hardware-strict gate (`gpu_cuda_smoke_hw`) passes on NVIDIA runner,
-  - HIP-lane hardware-strict gate (`gpu_hip_smoke_hw`) passes on AMD runner,
-  - CPU fallback is treated as failure in hardware-strict vendor lanes,
+  - hardware-strict CUDA gate (`gpu_smoke_hw`) passes on NVIDIA runner,
+  - CPU fallback is treated as failure in hardware-strict CUDA lanes,
 - for MPI-overlap/cuda-aware tasks: `scripts/bench_mpi_overlap.py ...` artifact run passes and is attached,
 - for hardware-strict GPU validation tasks: requested GPU backend execution is confirmed and CPU fallback is treated as failure,
 - for strict-failure observability tasks: incident bundle is generated and contains manifest/checksums,
@@ -181,7 +179,7 @@ Constraints:
 - MUST keep verify v2 green.
 
 Deliverables:
-- Backend interface + CPUBackend.
-- Feature-gated GPUBackend (default OFF).
-- Minimal GPU correctness test.
-- Verifylab integration for GPU benchmarks.
+- CUDA backend hardening with `numba-cuda` as primary implementation stack.
+- Strict parity and hardware-strict CUDA evidence (`gpu_smoke_hw` no-fallback).
+- VerifyLab integration for CUDA benchmarks and regression gates.
+- Optional Plan B evaluation (`CuPy RawKernel` or C++/CUDA extension) only after strict stabilization.

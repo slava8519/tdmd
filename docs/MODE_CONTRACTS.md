@@ -3,14 +3,14 @@
 This document defines post-hardening behavioral contracts by execution mode.
 It is governance-level policy and does not change TD automaton semantics.
 Active next-cycle extensions (cluster strict lanes, materials property-level strict lanes) are tracked in `docs/RISK_BURNDOWN_PLAN_V2.md` and become mandatory once implemented.
-Next active portability cycle is tracked in `docs/PORTABILITY_KOKKOS_PLAN.md` (`PR-K01..PR-K10`).
+Next active CUDA cycle is tracked in `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-C08`).
 
 ## Global Contract
 - TD states/transitions `F/D/P/W/S` are preserved.
 - No implicit global barriers are introduced.
 - CPU path is formal reference semantics.
 - GPU path is refinement only (numerical parity within documented tolerances).
-- Current implementation is CUDA-first; planned portability extension (NVIDIA + AMD via Kokkos) must preserve the same semantic contract.
+- Current implementation is CUDA-first; active cycle focuses on CUDA execution hardening and kernel migration without semantic drift.
 - Visualization/output pipelines are passive observability layers and must not feed back into runtime scheduling/forces.
 - Runtime ensemble support:
   - `serial`: `NVE/NVT/NPT`
@@ -28,7 +28,7 @@ Next active portability cycle is tracked in `docs/PORTABILITY_KOKKOS_PLAN.md` (`
 | `td_full_mpi` (`static_rr`) | Fixed ownership extension, no ownership transfer in steady-state | Serial closeness is tolerance-based, not identity | strict smoke + MPI overlap strict presets when transport changes |
 | GPU `serial`/`td_local` (current CUDA-first) | Same control semantics as CPU mode | CPU-equivalent within tolerance, fallback explicit | `gpu_smoke`; hardware validation via `*_hw` |
 | GPU `td_full_mpi` / multi-GPU (current CUDA-first) | Same TD-MPI semantics with rank->device mapping | CPU-equivalent within tolerance; transport strategy is refinement | `gpu_*` strict presets + overlap strict presets for transport changes |
-| GPU portability extension (planned Kokkos CUDA/HIP) | Must preserve same TD control semantics as above | Same tolerance policy; hardware-strict no-fallback remains mandatory | Existing `gpu_*` strict gates + planned vendor lanes per `docs/PORTABILITY_KOKKOS_PLAN.md` |
+| GPU CUDA execution cycle | Must preserve same TD control semantics as above | Same tolerance policy; hardware-strict no-fallback remains mandatory | Existing `gpu_*` strict gates + `gpu_smoke_hw` |
 
 ## Non-Guarantees
 - Bitwise equality across modes/backends is not guaranteed.
@@ -56,10 +56,10 @@ Next active portability cycle is tracked in `docs/PORTABILITY_KOKKOS_PLAN.md` (`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_interop_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_metal_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke_hw --strict`
-- GPU portability cycle (planned additions, in addition to existing gates):
-  - backend-agnostic hardware-strict policy key: `require_effective_gpu` (with compatibility alias support during migration),
-  - vendor lanes: `gpu_cuda_smoke_hw`, `gpu_hip_smoke_hw`,
-  - cross-vendor parity lane: `gpu_portability_smoke`.
+- GPU CUDA cycle:
+  - hardware-strict policy remains CUDA-specific (`require_effective_cuda`),
+  - mandatory hardware-strict gate: `gpu_smoke_hw`,
+  - CPU fallback in hardware-strict CUDA validation is treated as failure.
 - MPI overlap/cuda-aware strict:
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_cudaaware_smoke --strict`

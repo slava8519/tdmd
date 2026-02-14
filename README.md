@@ -9,7 +9,7 @@ Project goals:
 - target **metals and alloys** workflows (`eam/alloy`, multi-type, multi-mass).
 
 Active cycle:
-- GPU portability (NVIDIA + AMD) via Kokkos: `docs/PORTABILITY_KOKKOS_PLAN.md` (`PR-K01..PR-K10`).
+- CUDA execution cycle: `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-C08`).
 
 Versioning:
 - GitHub releases/tags + `RELEASE_NOTES.md` (README is intentionally not a changelog).
@@ -26,7 +26,12 @@ Setup:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e '.[dev]'
+```
+
+Quick workstation bootstrap (Ubuntu/Debian):
+```bash
+bash scripts/bootstrap_codex_env.sh
 ```
 
 Optional GPU (current implementation is CUDA-first via CuPy):
@@ -41,7 +46,7 @@ CPU only (serial), 5 commands:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e '.[dev]'
 python -m tdmd.main run examples/td_1d_morse.yaml --mode serial --device cpu
 ```
 
@@ -51,7 +56,7 @@ mpirun -np 2 python -m tdmd.main run examples/td_1d_morse_static_rr.yaml --mode 
 mpirun -np 4 python -m tdmd.main run examples/td_1d_morse_static_rr_smoke4.yaml --mode td_full_mpi --device cpu
 ```
 
-GPU (CUDA today; AMD support is planned via Kokkos, see `docs/PORTABILITY_KOKKOS_PLAN.md`):
+GPU (CUDA):
 ```bash
 # Prereq: install a CuPy build matching your CUDA version (example for CUDA 12.x):
 # python -m pip install cupy-cuda12x
@@ -171,8 +176,9 @@ Top-level structure:
 
 Start here:
 - `AGENTS.md` (roles, strict acceptance, ownership)
+- `CODEX_ENV_BOOTSTRAP_PROMPT.md` (fresh-machine Codex bootstrap prompt)
 - `docs/TODO.md` (PR-sized tasks, critical order)
-- `docs/PORTABILITY_KOKKOS_PLAN.md` (active GPU portability cycle)
+- `docs/CUDA_EXECUTION_PLAN.md` (active CUDA execution cycle)
 - `docs/MODE_CONTRACTS.md` (mode guarantees and required gates)
 
 Formal semantics:
@@ -203,5 +209,6 @@ See `CONTRIBUTING.md`.
 - GPU roadmap: `docs/ROADMAP_GPU.md`
 - GPU PR plan: `docs/PR_PLAN_GPU.md`
 - Codex runbook: `docs/CODEX_RUNBOOK.md`
+- Codex env bootstrap script: `scripts/bootstrap_codex_env.sh`
 
 - Contracts (do-not-break rules): `docs/CONTRACTS.md`
