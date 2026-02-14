@@ -556,6 +556,8 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
         hV_vals = [_as_int(r, "hV_max", default=0) for r in bench_rows]
         violW_vals = [_as_int(r, "violW_max", default=0) for r in bench_rows]
         lagV_vals = [_as_int(r, "lagV_max", default=0) for r in bench_rows]
+        asyncS_vals = [_as_int(r, "async_send_msgs_max", default=0) for r in bench_rows]
+        asyncB_vals = [_as_int(r, "async_send_bytes_max", default=0) for r in bench_rows]
         wfgC_vals = [_as_int(r, "wfgC_max", default=0) for r in bench_rows]
         wfgO_vals = [_as_int(r, "wfgO_max", default=0) for r in bench_rows]
         wfgS_vals = [_as_int(r, "wfgS_max", default=0) for r in bench_rows]
@@ -597,6 +599,8 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 "hV_max": int(max(hV_vals) if hV_vals else 0),
                 "violW_max": int(max(violW_vals) if violW_vals else 0),
                 "lagV_max": int(max(lagV_vals) if lagV_vals else 0),
+                "async_send_msgs_max": int(max(asyncS_vals) if asyncS_vals else 0),
+                "async_send_bytes_max": int(max(asyncB_vals) if asyncB_vals else 0),
                 "wfgC_max": int(max(wfgC_vals) if wfgC_vals else 0),
                 "wfgO_max": int(max(wfgO_vals) if wfgO_vals else 0),
                 "wfgS_max": int(max(wfgS_vals) if wfgS_vals else 0),
@@ -623,6 +627,12 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             "max_hV": max((int(r["hV_max"]) for r in rank_runs), default=0),
             "max_violW": max((int(r["violW_max"]) for r in rank_runs), default=0),
             "max_lagV": max((int(r["lagV_max"]) for r in rank_runs), default=0),
+            "max_async_send_msgs": max(
+                (int(r.get("async_send_msgs_max", 0)) for r in rank_runs), default=0
+            ),
+            "max_async_send_bytes": max(
+                (int(r.get("async_send_bytes_max", 0)) for r in rank_runs), default=0
+            ),
             "min_overlap_speedup": min(
                 (float(r["overlap_speedup"]) for r in rank_runs), default=0.0
             ),
@@ -642,6 +652,8 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 "hV_max": int(r["hV_max"]),
                 "violW_max": int(r["violW_max"]),
                 "lagV_max": int(r["lagV_max"]),
+                "async_send_msgs_max": int(r.get("async_send_msgs_max", 0)),
+                "async_send_bytes_max": int(r.get("async_send_bytes_max", 0)),
                 "wfgC_max": int(r.get("wfgC_max", 0)),
                 "wfgO_max": int(r.get("wfgO_max", 0)),
                 "wfgS_max": int(r.get("wfgS_max", 0)),
@@ -1184,6 +1196,8 @@ def main():
                         f"speedup={float(rr.get('overlap_speedup', 0.0)):.6f} "
                         f"hG={int(rr.get('hG_max', 0))} hV={int(rr.get('hV_max', 0))} "
                         f"violW={int(rr.get('violW_max', 0))} lagV={int(rr.get('lagV_max', 0))} "
+                        f"asyncS={int(rr.get('async_send_msgs_max', 0))} "
+                        f"asyncB={int(rr.get('async_send_bytes_max', 0))} "
                         f"wfgC={int(rr.get('wfgC_max', 0))} wfgO={int(rr.get('wfgO_max', 0))} "
                         f"rate={float(rr.get('wfgC_rate', 0.0)):.3f} "
                         f"p100={float(rr.get('wfgC_per_100_steps', 0.0)):.3f}\n"

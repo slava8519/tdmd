@@ -74,6 +74,10 @@ python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_ov
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_transport_matrix_smoke --strict
 ```
 
+MPI overlap artifacts also include async transport observability counters:
+- `async_send_msgs_max`
+- `async_send_bytes_max`
+
 Cluster-profile transport matrix helper (fabric-aware, profile-driven):
 ```bash
 python scripts/bench_mpi_transport_matrix.py --profile examples/cluster/cluster_profile_real_template.yaml --strict

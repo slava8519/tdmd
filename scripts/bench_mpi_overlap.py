@@ -141,6 +141,8 @@ def _iter_rows(
                     "hV_max": 0,
                     "violW_max": 0,
                     "lagV_max": 0,
+                    "async_send_msgs_max": 0,
+                    "async_send_bytes_max": 0,
                     "diag_samples": max(1, int(thermo_every)),
                     "invariants_ok": 1,
                     "strict_invariants_ok": 1,
@@ -189,6 +191,12 @@ def _iter_rows(
             hV_max, hV_samples = _diag_max(text, "hV")
             violW_max, violW_samples = _diag_max(text, "violW")
             lagV_max, lagV_samples = _diag_max(text, "lagV")
+            asyncS_max, asyncS_samples = _diag_max(text, "asyncS")
+            asyncB_max, asyncB_samples = _diag_max(text, "asyncB")
+            if asyncS_samples == 0:
+                asyncS_samples = lagV_samples
+            if asyncB_samples == 0:
+                asyncB_samples = lagV_samples
             wfgC_max, wfgC_samples = _diag_max(text, "wfgC")
             wfgO_max, wfgO_samples = _diag_max(text, "wfgO")
             wfgS_max, wfgS_samples = _diag_max(text, "wfgS")
@@ -197,6 +205,8 @@ def _iter_rows(
                 hV_samples,
                 violW_samples,
                 lagV_samples,
+                asyncS_samples,
+                asyncB_samples,
                 wfgC_samples,
                 wfgO_samples,
                 wfgS_samples,
@@ -214,6 +224,8 @@ def _iter_rows(
                     "hV_max": int(hV_max),
                     "violW_max": int(violW_max),
                     "lagV_max": int(lagV_max),
+                    "async_send_msgs_max": int(asyncS_max),
+                    "async_send_bytes_max": int(asyncB_max),
                     "diag_samples": int(diag_samples),
                     "wfgC_max": int(wfgC_max),
                     "wfgO_max": int(wfgO_max),
@@ -253,6 +265,8 @@ def _write_outputs(
                 "hV_max",
                 "violW_max",
                 "lagV_max",
+                "async_send_msgs_max",
+                "async_send_bytes_max",
                 "diag_samples",
                 "wfgC_max",
                 "wfgO_max",
@@ -291,6 +305,8 @@ def _write_outputs(
                     int(r["hV_max"]),
                     int(r["violW_max"]),
                     int(r["lagV_max"]),
+                    int(r.get("async_send_msgs_max", 0)),
+                    int(r.get("async_send_bytes_max", 0)),
                     int(r["diag_samples"]),
                     int(r.get("wfgC_max", 0)),
                     int(r.get("wfgO_max", 0)),
@@ -321,6 +337,7 @@ def _write_outputs(
                 f"- overlap={int(r['overlap'])} cuda_aware={int(r['cuda_aware_mpi'])} "
                 f"rc={int(r['returncode'])} elapsed={float(r['elapsed_sec']):.3f}s "
                 f"hG={int(r['hG_max'])} hV={int(r['hV_max'])} violW={int(r['violW_max'])} lagV={int(r['lagV_max'])} "
+                f"asyncS={int(r.get('async_send_msgs_max', 0))} asyncB={int(r.get('async_send_bytes_max', 0))} "
                 f"diag_samples={int(r['diag_samples'])} attempts={int(r['attempts'])} simulated={int(r.get('simulated', 0))}\n"
             )
 
