@@ -184,9 +184,9 @@ For each row in `metrics.csv`:
 - `gpu_perf_smoke`: hardware-strict CUDA perf smoke (`require_effective_cuda`) reporting
   `h2d_full_ms`, `h2d_delta_ms`, `kernel_ms`, `d2h_ms`, `delta_over_full`, `transfer_over_kernel`.
 - `mpi_overlap_smoke`: strict TD-MPI A/B overlap verification (`comm_overlap_isend` off/on) for ranks 2 and 4.
-- `mpi_overlap_cudaaware_smoke`: strict TD-MPI A/B overlap verification with `cuda_aware_mpi=true` for overlap-on branch.
+- `mpi_overlap_cudaaware_smoke`: strict TD-MPI A/B overlap verification with `cuda_aware_mpi=true` for overlap-on branch, plus CUDA-aware activity guard (`cuda_aware_active_ok=1`, no CPU fallback rank lines).
 - `mpi_overlap_async_observe_smoke`: strict TD-MPI A/B overlap verification with explicit async evidence gate (`async_send_msgs_max`/`async_send_bytes_max` > 0 for `overlap=1` rows).
-- `mpi_overlap_cudaaware_async_observe_smoke`: same async evidence gate, with `cuda_aware_mpi=true` on overlap-on branch.
+- `mpi_overlap_cudaaware_async_observe_smoke`: same async evidence gate, with `cuda_aware_mpi=true` on overlap-on branch and CUDA-aware activity guard.
 - `mpi_overlap_perf_observe_smoke`: async evidence gate + overlap window evidence (`overlap_window_ms_max > 0` for `overlap=1` rows), plus timing observability metrics (`send_pack_ms_max`, `send_wait_ms_max`, `recv_poll_ms_max`).
 - `cluster_scale_smoke`: profile-driven strict strong/weak scaling gate (`scripts/bench_cluster_scale.py`).
 - `cluster_stability_smoke`: profile-driven strict long-run stability gate (`scripts/bench_cluster_stability.py`).
@@ -220,6 +220,10 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `results/<run_id>/mpi_overlap_n2.md`,
   - `results/<run_id>/mpi_overlap_n4.csv`,
   - `results/<run_id>/mpi_overlap_n4.md`.
+- overlap CSV rows include CUDA-aware activity observability for strict transport guards:
+  - `backend_cuda_lines`,
+  - `backend_cpu_lines`,
+  - `cuda_aware_active_ok`.
 
 ## CUDA-Cycle VerifyLab Plan (PR-C01..PR-C08)
 - Keep all existing strict gates mandatory during CUDA kernel migration/hardening.

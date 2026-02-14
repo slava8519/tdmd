@@ -295,6 +295,7 @@ PRESETS = {
         overlap_list="0,1",
         strict_invariants=True,
         cuda_aware=True,
+        require_cuda_aware_active=True,
         timeout=180,
     ),
     "mpi_overlap_async_observe_smoke": dict(
@@ -314,6 +315,7 @@ PRESETS = {
         strict_invariants=True,
         cuda_aware=True,
         require_async_evidence=True,
+        require_cuda_aware_active=True,
         timeout=180,
     ),
     "mpi_overlap_perf_observe_smoke": dict(
@@ -551,6 +553,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
     strict_invariants = bool(preset.get("strict_invariants", True))
     require_async_evidence = bool(preset.get("require_async_evidence", False))
     require_overlap_window = bool(preset.get("require_overlap_window", False))
+    require_cuda_aware_active = bool(preset.get("require_cuda_aware_active", False))
     simulate = bool(preset.get("simulate", False))
     mpirun = str(preset.get("mpirun", "")).strip() or _detect_mpirun()
 
@@ -584,6 +587,8 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             cmd.append("--require-async-evidence")
         if require_overlap_window:
             cmd.append("--require-overlap-window")
+        if require_cuda_aware_active:
+            cmd.append("--require-cuda-aware-active")
         if simulate:
             cmd.append("--simulate")
 
@@ -593,6 +598,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
         strict_ok = [_as_int(r, "strict_invariants_ok", default=0) for r in bench_rows]
         async_evidence_ok = [_as_int(r, "async_evidence_ok", default=1) for r in bench_rows]
         overlap_window_ok = [_as_int(r, "overlap_window_ok", default=1) for r in bench_rows]
+        cuda_aware_active_ok = [_as_int(r, "cuda_aware_active_ok", default=1) for r in bench_rows]
         hG_vals = [_as_int(r, "hG_max", default=0) for r in bench_rows]
         hV_vals = [_as_int(r, "hV_max", default=0) for r in bench_rows]
         violW_vals = [_as_int(r, "violW_max", default=0) for r in bench_rows]
@@ -622,6 +628,10 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             and (not strict_invariants or all(int(x) == 1 for x in strict_ok))
             and (not require_async_evidence or all(int(x) == 1 for x in async_evidence_ok))
             and (not require_overlap_window or all(int(x) == 1 for x in overlap_window_ok))
+            and (
+                not require_cuda_aware_active
+                or all(int(x) == 1 for x in cuda_aware_active_ok)
+            )
         )
         reasons: list[str] = []
         if not mpirun:
@@ -642,6 +652,10 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             int(x) != 1 for x in overlap_window_ok
         ):
             reasons.append("overlap_window_missing")
+        if require_cuda_aware_active and cuda_aware_active_ok and any(
+            int(x) != 1 for x in cuda_aware_active_ok
+        ):
+            reasons.append("cuda_aware_inactive")
 
         rank_runs.append(
             {
@@ -673,6 +687,11 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 ),
                 "overlap_window_ok": int(
                     1 if (not require_overlap_window or all(int(x) == 1 for x in overlap_window_ok)) else 0
+                ),
+                "cuda_aware_active_ok": int(
+                    1
+                    if (not require_cuda_aware_active or all(int(x) == 1 for x in cuda_aware_active_ok))
+                    else 0
                 ),
                 "reasons": reasons,
                 "out_csv": out_csv,
@@ -715,6 +734,9 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             "async_evidence_ok_all": int(
                 1 if all(int(r.get("async_evidence_ok", 1)) == 1 for r in rank_runs) else 0
             ),
+            "cuda_aware_active_ok_all": int(
+                1 if all(int(r.get("cuda_aware_active_ok", 1)) == 1 for r in rank_runs) else 0
+            ),
             "min_overlap_speedup": min(
                 (float(r["overlap_speedup"]) for r in rank_runs), default=0.0
             ),
@@ -747,6 +769,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 "wfgC_per_100_steps": float(r.get("wfgC_per_100_steps", 0.0) or 0.0),
                 "async_evidence_ok": int(r.get("async_evidence_ok", 1)),
                 "overlap_window_ok": int(r.get("overlap_window_ok", 1)),
+                "cuda_aware_active_ok": int(r.get("cuda_aware_active_ok", 1)),
             },
         }
     summary["by_case"] = by_case
@@ -1292,6 +1315,7 @@ def main():
                         f"recvPollMs={float(rr.get('recv_poll_ms_max', 0.0)):.3f} "
                         f"overlapWinMs={float(rr.get('overlap_window_ms_max', 0.0)):.3f} "
                         f"overlapWinOK={int(rr.get('overlap_window_ok', 1))} "
+                        f"cudaAwareOK={int(rr.get('cuda_aware_active_ok', 1))} "
                         f"wfgC={int(rr.get('wfgC_max', 0))} wfgO={int(rr.get('wfgO_max', 0))} "
                         f"rate={float(rr.get('wfgC_rate', 0.0)):.3f} "
                         f"p100={float(rr.get('wfgC_per_100_steps', 0.0)):.3f}\n"

@@ -28,6 +28,13 @@ def _find_mpirun(user_arg: str | None) -> str | None:
     env_val = os.environ.get("MPIRUN", "").strip()
     if env_val:
         return env_val
+    for cand in (
+        ROOT / ".venv" / "bin" / "mpiexec.hydra",
+        ROOT / ".venv" / "bin" / "mpiexec",
+        ROOT / ".venv" / "bin" / "mpirun",
+    ):
+        if cand.is_file() and os.access(str(cand), os.X_OK):
+            return str(cand)
     return shutil.which("mpiexec.hydra") or shutil.which("mpiexec") or shutil.which("mpirun")
 
 
@@ -108,6 +115,12 @@ def _diag_max_float(text: str, key: str) -> tuple[float, int]:
     return max(vals), len(vals)
 
 
+def _backend_device_counts(text: str) -> tuple[int, int]:
+    cuda_hits = len(re.findall(r"\[backend rank=\d+\]\s+device=cuda\b", str(text)))
+    cpu_hits = len(re.findall(r"\[backend rank=\d+\]\s+device=cpu\b", str(text)))
+    return int(cuda_hits), int(cpu_hits)
+
+
 def _sim_elapsed(*, n_ranks: int, overlap: int, cuda_aware: bool) -> float:
     base = 12.0 / max(1.0, float(n_ranks))
     if int(overlap) == 1:
@@ -129,6 +142,7 @@ def _iter_rows(
     strict_invariants: bool,
     require_async_evidence: bool,
     require_overlap_window: bool,
+    require_cuda_aware_active: bool,
     retries: int,
     strict_zone_width: bool,
     n_steps: int,
@@ -155,6 +169,11 @@ def _iter_rows(
                 or (not require_overlap_window)
                 or (float(overlap_win_ms) > 0.0)
             )
+            cuda_active_ok = bool(
+                (overlap_i == 0)
+                or (not require_cuda_aware_active)
+                or bool(enable_cuda_aware_mpi)
+            )
             rows.append(
                 {
                     "overlap": overlap_i,
@@ -173,6 +192,9 @@ def _iter_rows(
                     "recv_poll_ms_max": float(recv_poll_ms),
                     "overlap_window_ms_max": float(overlap_win_ms),
                     "overlap_window_ok": int(overlap_win_ok),
+                    "backend_cuda_lines": int(max(0, n_ranks) if overlap_i == 1 else 0),
+                    "backend_cpu_lines": 0,
+                    "cuda_aware_active_ok": int(cuda_active_ok),
                     "diag_samples": max(1, int(thermo_every)),
                     "invariants_ok": 1,
                     "strict_invariants_ok": 1,
@@ -269,8 +291,25 @@ def _iter_rows(
                 or (not require_overlap_window)
                 or (float(overlap_window_ms_max) > 0.0)
             )
+            backend_cuda_hits, backend_cpu_hits = _backend_device_counts(text)
+            cuda_aware_inactive = (
+                "[backend] cuda_aware_mpi requested but inactive" in text
+            )
+            cuda_active_ok = bool(
+                (overlap_i == 0)
+                or (not require_cuda_aware_active)
+                or (
+                    (int(rc) == 0)
+                    and (not cuda_aware_inactive)
+                    and (int(backend_cpu_hits) == 0)
+                    and (int(backend_cuda_hits) > 0)
+                )
+            )
             strict_ok = bool(
-                ((not strict_invariants) or (inv_ok and parse_ok)) and async_ok and overlap_win_ok
+                ((not strict_invariants) or (inv_ok and parse_ok))
+                and async_ok
+                and overlap_win_ok
+                and cuda_active_ok
             )
             rows.append(
                 {
@@ -290,6 +329,9 @@ def _iter_rows(
                     "recv_poll_ms_max": float(recv_poll_ms_max),
                     "overlap_window_ms_max": float(overlap_window_ms_max),
                     "overlap_window_ok": int(overlap_win_ok),
+                    "backend_cuda_lines": int(backend_cuda_hits),
+                    "backend_cpu_lines": int(backend_cpu_hits),
+                    "cuda_aware_active_ok": int(cuda_active_ok),
                     "diag_samples": int(diag_samples),
                     "wfgC_max": int(wfgC_max),
                     "wfgO_max": int(wfgO_max),
@@ -337,6 +379,9 @@ def _write_outputs(
                 "recv_poll_ms_max",
                 "overlap_window_ms_max",
                 "overlap_window_ok",
+                "backend_cuda_lines",
+                "backend_cpu_lines",
+                "cuda_aware_active_ok",
                 "diag_samples",
                 "wfgC_max",
                 "wfgO_max",
@@ -383,6 +428,9 @@ def _write_outputs(
                     f"{float(r.get('recv_poll_ms_max', 0.0)):.6f}",
                     f"{float(r.get('overlap_window_ms_max', 0.0)):.6f}",
                     int(r.get("overlap_window_ok", 1)),
+                    int(r.get("backend_cuda_lines", 0)),
+                    int(r.get("backend_cpu_lines", 0)),
+                    int(r.get("cuda_aware_active_ok", 1)),
                     int(r["diag_samples"]),
                     int(r.get("wfgC_max", 0)),
                     int(r.get("wfgO_max", 0)),
@@ -416,6 +464,7 @@ def _write_outputs(
                 f"asyncS={int(r.get('async_send_msgs_max', 0))} asyncB={int(r.get('async_send_bytes_max', 0))} "
                 f"async_ok={int(r.get('async_evidence_ok', 1))} "
                 f"sendPackMs={float(r.get('send_pack_ms_max', 0.0)):.3f} sendWaitMs={float(r.get('send_wait_ms_max', 0.0)):.3f} recvPollMs={float(r.get('recv_poll_ms_max', 0.0)):.3f} overlapWinMs={float(r.get('overlap_window_ms_max', 0.0)):.3f} overlapWinOk={int(r.get('overlap_window_ok', 1))} "
+                f"backendCuda={int(r.get('backend_cuda_lines', 0))} backendCpu={int(r.get('backend_cpu_lines', 0))} cudaAwareOk={int(r.get('cuda_aware_active_ok', 1))} "
                 f"diag_samples={int(r['diag_samples'])} attempts={int(r['attempts'])} simulated={int(r.get('simulated', 0))}\n"
             )
 
@@ -470,6 +519,11 @@ def main() -> int:
         "--require-overlap-window",
         action="store_true",
         help="Require overlap window evidence (overlapWinMs > 0) for overlap=1 rows",
+    )
+    p.add_argument(
+        "--require-cuda-aware-active",
+        action="store_true",
+        help="Require active CUDA-aware transport evidence (no CPU rank lines, cuda rank lines present) for overlap=1 rows",
     )
     p.add_argument(
         "--dry-run", action="store_true", help="Only validate inputs and print planned runs"
@@ -535,6 +589,7 @@ def main() -> int:
         strict_invariants = False
     require_async_evidence = bool(args.require_async_evidence)
     require_overlap_window = bool(args.require_overlap_window)
+    require_cuda_aware_active = bool(args.require_cuda_aware_active)
 
     prefer_simulated = bool(profile.runtime.prefer_simulated) if profile is not None else False
     allow_simulated = bool(profile.runtime.allow_simulated_cluster) if profile is not None else True
@@ -543,6 +598,12 @@ def main() -> int:
     cuda_aware = bool(args.cuda_aware)
     if (not args.cuda_aware) and profile is not None:
         cuda_aware = bool(profile.scaling.cuda_aware_mpi)
+    if require_cuda_aware_active and (not cuda_aware):
+        print(
+            "[bench-mpi-overlap] --require-cuda-aware-active requires cuda-aware mode",
+            file=sys.stderr,
+        )
+        return 2
 
     run_env = apply_profile_env(
         dict(os.environ), profile.runtime.env if profile is not None else {}
@@ -589,6 +650,7 @@ def main() -> int:
         strict_invariants=bool(strict_invariants),
         require_async_evidence=bool(require_async_evidence),
         require_overlap_window=bool(require_overlap_window),
+        require_cuda_aware_active=bool(require_cuda_aware_active),
         retries=max(1, int(retries)),
         strict_zone_width=bool(strict_zone_width),
         n_steps=max(0, int(n_steps)),
@@ -611,6 +673,7 @@ def main() -> int:
         "strict_invariants": bool(strict_invariants),
         "require_async_evidence": bool(require_async_evidence),
         "require_overlap_window": bool(require_overlap_window),
+        "require_cuda_aware_active": bool(require_cuda_aware_active),
         "strict_zone_width": bool(strict_zone_width),
         "cuda_aware": bool(cuda_aware),
         "simulated": bool(simulate),

@@ -81,6 +81,10 @@ MPI overlap artifacts also include async transport observability counters:
 - `async_send_msgs_max`
 - `async_send_bytes_max`
 - `async_evidence_ok` (strict evidence status per row for overlap lanes when enabled)
+- CUDA-aware activity guard counters:
+  - `backend_cuda_lines`
+  - `backend_cpu_lines`
+  - `cuda_aware_active_ok` (strict status when CUDA-aware activity is required)
 - timing counters:
   - `send_pack_ms_max`
   - `send_wait_ms_max`

@@ -63,6 +63,7 @@ Next active CUDA cycle is tracked in `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-
 - MPI overlap/cuda-aware strict:
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_cudaaware_smoke --strict`
+  - `mpi_overlap_cudaaware_smoke` includes a strict CUDA-aware activity guard (fails if overlap-on branch reports CPU fallback/inactive cuda-aware transport).
 - Materials property strict (v2):
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset metal_property_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_metal_property_smoke --strict`
