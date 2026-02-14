@@ -6,6 +6,7 @@ import pytest
 from tdmd.backend import resolve_backend
 from tdmd.celllist import forces_on_targets_celllist
 from tdmd.forces_gpu import (
+    build_neighbor_list_celllist_backend,
     forces_on_targets_celllist_backend,
     forces_on_targets_pair_backend,
     supports_pair_gpu,
@@ -176,6 +177,48 @@ def test_gpu_celllist_table_matches_cpu_celllist():
     target = ids[::4]
     pot = make_potential("table", {"file": "examples/interop/table_zero.table", "keyword": "ZERO"})
     cutoff = 2.5
+    f_cpu = forces_on_targets_celllist(
+        r, box, pot, cutoff, target, ids, rc=cutoff, atom_types=atom_types
+    )
+    f_gpu = forces_on_targets_celllist_backend(
+        r=r,
+        box=box,
+        cutoff=cutoff,
+        rc=cutoff,
+        potential=pot,
+        target_ids=target,
+        candidate_ids=ids,
+        atom_types=atom_types,
+        backend=resolve_backend("cuda"),
+    )
+    assert f_gpu is not None
+    assert np.allclose(f_gpu, f_cpu, atol=1e-9, rtol=1e-9)
+
+
+@pytest.mark.skipif(resolve_backend("auto").device != "cuda", reason="CUDA backend not available")
+def test_gpu_neighbor_list_kernel_parity_with_cpu_celllist():
+    r, _v, box, atom_types = _sample_state(26)
+    ids = np.arange(r.shape[0], dtype=np.int32)
+    target = ids[::2]
+    pot = make_potential("lj", {"epsilon": 1.0, "sigma": 1.0})
+    cutoff = 2.7
+
+    built = build_neighbor_list_celllist_backend(
+        r=r,
+        box=box,
+        cutoff=cutoff,
+        rc=cutoff,
+        target_ids=target,
+        candidate_ids=ids,
+        atom_types=atom_types,
+        backend=resolve_backend("cuda"),
+        max_neighbors=1024,
+    )
+    assert built is not None
+    neighbor_ids, counts = built
+    assert neighbor_ids.shape[0] == target.size
+    assert counts.shape == (target.size,)
+
     f_cpu = forces_on_targets_celllist(
         r, box, pot, cutoff, target, ids, rc=cutoff, atom_types=atom_types
     )
