@@ -10,7 +10,7 @@ Next active CUDA cycle is tracked in `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-
 - No implicit global barriers are introduced.
 - CPU path is formal reference semantics.
 - GPU path is refinement only (numerical parity within documented tolerances).
-- Current implementation is CUDA-first; active cycle focuses on CUDA execution hardening and kernel migration without semantic drift.
+- Current implementation is CUDA-first via CuPy; active cycle migrates to CuPy RawKernel (real CUDA C kernels) for production performance without semantic drift.
 - Visualization/output pipelines are passive observability layers and must not feed back into runtime scheduling/forces.
 - Runtime ensemble support:
   - `serial`: `NVE/NVT/NPT`
@@ -28,7 +28,7 @@ Next active CUDA cycle is tracked in `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-
 | `td_full_mpi` (`static_rr`) | Fixed ownership extension, no ownership transfer in steady-state | Serial closeness is tolerance-based, not identity | strict smoke + MPI overlap strict presets when transport changes |
 | GPU `serial`/`td_local` (current CUDA-first) | Same control semantics as CPU mode | CPU-equivalent within tolerance, fallback explicit | `gpu_smoke`; hardware validation via `*_hw` |
 | GPU `td_full_mpi` / multi-GPU (current CUDA-first) | Same TD-MPI semantics with rank->device mapping | CPU-equivalent within tolerance; transport strategy is refinement | `gpu_*` strict presets + overlap strict presets for transport changes |
-| GPU CUDA execution cycle | Must preserve same TD control semantics as above | Same tolerance policy; hardware-strict no-fallback remains mandatory | Existing `gpu_*` strict gates + `gpu_smoke_hw` |
+| GPU CUDA execution cycle (CuPy RawKernel) | Must preserve same TD control semantics as above | Same tolerance policy; hardware-strict no-fallback remains mandatory | Existing `gpu_*` strict gates + `gpu_smoke_hw` |
 
 ## Non-Guarantees
 - Bitwise equality across modes/backends is not guaranteed.
