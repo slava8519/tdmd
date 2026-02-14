@@ -200,6 +200,65 @@ void tdmd_morse_force_from_neighbors(
 }
 """
 
+_TABLE_FORCE_RAWKERNEL_NAME = "tdmd_table_force_from_neighbors"
+_TABLE_FORCE_RAWKERNEL_SRC = r"""
+extern "C" __global__
+void tdmd_table_force_from_neighbors(
+    const double* r,
+    const int* target_ids,
+    const int* neighbor_ids,
+    const int n_targets,
+    const int max_neighbors,
+    const double box,
+    const double cutoff2,
+    const double* r_grid,
+    const double* f_grid,
+    const int n_grid,
+    double* out_f
+) {
+    const int tid = (int)(blockDim.x * blockIdx.x + threadIdx.x);
+    if (tid >= n_targets) return;
+    const int i = target_ids[tid];
+    double fx = 0.0;
+    double fy = 0.0;
+    double fz = 0.0;
+    for (int k = 0; k < max_neighbors; ++k) {
+        const int j = neighbor_ids[tid * max_neighbors + k];
+        if (j < 0) continue;
+        double rx = r[3 * i + 0] - r[3 * j + 0];
+        double ry = r[3 * i + 1] - r[3 * j + 1];
+        double rz = r[3 * i + 2] - r[3 * j + 2];
+        rx -= box * nearbyint(rx / box);
+        ry -= box * nearbyint(ry / box);
+        rz -= box * nearbyint(rz / box);
+        const double r2 = rx * rx + ry * ry + rz * rz;
+        if (!(r2 > 0.0 && r2 < cutoff2)) continue;
+        const double rr = sqrt(r2 + 1.0e-30);
+        if (rr < r_grid[0] || rr > r_grid[n_grid - 1]) continue;
+        int lo = 0;
+        int hi = n_grid - 1;
+        while (hi - lo > 1) {
+            const int mid = (lo + hi) / 2;
+            if (r_grid[mid] <= rr) lo = mid;
+            else hi = mid;
+        }
+        const double x0 = r_grid[lo];
+        const double x1 = r_grid[lo + 1];
+        const double y0 = f_grid[lo];
+        const double y1 = f_grid[lo + 1];
+        const double t = (rr - x0) / (x1 - x0);
+        const double fmag = y0 + t * (y1 - y0);
+        const double coef = fmag / (rr + 1.0e-30);
+        fx += coef * rx;
+        fy += coef * ry;
+        fz += coef * rz;
+    }
+    out_f[3 * tid + 0] = fx;
+    out_f[3 * tid + 1] = fy;
+    out_f[3 * tid + 2] = fz;
+}
+"""
+
 
 def _interp_with_grad_cp(cp, x, y, q):
     qq = q
@@ -284,6 +343,10 @@ def _lj_force_rawkernel(cp):
 
 def _morse_force_rawkernel(cp):
     return cp.RawKernel(_MORSE_FORCE_RAWKERNEL_SRC, _MORSE_FORCE_RAWKERNEL_NAME)
+
+
+def _table_force_rawkernel(cp):
+    return cp.RawKernel(_TABLE_FORCE_RAWKERNEL_SRC, _TABLE_FORCE_RAWKERNEL_NAME)
 
 
 def _pair_matrix_lj_dense(pot: LennardJones, atom_types: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -559,6 +622,32 @@ def _forces_from_neighbor_matrix_cp(
         )
         return cp.asnumpy(d_out)
 
+    if isinstance(potential, TablePotential):
+        d_out = cp.zeros((tids.size, 3), dtype=cp.float64)
+        d_r_grid = cp.asarray(np.asarray(potential.r_grid, dtype=np.float64))
+        d_f_grid = cp.asarray(np.asarray(potential.f_grid, dtype=np.float64))
+        kernel = _table_force_rawkernel(cp)
+        threads = 128
+        blocks = (int(tids.size) + threads - 1) // threads
+        kernel(
+            (blocks,),
+            (threads,),
+            (
+                cp.asarray(np.asarray(r, dtype=np.float64)).reshape(-1),
+                d_tids,
+                d_nei.reshape(-1),
+                np.int32(tids.size),
+                np.int32(max_neighbors),
+                np.float64(float(box)),
+                np.float64(cutoff2),
+                d_r_grid,
+                d_f_grid,
+                np.int32(int(d_r_grid.size)),
+                d_out.reshape(-1),
+            ),
+        )
+        return cp.asnumpy(d_out)
+
     rr_t = cp.asarray(np.asarray(r[tids], dtype=np.float64))
     rr_j = cp.asarray(np.asarray(r, dtype=np.float64))[js_safe]
     dr = rr_t[:, None, :] - rr_j
@@ -566,17 +655,7 @@ def _forces_from_neighbor_matrix_cp(
     r2 = cp.sum(dr * dr, axis=2)
     mask = valid & (r2 > 0.0) & (r2 < cutoff2)
 
-    if isinstance(potential, TablePotential):
-        rr = cp.sqrt(r2 + NUMERICAL_ZERO)
-        r_grid = cp.asarray(np.asarray(potential.r_grid, dtype=np.float64))
-        f_grid = cp.asarray(np.asarray(potential.f_grid, dtype=np.float64))
-        force_mag = cp.interp(rr, r_grid, f_grid, left=0.0, right=0.0)
-        coef = cp.where(mask, force_mag / (rr + NUMERICAL_ZERO), 0.0)
-    else:
-        return np.zeros((tids.size, 3), dtype=np.float64)
-
-    ff = cp.sum(coef[:, :, None] * dr, axis=1)
-    return cp.asnumpy(ff)
+    return np.zeros((tids.size, 3), dtype=np.float64)
 
 
 def forces_on_targets_pair_backend(
