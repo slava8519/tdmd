@@ -90,6 +90,116 @@ void tdmd_build_neighbor_list(
 }
 """
 
+_LJ_FORCE_RAWKERNEL_NAME = "tdmd_lj_force_from_neighbors"
+_LJ_FORCE_RAWKERNEL_SRC = r"""
+extern "C" __global__
+void tdmd_lj_force_from_neighbors(
+    const double* r,
+    const int* target_ids,
+    const int* neighbor_ids,
+    const int n_targets,
+    const int max_neighbors,
+    const double box,
+    const double cutoff2,
+    const int* atom_types,
+    const double* eps_mat,
+    const double* sig_mat,
+    const int mat_stride,
+    double* out_f
+) {
+    const int tid = (int)(blockDim.x * blockIdx.x + threadIdx.x);
+    if (tid >= n_targets) return;
+    const int i = target_ids[tid];
+    const int ti = atom_types[i];
+    double fx = 0.0;
+    double fy = 0.0;
+    double fz = 0.0;
+    for (int k = 0; k < max_neighbors; ++k) {
+        const int j = neighbor_ids[tid * max_neighbors + k];
+        if (j < 0) continue;
+        double rx = r[3 * i + 0] - r[3 * j + 0];
+        double ry = r[3 * i + 1] - r[3 * j + 1];
+        double rz = r[3 * i + 2] - r[3 * j + 2];
+        rx -= box * nearbyint(rx / box);
+        ry -= box * nearbyint(ry / box);
+        rz -= box * nearbyint(rz / box);
+        const double r2 = rx * rx + ry * ry + rz * rz;
+        if (!(r2 > 0.0 && r2 < cutoff2)) continue;
+        const int tj = atom_types[j];
+        const int pidx = ti * mat_stride + tj;
+        const double eps = eps_mat[pidx];
+        const double sig = sig_mat[pidx];
+        const double inv_r2 = 1.0 / r2;
+        const double sr2 = (sig * sig) * inv_r2;
+        const double sr6 = sr2 * sr2 * sr2;
+        const double sr12 = sr6 * sr6;
+        const double coef = 24.0 * eps * (2.0 * sr12 - sr6) * inv_r2;
+        fx += coef * rx;
+        fy += coef * ry;
+        fz += coef * rz;
+    }
+    out_f[3 * tid + 0] = fx;
+    out_f[3 * tid + 1] = fy;
+    out_f[3 * tid + 2] = fz;
+}
+"""
+
+_MORSE_FORCE_RAWKERNEL_NAME = "tdmd_morse_force_from_neighbors"
+_MORSE_FORCE_RAWKERNEL_SRC = r"""
+extern "C" __global__
+void tdmd_morse_force_from_neighbors(
+    const double* r,
+    const int* target_ids,
+    const int* neighbor_ids,
+    const int n_targets,
+    const int max_neighbors,
+    const double box,
+    const double cutoff2,
+    const int* atom_types,
+    const double* d_mat,
+    const double* a_mat,
+    const double* r0_mat,
+    const int mat_stride,
+    double* out_f
+) {
+    const int tid = (int)(blockDim.x * blockIdx.x + threadIdx.x);
+    if (tid >= n_targets) return;
+    const int i = target_ids[tid];
+    const int ti = atom_types[i];
+    double fx = 0.0;
+    double fy = 0.0;
+    double fz = 0.0;
+    for (int k = 0; k < max_neighbors; ++k) {
+        const int j = neighbor_ids[tid * max_neighbors + k];
+        if (j < 0) continue;
+        double rx = r[3 * i + 0] - r[3 * j + 0];
+        double ry = r[3 * i + 1] - r[3 * j + 1];
+        double rz = r[3 * i + 2] - r[3 * j + 2];
+        rx -= box * nearbyint(rx / box);
+        ry -= box * nearbyint(ry / box);
+        rz -= box * nearbyint(rz / box);
+        const double r2 = rx * rx + ry * ry + rz * rz;
+        if (!(r2 > 0.0 && r2 < cutoff2)) continue;
+        const int tj = atom_types[j];
+        const int pidx = ti * mat_stride + tj;
+        const double D = d_mat[pidx];
+        const double a = a_mat[pidx];
+        const double r0 = r0_mat[pidx];
+        const double rr = sqrt(r2 + 1.0e-30);
+        const double x = rr - r0;
+        const double exp1 = exp(-a * x);
+        const double dUdr = 2.0 * D * a * (1.0 - exp1) * exp1;
+        const double coef = dUdr / (rr + 1.0e-30);
+        fx += coef * rx;
+        fy += coef * ry;
+        fz += coef * rz;
+    }
+    out_f[3 * tid + 0] = fx;
+    out_f[3 * tid + 1] = fy;
+    out_f[3 * tid + 2] = fz;
+}
+"""
+
 
 def _interp_with_grad_cp(cp, x, y, q):
     qq = q
@@ -166,6 +276,55 @@ def _flatten_cell_atoms(cl) -> tuple[np.ndarray, np.ndarray]:
 
 def _neighbor_rawkernel(cp):
     return cp.RawKernel(_NEIGHBOR_RAWKERNEL_SRC, _NEIGHBOR_RAWKERNEL_NAME)
+
+
+def _lj_force_rawkernel(cp):
+    return cp.RawKernel(_LJ_FORCE_RAWKERNEL_SRC, _LJ_FORCE_RAWKERNEL_NAME)
+
+
+def _morse_force_rawkernel(cp):
+    return cp.RawKernel(_MORSE_FORCE_RAWKERNEL_SRC, _MORSE_FORCE_RAWKERNEL_NAME)
+
+
+def _pair_matrix_lj_dense(pot: LennardJones, atom_types: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    max_type = int(np.max(np.asarray(atom_types, dtype=np.int32))) if atom_types.size else 1
+    if pot.pair_coeffs:
+        for (a, b) in pot.pair_coeffs.keys():
+            max_type = max(max_type, int(a), int(b))
+    stride = max(2, max_type + 1)
+    eps = np.full((stride, stride), float(pot.epsilon), dtype=np.float64)
+    sig = np.full((stride, stride), float(pot.sigma), dtype=np.float64)
+    if pot.pair_coeffs:
+        for (a, b), prm in pot.pair_coeffs.items():
+            ai, bi = int(a), int(b)
+            eps[ai, bi] = float(prm["epsilon"])
+            eps[bi, ai] = float(prm["epsilon"])
+            sig[ai, bi] = float(prm["sigma"])
+            sig[bi, ai] = float(prm["sigma"])
+    return eps, sig
+
+
+def _pair_matrix_morse_dense(
+    pot: Morse, atom_types: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    max_type = int(np.max(np.asarray(atom_types, dtype=np.int32))) if atom_types.size else 1
+    if pot.pair_coeffs:
+        for (a, b) in pot.pair_coeffs.keys():
+            max_type = max(max_type, int(a), int(b))
+    stride = max(2, max_type + 1)
+    d = np.full((stride, stride), float(pot.D_e), dtype=np.float64)
+    a = np.full((stride, stride), float(pot.a), dtype=np.float64)
+    r0 = np.full((stride, stride), float(pot.r0), dtype=np.float64)
+    if pot.pair_coeffs:
+        for (x, y), prm in pot.pair_coeffs.items():
+            xi, yi = int(x), int(y)
+            d[xi, yi] = float(prm["D_e"])
+            d[yi, xi] = float(prm["D_e"])
+            a[xi, yi] = float(prm["a"])
+            a[yi, xi] = float(prm["a"])
+            r0[xi, yi] = float(prm["r0"])
+            r0[yi, xi] = float(prm["r0"])
+    return d, a, r0
 
 
 def _set_last_neighbor_diagnostics(diag: NeighborListDiagnostics) -> None:
@@ -332,54 +491,82 @@ def _forces_from_neighbor_matrix_cp(
     if neighbor_ids.size == 0:
         return np.zeros((tids.size, 3), dtype=np.float64)
 
+    d_tids = cp.asarray(tids)
     d_nei = cp.asarray(np.asarray(neighbor_ids, dtype=np.int32))
     valid = d_nei >= 0
     js_safe = cp.where(valid, d_nei, 0)
+    max_neighbors = int(neighbor_ids.shape[1]) if neighbor_ids.ndim == 2 else 0
+    d_types = cp.asarray(np.asarray(atom_types, dtype=np.int32))
+    cutoff2 = float(cutoff) * float(cutoff)
+
+    if isinstance(potential, LennardJones):
+        eps, sig = _pair_matrix_lj_dense(potential, np.asarray(atom_types, dtype=np.int32))
+        d_eps = cp.asarray(eps)
+        d_sig = cp.asarray(sig)
+        d_out = cp.zeros((tids.size, 3), dtype=cp.float64)
+        kernel = _lj_force_rawkernel(cp)
+        threads = 128
+        blocks = (int(tids.size) + threads - 1) // threads
+        kernel(
+            (blocks,),
+            (threads,),
+            (
+                cp.asarray(np.asarray(r, dtype=np.float64)).reshape(-1),
+                d_tids,
+                d_nei.reshape(-1),
+                np.int32(tids.size),
+                np.int32(max_neighbors),
+                np.float64(float(box)),
+                np.float64(cutoff2),
+                d_types,
+                d_eps.reshape(-1),
+                d_sig.reshape(-1),
+                np.int32(int(eps.shape[0])),
+                d_out.reshape(-1),
+            ),
+        )
+        return cp.asnumpy(d_out)
+
+    if isinstance(potential, Morse):
+        d_mat, a_mat, r0_mat = _pair_matrix_morse_dense(
+            potential, np.asarray(atom_types, dtype=np.int32)
+        )
+        d_d = cp.asarray(d_mat)
+        d_a = cp.asarray(a_mat)
+        d_r0 = cp.asarray(r0_mat)
+        d_out = cp.zeros((tids.size, 3), dtype=cp.float64)
+        kernel = _morse_force_rawkernel(cp)
+        threads = 128
+        blocks = (int(tids.size) + threads - 1) // threads
+        kernel(
+            (blocks,),
+            (threads,),
+            (
+                cp.asarray(np.asarray(r, dtype=np.float64)).reshape(-1),
+                d_tids,
+                d_nei.reshape(-1),
+                np.int32(tids.size),
+                np.int32(max_neighbors),
+                np.float64(float(box)),
+                np.float64(cutoff2),
+                d_types,
+                d_d.reshape(-1),
+                d_a.reshape(-1),
+                d_r0.reshape(-1),
+                np.int32(int(d_mat.shape[0])),
+                d_out.reshape(-1),
+            ),
+        )
+        return cp.asnumpy(d_out)
 
     rr_t = cp.asarray(np.asarray(r[tids], dtype=np.float64))
     rr_j = cp.asarray(np.asarray(r, dtype=np.float64))[js_safe]
     dr = rr_t[:, None, :] - rr_j
     dr = dr - float(box) * cp.rint(dr / float(box))
     r2 = cp.sum(dr * dr, axis=2)
-    cutoff2 = float(cutoff) * float(cutoff)
     mask = valid & (r2 > 0.0) & (r2 < cutoff2)
 
-    types_i = cp.asarray(np.asarray(atom_types[tids], dtype=np.int32))[:, None]
-    types_j = cp.asarray(np.asarray(atom_types, dtype=np.int32))[js_safe]
-
-    if isinstance(potential, LennardJones):
-        eps = cp.full(mask.shape, float(potential.epsilon), dtype=cp.float64)
-        sig = cp.full(mask.shape, float(potential.sigma), dtype=cp.float64)
-        if potential.pair_coeffs:
-            for (a, b), prm in potential.pair_coeffs.items():
-                pmask = ((types_i == int(a)) & (types_j == int(b))) | (
-                    (types_i == int(b)) & (types_j == int(a))
-                )
-                eps = cp.where(pmask, float(prm["epsilon"]), eps)
-                sig = cp.where(pmask, float(prm["sigma"]), sig)
-        inv_r2 = cp.where(mask, 1.0 / r2, 0.0)
-        sr2 = (sig * sig) * inv_r2
-        sr6 = sr2 * sr2 * sr2
-        sr12 = sr6 * sr6
-        coef = cp.where(mask, 24.0 * eps * (2.0 * sr12 - sr6) * inv_r2, 0.0)
-    elif isinstance(potential, Morse):
-        d = cp.full(mask.shape, float(potential.D_e), dtype=cp.float64)
-        a = cp.full(mask.shape, float(potential.a), dtype=cp.float64)
-        r0 = cp.full(mask.shape, float(potential.r0), dtype=cp.float64)
-        if potential.pair_coeffs:
-            for (x, y), prm in potential.pair_coeffs.items():
-                pmask = ((types_i == int(x)) & (types_j == int(y))) | (
-                    (types_i == int(y)) & (types_j == int(x))
-                )
-                d = cp.where(pmask, float(prm["D_e"]), d)
-                a = cp.where(pmask, float(prm["a"]), a)
-                r0 = cp.where(pmask, float(prm["r0"]), r0)
-        rr = cp.sqrt(r2 + NUMERICAL_ZERO)
-        x = rr - r0
-        exp1 = cp.exp(-a * x)
-        dUdr = 2.0 * d * a * (1.0 - exp1) * exp1
-        coef = cp.where(mask, dUdr / (rr + NUMERICAL_ZERO), 0.0)
-    elif isinstance(potential, TablePotential):
+    if isinstance(potential, TablePotential):
         rr = cp.sqrt(r2 + NUMERICAL_ZERO)
         r_grid = cp.asarray(np.asarray(potential.r_grid, dtype=np.float64))
         f_grid = cp.asarray(np.asarray(potential.f_grid, dtype=np.float64))
