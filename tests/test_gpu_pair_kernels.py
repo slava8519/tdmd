@@ -9,6 +9,7 @@ from tdmd.forces_gpu import (
     build_neighbor_list_celllist_backend,
     forces_on_targets_celllist_backend,
     forces_on_targets_pair_backend,
+    get_last_neighbor_list_diagnostics,
     supports_pair_gpu,
 )
 from tdmd.io.task import load_task, task_to_arrays
@@ -235,6 +236,34 @@ def test_gpu_neighbor_list_kernel_parity_with_cpu_celllist():
     )
     assert f_gpu is not None
     assert np.allclose(f_gpu, f_cpu, atol=1e-9, rtol=1e-9)
+
+
+@pytest.mark.skipif(resolve_backend("auto").device != "cuda", reason="CUDA backend not available")
+def test_gpu_neighbor_list_kernel_auto_retry_recovers_from_small_initial_buffer():
+    r, _v, box, atom_types = _sample_state(40)
+    ids = np.arange(r.shape[0], dtype=np.int32)
+    target = ids[::2]
+    cutoff = 3.5
+
+    built = build_neighbor_list_celllist_backend(
+        r=r,
+        box=box,
+        cutoff=cutoff,
+        rc=cutoff,
+        target_ids=target,
+        candidate_ids=ids,
+        atom_types=atom_types,
+        backend=resolve_backend("cuda"),
+        max_neighbors=1,
+        max_retries=10,
+    )
+    assert built is not None
+    _neighbor_ids, counts = built
+    assert counts.size == target.size
+    diag = get_last_neighbor_list_diagnostics()
+    assert diag.overflow_retries > 0
+    assert diag.final_max_neighbors > 1
+    assert diag.overflowed is False
 
 
 def test_run_serial_cuda_request_preserves_results():

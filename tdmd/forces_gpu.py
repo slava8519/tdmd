@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .backend import ComputeBackend, resolve_backend
@@ -10,6 +12,19 @@ from .potentials import EAMAlloyPotential, LennardJones, Morse, TablePotential
 
 def supports_pair_gpu(potential) -> bool:
     return isinstance(potential, (LennardJones, Morse, TablePotential, EAMAlloyPotential))
+
+
+@dataclass(frozen=True)
+class NeighborListDiagnostics:
+    attempts: int = 0
+    overflow_retries: int = 0
+    final_max_neighbors: int = 0
+    max_neighbors_used: int = 0
+    avg_neighbors: float = 0.0
+    overflowed: bool = False
+
+
+_LAST_NEIGHBOR_DIAGNOSTICS = NeighborListDiagnostics()
 
 
 _NEIGHBOR_RAWKERNEL_NAME = "tdmd_build_neighbor_list"
@@ -153,34 +168,28 @@ def _neighbor_rawkernel(cp):
     return cp.RawKernel(_NEIGHBOR_RAWKERNEL_SRC, _NEIGHBOR_RAWKERNEL_NAME)
 
 
-def build_neighbor_list_celllist_backend(
+def _set_last_neighbor_diagnostics(diag: NeighborListDiagnostics) -> None:
+    global _LAST_NEIGHBOR_DIAGNOSTICS
+    _LAST_NEIGHBOR_DIAGNOSTICS = diag
+
+
+def get_last_neighbor_list_diagnostics() -> NeighborListDiagnostics:
+    return _LAST_NEIGHBOR_DIAGNOSTICS
+
+
+def _build_neighbor_list_once(
     *,
+    cp,
     r: np.ndarray,
     box: float,
     cutoff: float,
-    rc: float,
     target_ids: np.ndarray,
-    candidate_ids: np.ndarray,
-    atom_types: np.ndarray | None = None,
-    backend: ComputeBackend | None = None,
-    device: str = "cpu",
-    max_neighbors: int = 256,
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """Build per-target neighbor list on CUDA from cell-list buckets."""
-    if backend is None:
-        backend = resolve_backend(device)
-    if backend.device != "cuda":
-        return None
-    cp = backend.xp
-
+    cl,
+    cell_atoms_flat: np.ndarray,
+    cell_starts: np.ndarray,
+    max_neighbors: int,
+) -> tuple[np.ndarray, np.ndarray, bool]:
     tids = np.asarray(target_ids, dtype=np.int32)
-    cids = np.asarray(candidate_ids, dtype=np.int32)
-    if tids.size == 0 or cids.size == 0:
-        return np.full((tids.size, 0), -1, dtype=np.int32), np.zeros((tids.size,), dtype=np.int32)
-
-    cl = build_cell_list(r, cids, float(box), rc=float(rc))
-    cell_atoms_flat, cell_starts = _flatten_cell_atoms(cl)
-
     d_r = cp.asarray(np.asarray(r, dtype=np.float64))
     d_tids = cp.asarray(tids)
     d_tcells = cp.asarray(np.asarray(cl.idx[tids], dtype=np.int32))
@@ -214,11 +223,96 @@ def build_neighbor_list_celllist_backend(
             d_overflow,
         ),
     )
+    overflowed = int(cp.asnumpy(d_overflow)[0]) != 0
+    return cp.asnumpy(d_out_ids), cp.asnumpy(d_out_counts), overflowed
 
-    if int(cp.asnumpy(d_overflow)[0]) != 0:
+
+def build_neighbor_list_celllist_backend(
+    *,
+    r: np.ndarray,
+    box: float,
+    cutoff: float,
+    rc: float,
+    target_ids: np.ndarray,
+    candidate_ids: np.ndarray,
+    atom_types: np.ndarray | None = None,
+    backend: ComputeBackend | None = None,
+    device: str = "cpu",
+    max_neighbors: int = 256,
+    max_retries: int = 6,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Build per-target neighbor list on CUDA from cell-list buckets."""
+    if backend is None:
+        backend = resolve_backend(device)
+    if backend.device != "cuda":
+        return None
+    cp = backend.xp
+
+    tids = np.asarray(target_ids, dtype=np.int32)
+    cids = np.asarray(candidate_ids, dtype=np.int32)
+    if tids.size == 0 or cids.size == 0:
+        _set_last_neighbor_diagnostics(NeighborListDiagnostics())
+        return np.full((tids.size, 0), -1, dtype=np.int32), np.zeros((tids.size,), dtype=np.int32)
+
+    cl = build_cell_list(r, cids, float(box), rc=float(rc))
+    cell_atoms_flat, cell_starts = _flatten_cell_atoms(cl)
+    max_nei = int(max(1, max_neighbors))
+    upper_bound = int(max(1, cids.size))
+    retries = int(max(0, max_retries))
+
+    attempts = 0
+    overflow_retries = 0
+    last_ids: np.ndarray | None = None
+    last_counts: np.ndarray | None = None
+    last_overflow = True
+
+    for _ in range(retries + 1):
+        attempts += 1
+        out_ids, out_counts, overflowed = _build_neighbor_list_once(
+            cp=cp,
+            r=r,
+            box=box,
+            cutoff=cutoff,
+            target_ids=tids,
+            cl=cl,
+            cell_atoms_flat=cell_atoms_flat,
+            cell_starts=cell_starts,
+            max_neighbors=max_nei,
+        )
+        last_ids, last_counts, last_overflow = out_ids, out_counts, overflowed
+        if not overflowed:
+            break
+        overflow_retries += 1
+        if max_nei >= upper_bound:
+            break
+        max_nei = min(upper_bound, max_nei * 2)
+
+    if last_counts is None or last_ids is None:
+        _set_last_neighbor_diagnostics(
+            NeighborListDiagnostics(
+                attempts=attempts,
+                overflow_retries=overflow_retries,
+                final_max_neighbors=max_nei,
+                overflowed=True,
+            )
+        )
         return None
 
-    return cp.asnumpy(d_out_ids), cp.asnumpy(d_out_counts)
+    max_used = int(last_counts.max()) if last_counts.size else 0
+    avg_used = float(last_counts.mean()) if last_counts.size else 0.0
+    _set_last_neighbor_diagnostics(
+        NeighborListDiagnostics(
+            attempts=attempts,
+            overflow_retries=overflow_retries,
+            final_max_neighbors=max_nei,
+            max_neighbors_used=max_used,
+            avg_neighbors=avg_used,
+            overflowed=bool(last_overflow),
+        )
+    )
+    if last_overflow:
+        return None
+    return last_ids, last_counts
 
 
 def _forces_from_neighbor_matrix_cp(
@@ -414,52 +508,6 @@ def forces_on_targets_pair_backend(
     return cp.asnumpy(ff)
 
 
-def _forces_on_targets_celllist_backend_legacy(
-    *,
-    r: np.ndarray,
-    box: float,
-    cutoff: float,
-    rc: float,
-    potential,
-    target_ids: np.ndarray,
-    candidate_ids: np.ndarray,
-    atom_types: np.ndarray,
-    backend: ComputeBackend,
-) -> np.ndarray:
-    """Legacy per-target loop path used as safety fallback."""
-    tids = np.asarray(target_ids, dtype=np.int32)
-    cids = np.asarray(candidate_ids, dtype=np.int32)
-    cl = build_cell_list(r, cids, float(box), rc=float(rc))
-    out = np.zeros((tids.size, 3), dtype=np.float64)
-
-    for ti, i in enumerate(tids.tolist()):
-        ci = tuple(cl.idx[int(i)])
-        neigh = []
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    cj = ((ci[0] + dx) % cl.ncell, (ci[1] + dy) % cl.ncell, (ci[2] + dz) % cl.ncell)
-                    arr = cl.cell_atoms.get(cj)
-                    if arr is not None and arr.size:
-                        neigh.append(arr)
-        if not neigh:
-            continue
-        js = np.concatenate(neigh).astype(np.int32)
-        f1 = forces_on_targets_pair_backend(
-            r=r,
-            box=box,
-            cutoff=cutoff,
-            potential=potential,
-            target_ids=np.array([int(i)], dtype=np.int32),
-            candidate_ids=js,
-            atom_types=atom_types,
-            backend=backend,
-        )
-        if f1 is not None and f1.size:
-            out[ti] = f1[0]
-    return out
-
-
 def forces_on_targets_celllist_backend(
     *,
     r: np.ndarray,
@@ -504,11 +552,11 @@ def forces_on_targets_celllist_backend(
         max_neighbors=max_neighbors,
     )
     if built is None:
-        return _forces_on_targets_celllist_backend_legacy(
+        # Avoid fallback to the legacy Python-loop cell-list path.
+        return forces_on_targets_pair_backend(
             r=r,
             box=box,
             cutoff=cutoff,
-            rc=rc,
             potential=potential,
             target_ids=tids,
             candidate_ids=cids,
