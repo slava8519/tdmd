@@ -306,6 +306,16 @@ PRESETS = {
         require_async_evidence=True,
         timeout=180,
     ),
+    "mpi_overlap_cudaaware_async_observe_smoke": dict(
+        mpi_overlap_mode=True,
+        mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
+        mpi_ranks=[2, 4],
+        overlap_list="0,1",
+        strict_invariants=True,
+        cuda_aware=True,
+        require_async_evidence=True,
+        timeout=180,
+    ),
     "cluster_scale_smoke": dict(
         cluster_scale_mode=True,
         cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
@@ -529,6 +539,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
     cuda_aware = bool(preset.get("cuda_aware", False))
     strict_invariants = bool(preset.get("strict_invariants", True))
     require_async_evidence = bool(preset.get("require_async_evidence", False))
+    simulate = bool(preset.get("simulate", False))
     mpirun = str(preset.get("mpirun", "")).strip() or _detect_mpirun()
 
     rank_runs: list[dict[str, object]] = []
@@ -559,6 +570,8 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             cmd.append("--no-strict-invariants")
         if require_async_evidence:
             cmd.append("--require-async-evidence")
+        if simulate:
+            cmd.append("--simulate")
 
         proc = subprocess.run(cmd, cwd=ROOT_DIR, capture_output=True, text=True)
         bench_rows = _read_overlap_csv(out_csv)
