@@ -155,6 +155,9 @@ class _TDMPICommContext:
     lag_value_fn: Callable[[int], int]
     set_holder_fn: Callable[[int, int], None]
     validate_halo_geometry_fn: Callable[[int, np.ndarray], None]
+    pending_send_reqs: list[object]
+    pending_send_keepalive: list[object]
+    pending_send_post_ts: float | None
 
 
 def _init_td_full_mpi_runtime(
@@ -582,6 +585,7 @@ def _run_td_warmup_phase(
     start_compute_fn,
     finish_compute_fn,
     send_phase_fn,
+    flush_async_sends_fn,
     comm,
     use_verlet: bool,
     verlet_k_steps: int,
@@ -631,6 +635,7 @@ def _run_td_warmup_phase(
         else:
             send_phase_fn(tag_base=7000 + 10 * w, rc=rc, step=w)
             recv_phase_fn(tag_base=7000 + 10 * w)
+        flush_async_sends_fn()
         comm.Barrier()
 
 
@@ -1033,6 +1038,7 @@ def _handle_record(
 
 
 def _recv_phase(ctx: _TDMPICommContext, *, tag_base: int) -> None:
+    _drain_async_sends(ctx, block=True)
     t0 = time.perf_counter()
     # Forward direction: from prev_rank on tag_base.
     while ctx.comm.Iprobe(source=ctx.prev_rank, tag=tag_base):
@@ -1067,6 +1073,37 @@ def _recv_phase(ctx: _TDMPICommContext, *, tag_base: int) -> None:
             )
     dt_ms = float((time.perf_counter() - t0) * 1000.0)
     ctx.autom.diag["recv_poll_ms"] = float(ctx.autom.diag.get("recv_poll_ms", 0.0)) + dt_ms
+
+
+def _drain_async_sends(ctx: _TDMPICommContext, *, block: bool) -> None:
+    if not ctx.use_async_send:
+        return
+    if not ctx.pending_send_reqs:
+        ctx.pending_send_post_ts = None
+        return
+
+    if ctx.pending_send_post_ts is not None:
+        overlap_ms = float((time.perf_counter() - float(ctx.pending_send_post_ts)) * 1000.0)
+        if overlap_ms > 0.0:
+            ctx.autom.diag["overlap_window_ms"] = float(
+                ctx.autom.diag.get("overlap_window_ms", 0.0)
+            ) + overlap_ms
+
+    if block:
+        t_wait0 = time.perf_counter()
+        MPI.Request.Waitall(ctx.pending_send_reqs)
+        wait_ms = float((time.perf_counter() - t_wait0) * 1000.0)
+        ctx.autom.diag["send_wait_ms"] = float(ctx.autom.diag.get("send_wait_ms", 0.0)) + wait_ms
+        ctx.pending_send_reqs.clear()
+        ctx.pending_send_keepalive.clear()
+        ctx.pending_send_post_ts = None
+        return
+
+    all_done, _ = MPI.Request.Testall(ctx.pending_send_reqs)
+    if bool(all_done):
+        ctx.pending_send_reqs.clear()
+        ctx.pending_send_keepalive.clear()
+        ctx.pending_send_post_ts = None
 
 
 def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) -> None:
@@ -1224,10 +1261,7 @@ def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) 
             )
     ctx.autom.clear_outbox()
 
-    send_reqs = []
-    send_keepalive = []
     t_pack_ms = 0.0
-    first_async_post_ts = None
     for dest_rank, recs in buckets.items():
         if not recs:
             continue
@@ -1236,29 +1270,21 @@ def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) 
         t_pack_ms += float((time.perf_counter() - t_pack0) * 1000.0)
         if ctx.use_async_send:
             reqs, refs = post_send_payload(ctx.comm, int(dest_rank), tag=tag_base, payload=payload)
-            send_reqs.extend(reqs)
-            send_keepalive.extend(refs)
-            if reqs and first_async_post_ts is None:
-                first_async_post_ts = time.perf_counter()
+            if reqs:
+                if ctx.pending_send_post_ts is None:
+                    ctx.pending_send_post_ts = time.perf_counter()
+                ctx.pending_send_reqs.extend(reqs)
+            if refs:
+                ctx.pending_send_keepalive.extend(refs)
             ctx.autom.diag["async_send_msgs"] = ctx.autom.diag.get("async_send_msgs", 0) + 1
             ctx.autom.diag["async_send_bytes"] = ctx.autom.diag.get("async_send_bytes", 0) + int(
                 len(payload)
             )
         else:
             send_payload(ctx.comm, int(dest_rank), tag=tag_base, payload=payload)
-    ctx.autom.diag["send_pack_ms"] = float(ctx.autom.diag.get("send_pack_ms", 0.0)) + float(t_pack_ms)
-    if send_reqs:
-        t_wait0 = time.perf_counter()
-        if first_async_post_ts is not None:
-            overlap_ms = float((t_wait0 - first_async_post_ts) * 1000.0)
-            if overlap_ms > 0.0:
-                ctx.autom.diag["overlap_window_ms"] = float(
-                    ctx.autom.diag.get("overlap_window_ms", 0.0)
-                ) + overlap_ms
-        MPI.Request.Waitall(send_reqs)
-        wait_ms = float((time.perf_counter() - t_wait0) * 1000.0)
-        ctx.autom.diag["send_wait_ms"] = float(ctx.autom.diag.get("send_wait_ms", 0.0)) + wait_ms
-        send_keepalive.clear()
+    ctx.autom.diag["send_pack_ms"] = float(ctx.autom.diag.get("send_pack_ms", 0.0)) + float(
+        t_pack_ms
+    )
 
 
 @dataclass
@@ -1999,6 +2025,9 @@ def _run_td_full_mpi_1d_legacy(
         lag_value_fn=_lag_value,
         set_holder_fn=_set_holder,
         validate_halo_geometry_fn=_validate_halo_geometry,
+        pending_send_reqs=[],
+        pending_send_keepalive=[],
+        pending_send_post_ts=None,
     )
 
     def recv_phase(tag_base: int) -> None:
@@ -2010,6 +2039,9 @@ def _run_td_full_mpi_1d_legacy(
         # Keep communication geometry aligned with the current box (NPT can rescale it).
         comm_ctx.box = float(sim.box)
         _send_phase(comm_ctx, tag_base=int(tag_base), rc=float(rc), step=int(step))
+
+    def flush_async_sends() -> None:
+        _drain_async_sends(comm_ctx, block=True)
 
     # --- initial output ---
     if output_enabled:
@@ -2043,6 +2075,7 @@ def _run_td_full_mpi_1d_legacy(
         start_compute_fn=_start_compute_with_trace,
         finish_compute_fn=_finish_compute_with_trace,
         send_phase_fn=send_phase,
+        flush_async_sends_fn=flush_async_sends,
         comm=comm,
         use_verlet=bool(config.use_verlet),
         verlet_k_steps=int(config.verlet_k_steps),
@@ -2087,6 +2120,7 @@ def _run_td_full_mpi_1d_legacy(
     )
 
     # --- cleanup ---
+    flush_async_sends()
     if output is not None:
         output.close()
     if trace is not None:
