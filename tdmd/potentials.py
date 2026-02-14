@@ -551,7 +551,9 @@ class EAMAlloyPotential:
         atom_types: np.ndarray,
         target_ids: np.ndarray,
         candidate_ids: np.ndarray,
+        rc: float | None = None,
     ) -> np.ndarray:
+        del rc
         tgt = np.asarray(target_ids, dtype=np.int32)
         cand_in = np.asarray(candidate_ids, dtype=np.int32)
         if tgt.ndim != 1 or cand_in.ndim != 1:

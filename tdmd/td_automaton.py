@@ -517,14 +517,26 @@ class TDAutomaton1W:
             support = z.table.support_ids() if z.table is not None else z.atom_ids
             if support.size == 0:
                 support = z.atom_ids
-            f = potential.forces_on_targets(
-                r=r,
-                box=self.box,
-                cutoff=cutoff,
-                atom_types=atom_types,
-                target_ids=z.atom_ids,
-                candidate_ids=support,
-            )
+            try:
+                f = potential.forces_on_targets(
+                    r=r,
+                    box=self.box,
+                    cutoff=cutoff,
+                    rc=float(rc),
+                    atom_types=atom_types,
+                    target_ids=z.atom_ids,
+                    candidate_ids=support,
+                )
+            except TypeError:
+                # Backward compatibility: legacy force callbacks may not accept rc.
+                f = potential.forces_on_targets(
+                    r=r,
+                    box=self.box,
+                    cutoff=cutoff,
+                    atom_types=atom_types,
+                    target_ids=z.atom_ids,
+                    candidate_ids=support,
+                )
         elif z.table is not None and isinstance(z.table.impl, CellList):
             f = forces_on_targets_celllist_compact(
                 r, self.box, potential, cutoff, z.atom_ids, z.table.impl, atom_types=atom_types
@@ -552,14 +564,26 @@ class TDAutomaton1W:
                 support = z.table.support_ids() if z.table is not None else z.atom_ids
                 if support.size == 0:
                     support = z.atom_ids
-                f2 = potential.forces_on_targets(
-                    r=r,
-                    box=self.box,
-                    cutoff=cutoff,
-                    atom_types=atom_types,
-                    target_ids=z.atom_ids,
-                    candidate_ids=support,
-                )
+                try:
+                    f2 = potential.forces_on_targets(
+                        r=r,
+                        box=self.box,
+                        cutoff=cutoff,
+                        rc=float(rc),
+                        atom_types=atom_types,
+                        target_ids=z.atom_ids,
+                        candidate_ids=support,
+                    )
+                except TypeError:
+                    # Backward compatibility: legacy force callbacks may not accept rc.
+                    f2 = potential.forces_on_targets(
+                        r=r,
+                        box=self.box,
+                        cutoff=cutoff,
+                        atom_types=atom_types,
+                        target_ids=z.atom_ids,
+                        candidate_ids=support,
+                    )
             elif z.table is not None and isinstance(z.table.impl, CellList):
                 f2 = forces_on_targets_celllist_compact(
                     r, self.box, potential, cutoff, z.atom_ids, z.table.impl, atom_types=atom_types

@@ -84,15 +84,17 @@ class _GPUPotentialRefinement:
         r: np.ndarray,
         box: float,
         cutoff: float,
+        rc: float | None = None,
         atom_types: np.ndarray,
         target_ids: np.ndarray,
         candidate_ids: np.ndarray,
     ) -> np.ndarray:
+        rc_eff = float(cutoff) if rc is None else float(rc)
         f_gpu = try_gpu_forces_on_targets(
             r=r,
             box=float(box),
             cutoff=float(cutoff),
-            rc=float(cutoff),
+            rc=rc_eff,
             potential=self._base,
             target_ids=np.asarray(target_ids, dtype=np.int32),
             candidate_ids=np.asarray(candidate_ids, dtype=np.int32),
@@ -105,6 +107,7 @@ class _GPUPotentialRefinement:
             r=r,
             box=float(box),
             cutoff=float(cutoff),
+            rc=rc_eff,
             atom_types=np.asarray(atom_types, dtype=np.int32),
             target_ids=np.asarray(target_ids, dtype=np.int32),
             candidate_ids=np.asarray(candidate_ids, dtype=np.int32),

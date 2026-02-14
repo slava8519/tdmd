@@ -15,10 +15,12 @@ class _DummyPotential:
         r: np.ndarray,
         box: float,
         cutoff: float,
+        rc: float | None = None,
         atom_types: np.ndarray,
         target_ids: np.ndarray,
         candidate_ids: np.ndarray,
     ) -> np.ndarray:
+        del rc
         self.cpu_calls += 1
         return np.full((int(target_ids.size), 3), 7.0, dtype=float)
 
@@ -37,6 +39,7 @@ def test_gpu_refinement_prefers_gpu_force_path(monkeypatch):
 
     def _fake_gpu(**kwargs):
         tids = np.asarray(kwargs["target_ids"], dtype=np.int32)
+        assert float(kwargs["rc"]) == 3.25
         return np.full((int(tids.size), 3), 3.0, dtype=float)
 
     monkeypatch.setattr(td_full_mpi, "try_gpu_forces_on_targets", _fake_gpu)
@@ -44,6 +47,7 @@ def test_gpu_refinement_prefers_gpu_force_path(monkeypatch):
         r=np.zeros((5, 3), dtype=float),
         box=10.0,
         cutoff=2.5,
+        rc=3.25,
         atom_types=np.ones((5,), dtype=np.int32),
         target_ids=np.array([0, 1, 2], dtype=np.int32),
         candidate_ids=np.array([0, 1, 2, 3], dtype=np.int32),
