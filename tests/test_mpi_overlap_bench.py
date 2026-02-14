@@ -46,6 +46,7 @@ def test_bench_mpi_overlap_simulated_outputs_async_columns(tmp_path):
         "--overlap-list",
         "0,1",
         "--simulate",
+        "--require-async-evidence",
         "--out",
         str(out_csv),
         "--md",
@@ -59,3 +60,8 @@ def test_bench_mpi_overlap_simulated_outputs_async_columns(tmp_path):
         assert reader.fieldnames is not None
         assert "async_send_msgs_max" in reader.fieldnames
         assert "async_send_bytes_max" in reader.fieldnames
+        assert "async_evidence_ok" in reader.fieldnames
+        rows = list(reader)
+        overlap1 = [r for r in rows if r.get("overlap") == "1"]
+        assert overlap1
+        assert all(int(r.get("async_evidence_ok", "0")) == 1 for r in overlap1)

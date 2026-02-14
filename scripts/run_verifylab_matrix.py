@@ -297,6 +297,15 @@ PRESETS = {
         cuda_aware=True,
         timeout=180,
     ),
+    "mpi_overlap_async_observe_smoke": dict(
+        mpi_overlap_mode=True,
+        mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
+        mpi_ranks=[2, 4],
+        overlap_list="0,1",
+        strict_invariants=True,
+        require_async_evidence=True,
+        timeout=180,
+    ),
     "cluster_scale_smoke": dict(
         cluster_scale_mode=True,
         cluster_profile="examples/cluster/cluster_profile_smoke.yaml",
@@ -519,6 +528,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
     timeout = int(preset.get("timeout", 180))
     cuda_aware = bool(preset.get("cuda_aware", False))
     strict_invariants = bool(preset.get("strict_invariants", True))
+    require_async_evidence = bool(preset.get("require_async_evidence", False))
     mpirun = str(preset.get("mpirun", "")).strip() or _detect_mpirun()
 
     rank_runs: list[dict[str, object]] = []
@@ -547,11 +557,14 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             cmd.append("--cuda-aware")
         if not strict_invariants:
             cmd.append("--no-strict-invariants")
+        if require_async_evidence:
+            cmd.append("--require-async-evidence")
 
         proc = subprocess.run(cmd, cwd=ROOT_DIR, capture_output=True, text=True)
         bench_rows = _read_overlap_csv(out_csv)
         run_rcs = [_as_int(r, "returncode", default=1) for r in bench_rows]
         strict_ok = [_as_int(r, "strict_invariants_ok", default=0) for r in bench_rows]
+        async_evidence_ok = [_as_int(r, "async_evidence_ok", default=1) for r in bench_rows]
         hG_vals = [_as_int(r, "hG_max", default=0) for r in bench_rows]
         hV_vals = [_as_int(r, "hV_max", default=0) for r in bench_rows]
         violW_vals = [_as_int(r, "violW_max", default=0) for r in bench_rows]
@@ -575,6 +588,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             and len(bench_rows) > 0
             and all(int(x) == 0 for x in run_rcs)
             and (not strict_invariants or all(int(x) == 1 for x in strict_ok))
+            and (not require_async_evidence or all(int(x) == 1 for x in async_evidence_ok))
         )
         reasons: list[str] = []
         if not mpirun:
@@ -587,6 +601,10 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             reasons.append("inner_run_failed")
         if strict_invariants and strict_ok and any(int(x) != 1 for x in strict_ok):
             reasons.append("strict_invariants_failed")
+        if require_async_evidence and async_evidence_ok and any(
+            int(x) != 1 for x in async_evidence_ok
+        ):
+            reasons.append("async_evidence_missing")
 
         rank_runs.append(
             {
@@ -607,6 +625,11 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 "wfgC_rate": float(max(wfgC_rate_vals) if wfgC_rate_vals else 0.0),
                 "wfgC_per_100_steps": float(max(wfgC_p100_vals) if wfgC_p100_vals else 0.0),
                 "diag_samples_min": int(min(diag_vals) if diag_vals else 0),
+                "async_evidence_ok": int(
+                    1
+                    if (not require_async_evidence or all(int(x) == 1 for x in async_evidence_ok))
+                    else 0
+                ),
                 "reasons": reasons,
                 "out_csv": out_csv,
                 "out_md": out_md,
@@ -632,6 +655,9 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             ),
             "max_async_send_bytes": max(
                 (int(r.get("async_send_bytes_max", 0)) for r in rank_runs), default=0
+            ),
+            "async_evidence_ok_all": int(
+                1 if all(int(r.get("async_evidence_ok", 1)) == 1 for r in rank_runs) else 0
             ),
             "min_overlap_speedup": min(
                 (float(r["overlap_speedup"]) for r in rank_runs), default=0.0
@@ -659,6 +685,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                 "wfgS_max": int(r.get("wfgS_max", 0)),
                 "wfgC_rate": float(r.get("wfgC_rate", 0.0) or 0.0),
                 "wfgC_per_100_steps": float(r.get("wfgC_per_100_steps", 0.0) or 0.0),
+                "async_evidence_ok": int(r.get("async_evidence_ok", 1)),
             },
         }
     summary["by_case"] = by_case
@@ -1198,6 +1225,7 @@ def main():
                         f"violW={int(rr.get('violW_max', 0))} lagV={int(rr.get('lagV_max', 0))} "
                         f"asyncS={int(rr.get('async_send_msgs_max', 0))} "
                         f"asyncB={int(rr.get('async_send_bytes_max', 0))} "
+                        f"asyncOK={int(rr.get('async_evidence_ok', 1))} "
                         f"wfgC={int(rr.get('wfgC_max', 0))} wfgO={int(rr.get('wfgO_max', 0))} "
                         f"rate={float(rr.get('wfgC_rate', 0.0)):.3f} "
                         f"p100={float(rr.get('wfgC_per_100_steps', 0.0)):.3f}\n"

@@ -117,6 +117,7 @@ def _iter_rows(
     timeout: int,
     root: Path,
     strict_invariants: bool,
+    require_async_evidence: bool,
     retries: int,
     strict_zone_width: bool,
     n_steps: int,
@@ -131,6 +132,9 @@ def _iter_rows(
             elapsed = _sim_elapsed(
                 n_ranks=int(n_ranks), overlap=overlap_i, cuda_aware=bool(enable_cuda_aware_mpi)
             )
+            async_msgs = int(max(0, n_ranks)) if overlap_i == 1 else 0
+            async_bytes = int(async_msgs * 64)
+            async_ok = bool((overlap_i == 0) or (not require_async_evidence) or (async_msgs > 0))
             rows.append(
                 {
                     "overlap": overlap_i,
@@ -141,8 +145,9 @@ def _iter_rows(
                     "hV_max": 0,
                     "violW_max": 0,
                     "lagV_max": 0,
-                    "async_send_msgs_max": 0,
-                    "async_send_bytes_max": 0,
+                    "async_send_msgs_max": int(async_msgs),
+                    "async_send_bytes_max": int(async_bytes),
+                    "async_evidence_ok": int(async_ok),
                     "diag_samples": max(1, int(thermo_every)),
                     "invariants_ok": 1,
                     "strict_invariants_ok": 1,
@@ -213,7 +218,12 @@ def _iter_rows(
             )
             inv_ok = bool((hG_max == 0) and (hV_max == 0) and (violW_max == 0) and (lagV_max == 0))
             parse_ok = bool(diag_samples > 0)
-            strict_ok = bool((not strict_invariants) or (inv_ok and parse_ok))
+            async_ok = bool(
+                (overlap_i == 0)
+                or (not require_async_evidence)
+                or ((int(asyncS_max) > 0) and (int(asyncB_max) > 0))
+            )
+            strict_ok = bool(((not strict_invariants) or (inv_ok and parse_ok)) and async_ok)
             rows.append(
                 {
                     "overlap": overlap_i,
@@ -226,6 +236,7 @@ def _iter_rows(
                     "lagV_max": int(lagV_max),
                     "async_send_msgs_max": int(asyncS_max),
                     "async_send_bytes_max": int(asyncB_max),
+                    "async_evidence_ok": int(async_ok),
                     "diag_samples": int(diag_samples),
                     "wfgC_max": int(wfgC_max),
                     "wfgO_max": int(wfgO_max),
@@ -267,6 +278,7 @@ def _write_outputs(
                 "lagV_max",
                 "async_send_msgs_max",
                 "async_send_bytes_max",
+                "async_evidence_ok",
                 "diag_samples",
                 "wfgC_max",
                 "wfgO_max",
@@ -307,6 +319,7 @@ def _write_outputs(
                     int(r["lagV_max"]),
                     int(r.get("async_send_msgs_max", 0)),
                     int(r.get("async_send_bytes_max", 0)),
+                    int(r.get("async_evidence_ok", 1)),
                     int(r["diag_samples"]),
                     int(r.get("wfgC_max", 0)),
                     int(r.get("wfgO_max", 0)),
@@ -338,6 +351,7 @@ def _write_outputs(
                 f"rc={int(r['returncode'])} elapsed={float(r['elapsed_sec']):.3f}s "
                 f"hG={int(r['hG_max'])} hV={int(r['hV_max'])} violW={int(r['violW_max'])} lagV={int(r['lagV_max'])} "
                 f"asyncS={int(r.get('async_send_msgs_max', 0))} asyncB={int(r.get('async_send_bytes_max', 0))} "
+                f"async_ok={int(r.get('async_evidence_ok', 1))} "
                 f"diag_samples={int(r['diag_samples'])} attempts={int(r['attempts'])} simulated={int(r.get('simulated', 0))}\n"
             )
 
@@ -382,6 +396,11 @@ def main() -> int:
         "--no-strict-invariants",
         action="store_true",
         help="Do not fail run when invariant counters are non-zero or missing",
+    )
+    p.add_argument(
+        "--require-async-evidence",
+        action="store_true",
+        help="Require async overlap evidence (asyncS/asyncB > 0) for overlap=1 rows",
     )
     p.add_argument(
         "--dry-run", action="store_true", help="Only validate inputs and print planned runs"
@@ -445,6 +464,7 @@ def main() -> int:
     strict_invariants = bool(profile.runtime.strict_invariants) if profile is not None else True
     if args.no_strict_invariants:
         strict_invariants = False
+    require_async_evidence = bool(args.require_async_evidence)
 
     prefer_simulated = bool(profile.runtime.prefer_simulated) if profile is not None else False
     allow_simulated = bool(profile.runtime.allow_simulated_cluster) if profile is not None else True
@@ -493,6 +513,7 @@ def main() -> int:
         timeout=int(timeout),
         root=ROOT,
         strict_invariants=bool(strict_invariants),
+        require_async_evidence=bool(require_async_evidence),
         retries=max(1, int(retries)),
         strict_zone_width=bool(strict_zone_width),
         n_steps=max(0, int(n_steps)),
@@ -513,6 +534,7 @@ def main() -> int:
         "n_steps": int(n_steps),
         "thermo_every": int(thermo_every),
         "strict_invariants": bool(strict_invariants),
+        "require_async_evidence": bool(require_async_evidence),
         "strict_zone_width": bool(strict_zone_width),
         "cuda_aware": bool(cuda_aware),
         "simulated": bool(simulate),

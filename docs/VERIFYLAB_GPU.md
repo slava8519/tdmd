@@ -71,12 +71,14 @@ MPI overlap strict presets in VerifyLab matrix:
 ```bash
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_smoke --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_cudaaware_smoke --strict
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_overlap_async_observe_smoke --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset mpi_transport_matrix_smoke --strict
 ```
 
 MPI overlap artifacts also include async transport observability counters:
 - `async_send_msgs_max`
 - `async_send_bytes_max`
+- `async_evidence_ok` (strict evidence status per row for overlap lanes when enabled)
 
 Cluster-profile transport matrix helper (fabric-aware, profile-driven):
 ```bash
