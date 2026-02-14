@@ -27,6 +27,50 @@ class NeighborListDiagnostics:
 _LAST_NEIGHBOR_DIAGNOSTICS = NeighborListDiagnostics()
 
 
+@dataclass
+class _GPUStateCache:
+    host_id: int = -1
+    shape: tuple[int, int] = (0, 0)
+    d_r: object | None = None
+    d_atom_types: object | None = None
+
+
+_GPU_STATE_CACHE = _GPUStateCache()
+
+
+def _get_device_state(
+    *,
+    cp,
+    r: np.ndarray,
+    atom_types: np.ndarray,
+    update_ids: np.ndarray | None = None,
+):
+    """Maintain persistent device arrays for positions and atom types."""
+    global _GPU_STATE_CACHE
+
+    rr = np.asarray(r, dtype=np.float64)
+    at = np.asarray(atom_types, dtype=np.int32)
+    reset = (
+        _GPU_STATE_CACHE.d_r is None
+        or _GPU_STATE_CACHE.d_atom_types is None
+        or _GPU_STATE_CACHE.host_id != id(rr)
+        or _GPU_STATE_CACHE.shape != rr.shape
+    )
+    if reset:
+        _GPU_STATE_CACHE.host_id = id(rr)
+        _GPU_STATE_CACHE.shape = rr.shape
+        _GPU_STATE_CACHE.d_r = cp.asarray(rr)
+        _GPU_STATE_CACHE.d_atom_types = cp.asarray(at)
+    elif update_ids is not None:
+        ids = np.asarray(update_ids, dtype=np.int32)
+        if ids.size:
+            uniq = np.unique(ids)
+            d_idx = cp.asarray(uniq)
+            _GPU_STATE_CACHE.d_r[d_idx] = cp.asarray(rr[uniq])
+            _GPU_STATE_CACHE.d_atom_types[d_idx] = cp.asarray(at[uniq])
+    return _GPU_STATE_CACHE.d_r, _GPU_STATE_CACHE.d_atom_types
+
+
 _NEIGHBOR_RAWKERNEL_NAME = "tdmd_build_neighbor_list"
 _NEIGHBOR_RAWKERNEL_SRC = r"""
 extern "C" __global__
@@ -422,7 +466,7 @@ def get_last_neighbor_list_diagnostics() -> NeighborListDiagnostics:
 def _build_neighbor_list_once(
     *,
     cp,
-    r: np.ndarray,
+    d_r,
     box: float,
     cutoff: float,
     target_ids: np.ndarray,
@@ -432,7 +476,6 @@ def _build_neighbor_list_once(
     max_neighbors: int,
 ) -> tuple[np.ndarray, np.ndarray, bool]:
     tids = np.asarray(target_ids, dtype=np.int32)
-    d_r = cp.asarray(np.asarray(r, dtype=np.float64))
     d_tids = cp.asarray(tids)
     d_tcells = cp.asarray(np.asarray(cl.idx[tids], dtype=np.int32))
     d_flat = cp.asarray(cell_atoms_flat)
@@ -496,6 +539,13 @@ def build_neighbor_list_celllist_backend(
         _set_last_neighbor_diagnostics(NeighborListDiagnostics())
         return np.full((tids.size, 0), -1, dtype=np.int32), np.zeros((tids.size,), dtype=np.int32)
 
+    if atom_types is None:
+        atom_types_arr = np.zeros((np.asarray(r).shape[0],), dtype=np.int32)
+    else:
+        atom_types_arr = np.asarray(atom_types, dtype=np.int32)
+    update_ids = np.unique(np.concatenate((tids, cids)).astype(np.int32))
+    d_r, _ = _get_device_state(cp=cp, r=r, atom_types=atom_types_arr, update_ids=update_ids)
+
     cl = build_cell_list(r, cids, float(box), rc=float(rc))
     cell_atoms_flat, cell_starts = _flatten_cell_atoms(cl)
     max_nei = int(max(1, max_neighbors))
@@ -512,7 +562,7 @@ def build_neighbor_list_celllist_backend(
         attempts += 1
         out_ids, out_counts, overflowed = _build_neighbor_list_once(
             cp=cp,
-            r=r,
+            d_r=d_r,
             box=box,
             cutoff=cutoff,
             target_ids=tids,
@@ -567,6 +617,8 @@ def _forces_from_neighbor_matrix_cp(
     target_ids: np.ndarray,
     neighbor_ids: np.ndarray,
     atom_types: np.ndarray,
+    d_r=None,
+    d_types=None,
 ) -> np.ndarray:
     tids = np.asarray(target_ids, dtype=np.int32)
     if tids.size == 0:
@@ -579,7 +631,16 @@ def _forces_from_neighbor_matrix_cp(
     valid = d_nei >= 0
     js_safe = cp.where(valid, d_nei, 0)
     max_neighbors = int(neighbor_ids.shape[1]) if neighbor_ids.ndim == 2 else 0
-    d_types = cp.asarray(np.asarray(atom_types, dtype=np.int32))
+    if d_r is None or d_types is None:
+        js = np.asarray(neighbor_ids, dtype=np.int32).reshape(-1)
+        js = js[js >= 0]
+        update_ids = np.unique(np.concatenate((tids, js)).astype(np.int32))
+        d_r, d_types = _get_device_state(
+            cp=cp,
+            r=r,
+            atom_types=np.asarray(atom_types, dtype=np.int32),
+            update_ids=update_ids,
+        )
     cutoff2 = float(cutoff) * float(cutoff)
 
     if isinstance(potential, LennardJones):
@@ -594,7 +655,7 @@ def _forces_from_neighbor_matrix_cp(
             (blocks,),
             (threads,),
             (
-                cp.asarray(np.asarray(r, dtype=np.float64)).reshape(-1),
+                d_r.reshape(-1),
                 d_tids,
                 d_nei.reshape(-1),
                 np.int32(tids.size),
@@ -625,7 +686,7 @@ def _forces_from_neighbor_matrix_cp(
             (blocks,),
             (threads,),
             (
-                cp.asarray(np.asarray(r, dtype=np.float64)).reshape(-1),
+                d_r.reshape(-1),
                 d_tids,
                 d_nei.reshape(-1),
                 np.int32(tids.size),
@@ -653,7 +714,7 @@ def _forces_from_neighbor_matrix_cp(
             (blocks,),
             (threads,),
             (
-                cp.asarray(np.asarray(r, dtype=np.float64)).reshape(-1),
+                d_r.reshape(-1),
                 d_tids,
                 d_nei.reshape(-1),
                 np.int32(tids.size),
@@ -668,8 +729,8 @@ def _forces_from_neighbor_matrix_cp(
         )
         return cp.asnumpy(d_out)
 
-    rr_t = cp.asarray(np.asarray(r[tids], dtype=np.float64))
-    rr_j = cp.asarray(np.asarray(r, dtype=np.float64))[js_safe]
+    rr_t = d_r[d_tids]
+    rr_j = d_r[js_safe]
     dr = rr_t[:, None, :] - rr_j
     dr = dr - float(box) * cp.rint(dr / float(box))
     r2 = cp.sum(dr * dr, axis=2)
@@ -703,8 +764,18 @@ def forces_on_targets_pair_backend(
     if tids.size == 0 or cids.size == 0:
         return np.zeros((tids.size, 3), dtype=np.float64)
 
-    rr_t = cp.asarray(np.asarray(r[tids], dtype=np.float64))
-    rr_c = cp.asarray(np.asarray(r[cids], dtype=np.float64))
+    update_ids = np.unique(np.concatenate((tids, cids)).astype(np.int32))
+    d_r, d_types_all = _get_device_state(
+        cp=cp,
+        r=r,
+        atom_types=np.asarray(atom_types, dtype=np.int32),
+        update_ids=update_ids,
+    )
+    d_tids = cp.asarray(tids)
+    d_cids = cp.asarray(cids)
+
+    rr_t = d_r[d_tids]
+    rr_c = d_r[d_cids]
     dr = rr_t[:, None, :] - rr_c[None, :, :]
     dr = dr - float(box) * cp.rint(dr / float(box))
     r2 = cp.sum(dr * dr, axis=2)
@@ -712,8 +783,8 @@ def forces_on_targets_pair_backend(
     cutoff2 = float(cutoff) * float(cutoff)
     mask = (r2 > 0.0) & (r2 < cutoff2)
 
-    types_i = cp.asarray(np.asarray(atom_types[tids], dtype=np.int32))
-    types_j = cp.asarray(np.asarray(atom_types[cids], dtype=np.int32))
+    types_i = d_types_all[d_tids]
+    types_j = d_types_all[d_cids]
 
     if isinstance(potential, LennardJones):
         eps, sig = _pair_mats_lj(cp, potential, types_i, types_j)
@@ -742,8 +813,9 @@ def forces_on_targets_pair_backend(
         pos_in_cand = {int(gid): int(i) for i, gid in enumerate(cand.tolist())}
         tgt_local = np.asarray([pos_in_cand[int(g)] for g in tids.tolist()], dtype=np.int32)
 
-        rr_c = cp.asarray(np.asarray(r[cand], dtype=np.float64))
-        elem_np = potential._types_to_elem_idx(np.asarray(atom_types[cand], dtype=np.int32))
+        d_cand = cp.asarray(cand)
+        rr_c = d_r[d_cand]
+        elem_np = potential._types_to_elem_idx(cp.asnumpy(d_types_all[d_cand]))
         elem = cp.asarray(elem_np.astype(np.int32))
         n = int(cand.size)
 
@@ -827,6 +899,7 @@ def forces_on_targets_celllist_backend(
         rc=rc,
         target_ids=tids,
         candidate_ids=cids,
+        atom_types=atom_types,
         backend=backend,
         max_neighbors=max_neighbors,
     )
@@ -845,6 +918,12 @@ def forces_on_targets_celllist_backend(
 
     neighbor_ids, _counts = built
     cp = backend.xp
+    d_r, d_types = _get_device_state(
+        cp=cp,
+        r=r,
+        atom_types=np.asarray(atom_types, dtype=np.int32),
+        update_ids=None,
+    )
     return _forces_from_neighbor_matrix_cp(
         cp=cp,
         r=r,
@@ -854,4 +933,6 @@ def forces_on_targets_celllist_backend(
         target_ids=tids,
         neighbor_ids=neighbor_ids,
         atom_types=atom_types,
+        d_r=d_r,
+        d_types=d_types,
     )
