@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Union
 
@@ -732,7 +733,9 @@ def _run_td_main_phase(
                 f"mig={diag['migrations']} out={diag.get('outbox_atoms',0)} lagV={diag['viol_lag']} bufV={diag.get('viol_buffer',0)} dA={diag.get('delta_applied',0)} dD={diag.get('delta_deferred',0)} hS={diag.get('halo_sent',0)} hA={diag.get('halo_applied',0)} hD={diag.get('halo_deferred',0)} hG={diag.get('halo_geo_viol',0)} hV={diag.get('halo_support_viol',0)} dX={diag.get('delta_dropped',0)} hX={diag.get('halo_dropped',0)} dO={diag.get('delta_dropped_overflow',0)} "
                 f"tblAgeReb={diag['table_rebuild_age']} violW={diag['viol_w_gt1']} violO={diag['viol_send_overlap']} "
                 f"zone_step_spread={spread} reqS={diag.get('req_sent',0)} reqR={diag.get('req_rcv',0)} reqHS={diag.get('req_holder_sent',0)} reqHR={diag.get('req_holder_reply',0)} sh={diag.get('shadow_promoted',0)} wT={diag.get('wait_table',0)} wO={diag.get('wait_owner',0)} wOU={diag.get('wait_owner_unknown',0)} wOS={diag.get('wait_owner_stale',0)} "
-                f"tbK={batch_size} sb={sb} sbAvg={sb_avg:.2f} sbMax={sb_max} asyncS={diag.get('async_send_msgs',0)} asyncB={diag.get('async_send_bytes',0)} wfgS={diag.get('wfg_samples',0)} wfgC={diag.get('wfg_cycles',0)} wfgO={diag.get('wfg_max_outdeg',0)}",
+                f"tbK={batch_size} sb={sb} sbAvg={sb_avg:.2f} sbMax={sb_max} asyncS={diag.get('async_send_msgs',0)} asyncB={diag.get('async_send_bytes',0)} "
+                f"sendPackMs={float(diag.get('send_pack_ms',0.0)):.3f} sendWaitMs={float(diag.get('send_wait_ms',0.0)):.3f} recvPollMs={float(diag.get('recv_poll_ms',0.0)):.3f} overlapWinMs={float(diag.get('overlap_window_ms',0.0)):.3f} "
+                f"wfgS={diag.get('wfg_samples',0)} wfgC={diag.get('wfg_cycles',0)} wfgO={diag.get('wfg_max_outdeg',0)}",
                 flush=True,
             )
 
@@ -1030,6 +1033,7 @@ def _handle_record(
 
 
 def _recv_phase(ctx: _TDMPICommContext, *, tag_base: int) -> None:
+    t0 = time.perf_counter()
     # Forward direction: from prev_rank on tag_base.
     while ctx.comm.Iprobe(source=ctx.prev_rank, tag=tag_base):
         payload = recv_payload(ctx.comm, ctx.prev_rank, tag=tag_base)
@@ -1061,6 +1065,8 @@ def _recv_phase(ctx: _TDMPICommContext, *, tag_base: int) -> None:
                 vv=vv,
                 step_id=int(step_id),
             )
+    dt_ms = float((time.perf_counter() - t0) * 1000.0)
+    ctx.autom.diag["recv_poll_ms"] = float(ctx.autom.diag.get("recv_poll_ms", 0.0)) + dt_ms
 
 
 def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) -> None:
@@ -1220,22 +1226,38 @@ def _send_phase(ctx: _TDMPICommContext, *, tag_base: int, rc: float, step: int) 
 
     send_reqs = []
     send_keepalive = []
+    t_pack_ms = 0.0
+    first_async_post_ts = None
     for dest_rank, recs in buckets.items():
         if not recs:
             continue
+        t_pack0 = time.perf_counter()
         payload = pack_records(recs, ctx.r, ctx.v)
+        t_pack_ms += float((time.perf_counter() - t_pack0) * 1000.0)
         if ctx.use_async_send:
             reqs, refs = post_send_payload(ctx.comm, int(dest_rank), tag=tag_base, payload=payload)
             send_reqs.extend(reqs)
             send_keepalive.extend(refs)
+            if reqs and first_async_post_ts is None:
+                first_async_post_ts = time.perf_counter()
             ctx.autom.diag["async_send_msgs"] = ctx.autom.diag.get("async_send_msgs", 0) + 1
             ctx.autom.diag["async_send_bytes"] = ctx.autom.diag.get("async_send_bytes", 0) + int(
                 len(payload)
             )
         else:
             send_payload(ctx.comm, int(dest_rank), tag=tag_base, payload=payload)
+    ctx.autom.diag["send_pack_ms"] = float(ctx.autom.diag.get("send_pack_ms", 0.0)) + float(t_pack_ms)
     if send_reqs:
+        t_wait0 = time.perf_counter()
+        if first_async_post_ts is not None:
+            overlap_ms = float((t_wait0 - first_async_post_ts) * 1000.0)
+            if overlap_ms > 0.0:
+                ctx.autom.diag["overlap_window_ms"] = float(
+                    ctx.autom.diag.get("overlap_window_ms", 0.0)
+                ) + overlap_ms
         MPI.Request.Waitall(send_reqs)
+        wait_ms = float((time.perf_counter() - t_wait0) * 1000.0)
+        ctx.autom.diag["send_wait_ms"] = float(ctx.autom.diag.get("send_wait_ms", 0.0)) + wait_ms
         send_keepalive.clear()
 
 

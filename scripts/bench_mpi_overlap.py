@@ -98,6 +98,16 @@ def _diag_max(text: str, key: str) -> tuple[int, int]:
     return max(vals), len(vals)
 
 
+def _diag_max_float(text: str, key: str) -> tuple[float, int]:
+    vals = [
+        float(m.group(1))
+        for m in re.finditer(rf"\b{re.escape(key)}=([-+]?\d+(?:\.\d+)?)\b", str(text))
+    ]
+    if not vals:
+        return 0.0, 0
+    return max(vals), len(vals)
+
+
 def _sim_elapsed(*, n_ranks: int, overlap: int, cuda_aware: bool) -> float:
     base = 12.0 / max(1.0, float(n_ranks))
     if int(overlap) == 1:
@@ -118,6 +128,7 @@ def _iter_rows(
     root: Path,
     strict_invariants: bool,
     require_async_evidence: bool,
+    require_overlap_window: bool,
     retries: int,
     strict_zone_width: bool,
     n_steps: int,
@@ -135,6 +146,15 @@ def _iter_rows(
             async_msgs = int(max(0, n_ranks)) if overlap_i == 1 else 0
             async_bytes = int(async_msgs * 64)
             async_ok = bool((overlap_i == 0) or (not require_async_evidence) or (async_msgs > 0))
+            send_pack_ms = float(0.08 if overlap_i == 1 else 0.12)
+            send_wait_ms = float(0.04 if overlap_i == 1 else 0.09)
+            recv_poll_ms = float(0.06 if overlap_i == 1 else 0.05)
+            overlap_win_ms = float(0.22 if overlap_i == 1 else 0.0)
+            overlap_win_ok = bool(
+                (overlap_i == 0)
+                or (not require_overlap_window)
+                or (float(overlap_win_ms) > 0.0)
+            )
             rows.append(
                 {
                     "overlap": overlap_i,
@@ -148,6 +168,11 @@ def _iter_rows(
                     "async_send_msgs_max": int(async_msgs),
                     "async_send_bytes_max": int(async_bytes),
                     "async_evidence_ok": int(async_ok),
+                    "send_pack_ms_max": float(send_pack_ms),
+                    "send_wait_ms_max": float(send_wait_ms),
+                    "recv_poll_ms_max": float(recv_poll_ms),
+                    "overlap_window_ms_max": float(overlap_win_ms),
+                    "overlap_window_ok": int(overlap_win_ok),
                     "diag_samples": max(1, int(thermo_every)),
                     "invariants_ok": 1,
                     "strict_invariants_ok": 1,
@@ -202,6 +227,18 @@ def _iter_rows(
                 asyncS_samples = lagV_samples
             if asyncB_samples == 0:
                 asyncB_samples = lagV_samples
+            send_pack_ms_max, send_pack_samples = _diag_max_float(text, "sendPackMs")
+            send_wait_ms_max, send_wait_samples = _diag_max_float(text, "sendWaitMs")
+            recv_poll_ms_max, recv_poll_samples = _diag_max_float(text, "recvPollMs")
+            overlap_window_ms_max, overlap_window_samples = _diag_max_float(text, "overlapWinMs")
+            if send_pack_samples == 0:
+                send_pack_samples = lagV_samples
+            if send_wait_samples == 0:
+                send_wait_samples = lagV_samples
+            if recv_poll_samples == 0:
+                recv_poll_samples = lagV_samples
+            if overlap_window_samples == 0:
+                overlap_window_samples = lagV_samples
             wfgC_max, wfgC_samples = _diag_max(text, "wfgC")
             wfgO_max, wfgO_samples = _diag_max(text, "wfgO")
             wfgS_max, wfgS_samples = _diag_max(text, "wfgS")
@@ -212,6 +249,10 @@ def _iter_rows(
                 lagV_samples,
                 asyncS_samples,
                 asyncB_samples,
+                send_pack_samples,
+                send_wait_samples,
+                recv_poll_samples,
+                overlap_window_samples,
                 wfgC_samples,
                 wfgO_samples,
                 wfgS_samples,
@@ -223,7 +264,14 @@ def _iter_rows(
                 or (not require_async_evidence)
                 or ((int(asyncS_max) > 0) and (int(asyncB_max) > 0))
             )
-            strict_ok = bool(((not strict_invariants) or (inv_ok and parse_ok)) and async_ok)
+            overlap_win_ok = bool(
+                (overlap_i == 0)
+                or (not require_overlap_window)
+                or (float(overlap_window_ms_max) > 0.0)
+            )
+            strict_ok = bool(
+                ((not strict_invariants) or (inv_ok and parse_ok)) and async_ok and overlap_win_ok
+            )
             rows.append(
                 {
                     "overlap": overlap_i,
@@ -237,6 +285,11 @@ def _iter_rows(
                     "async_send_msgs_max": int(asyncS_max),
                     "async_send_bytes_max": int(asyncB_max),
                     "async_evidence_ok": int(async_ok),
+                    "send_pack_ms_max": float(send_pack_ms_max),
+                    "send_wait_ms_max": float(send_wait_ms_max),
+                    "recv_poll_ms_max": float(recv_poll_ms_max),
+                    "overlap_window_ms_max": float(overlap_window_ms_max),
+                    "overlap_window_ok": int(overlap_win_ok),
                     "diag_samples": int(diag_samples),
                     "wfgC_max": int(wfgC_max),
                     "wfgO_max": int(wfgO_max),
@@ -279,6 +332,11 @@ def _write_outputs(
                 "async_send_msgs_max",
                 "async_send_bytes_max",
                 "async_evidence_ok",
+                "send_pack_ms_max",
+                "send_wait_ms_max",
+                "recv_poll_ms_max",
+                "overlap_window_ms_max",
+                "overlap_window_ok",
                 "diag_samples",
                 "wfgC_max",
                 "wfgO_max",
@@ -320,6 +378,11 @@ def _write_outputs(
                     int(r.get("async_send_msgs_max", 0)),
                     int(r.get("async_send_bytes_max", 0)),
                     int(r.get("async_evidence_ok", 1)),
+                    f"{float(r.get('send_pack_ms_max', 0.0)):.6f}",
+                    f"{float(r.get('send_wait_ms_max', 0.0)):.6f}",
+                    f"{float(r.get('recv_poll_ms_max', 0.0)):.6f}",
+                    f"{float(r.get('overlap_window_ms_max', 0.0)):.6f}",
+                    int(r.get("overlap_window_ok", 1)),
                     int(r["diag_samples"]),
                     int(r.get("wfgC_max", 0)),
                     int(r.get("wfgO_max", 0)),
@@ -352,6 +415,7 @@ def _write_outputs(
                 f"hG={int(r['hG_max'])} hV={int(r['hV_max'])} violW={int(r['violW_max'])} lagV={int(r['lagV_max'])} "
                 f"asyncS={int(r.get('async_send_msgs_max', 0))} asyncB={int(r.get('async_send_bytes_max', 0))} "
                 f"async_ok={int(r.get('async_evidence_ok', 1))} "
+                f"sendPackMs={float(r.get('send_pack_ms_max', 0.0)):.3f} sendWaitMs={float(r.get('send_wait_ms_max', 0.0)):.3f} recvPollMs={float(r.get('recv_poll_ms_max', 0.0)):.3f} overlapWinMs={float(r.get('overlap_window_ms_max', 0.0)):.3f} overlapWinOk={int(r.get('overlap_window_ok', 1))} "
                 f"diag_samples={int(r['diag_samples'])} attempts={int(r['attempts'])} simulated={int(r.get('simulated', 0))}\n"
             )
 
@@ -401,6 +465,11 @@ def main() -> int:
         "--require-async-evidence",
         action="store_true",
         help="Require async overlap evidence (asyncS/asyncB > 0) for overlap=1 rows",
+    )
+    p.add_argument(
+        "--require-overlap-window",
+        action="store_true",
+        help="Require overlap window evidence (overlapWinMs > 0) for overlap=1 rows",
     )
     p.add_argument(
         "--dry-run", action="store_true", help="Only validate inputs and print planned runs"
@@ -465,6 +534,7 @@ def main() -> int:
     if args.no_strict_invariants:
         strict_invariants = False
     require_async_evidence = bool(args.require_async_evidence)
+    require_overlap_window = bool(args.require_overlap_window)
 
     prefer_simulated = bool(profile.runtime.prefer_simulated) if profile is not None else False
     allow_simulated = bool(profile.runtime.allow_simulated_cluster) if profile is not None else True
@@ -514,6 +584,7 @@ def main() -> int:
         root=ROOT,
         strict_invariants=bool(strict_invariants),
         require_async_evidence=bool(require_async_evidence),
+        require_overlap_window=bool(require_overlap_window),
         retries=max(1, int(retries)),
         strict_zone_width=bool(strict_zone_width),
         n_steps=max(0, int(n_steps)),
@@ -535,6 +606,7 @@ def main() -> int:
         "thermo_every": int(thermo_every),
         "strict_invariants": bool(strict_invariants),
         "require_async_evidence": bool(require_async_evidence),
+        "require_overlap_window": bool(require_overlap_window),
         "strict_zone_width": bool(strict_zone_width),
         "cuda_aware": bool(cuda_aware),
         "simulated": bool(simulate),

@@ -122,3 +122,6 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - work-zone force callback uses GPU force dispatch when backend is CUDA,
   - automatic fallback to wrapped CPU potential keeps reference semantics.
 - This integration does not change TD automaton transitions or communication ordering.
+- Added TD-MPI overlap observability counters in runtime diagnostics:
+  - `sendPackMs`, `sendWaitMs`, `recvPollMs`, `overlapWinMs`.
+  These counters are consumed by overlap VerifyLab lanes as observability-only metrics.
