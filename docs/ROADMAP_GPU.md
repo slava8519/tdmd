@@ -1,21 +1,26 @@
-# GPU Roadmap
+# GPU Roadmap (CUDA-Only)
 
-Principle: GPU is a **zone compute backend**. TD automaton stays on CPU.
+Principle:
+- GPU is compute-backend refinement only.
+- TD automaton/control semantics stay on CPU reference path.
 
-## Phase 0 — Backend interface (CPU-only)
-- Add `ZoneComputeBackend` + `CPUBackend`.
-- Wire TD compute through backend abstraction.
+## Completed Baseline
+- CUDA-first runtime path exists.
+- Strict GPU presets exist (`gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`, `gpu_smoke_hw`).
 
-## Phase 1 — Single-zone GPU (correctness)
-- Feature-gated `GPUBackend` (default OFF).
-- verify v2 GPU-vs-CPU regression.
+## Active Cycle
+- CUDA execution cycle: `PR-C01 -> PR-C08`.
+- Full plan: `docs/CUDA_EXECUTION_PLAN.md`.
+- Compact queue: `docs/PR_PLAN_GPU.md`.
 
-## Phase 2 — Overlap (performance)
-- Async kernels + comm overlap without breaking `W<=1`.
-- Track speedup vs contention metrics (Pareto).
+## Stack Policy
+- Primary stack for near-term PRs: `numba-cuda`.
+- Plan B for perf/prod hardening after stabilization:
+  - `CuPy RawKernel` or
+  - C++/CUDA extension.
 
-
-See `docs/GPU_BACKEND_API.md` for the strict backend contract.
-
-
-Data layout: see `docs/PR0_DATA_CONTRACT.md` (PR-0 golden SoA contract).
+## Acceptance Baseline (always)
+- `.venv/bin/python -m pytest -q`
+- `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict`
+- `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict`
+- GPU-touching work additionally requires strict GPU presets per `docs/VERIFYLAB.md`.

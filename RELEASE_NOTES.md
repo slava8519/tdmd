@@ -1,3 +1,18 @@
+## 4.5.6
+- Replaced active GPU planning strategy with CUDA-only execution cycle (`PR-C01..PR-C08`).
+- Added `docs/CUDA_EXECUTION_PLAN.md` (numba-cuda primary; plan B RawKernel/C++ CUDA extension).
+- Archived `docs/PORTABILITY_KOKKOS_PLAN.md` (historical only).
+- Aligned governance/docs/prompts (`AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`,
+  `docs/PR_PLAN_GPU.md`, `docs/MODE_CONTRACTS.md`, `docs/VERIFYLAB.md`,
+  `CODEX_MASTER_PROMPT.md`, `CODEX_GPU_MASTER_PROMPT.md`, `README.md`).
+
+## 4.5.5
+- Added `scripts/bootstrap_codex_env.sh` for one-command Codex workstation bootstrap
+  (system tools + `.venv` + editable install with dev extras + shell aliases).
+- Added `CODEX_ENV_BOOTSTRAP_PROMPT.md` for fresh-machine Codex startup.
+- Added `pyproject.toml` packaging metadata for editable installs (`pip install -e .`)
+  with explicit package discovery (`tdmd*`) and project dependencies.
+
 ## 4.5.4
 - Added docs/CONTRACTS.md with hard do-not-break rules for Codex cycles.
 - Added regression tripwire tests for W<=1 enforcement and A4b tie-break presence.

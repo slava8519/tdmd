@@ -1,17 +1,9 @@
-## GPU Cycle (PR-0) — Backend Abstraction (v4.5.0)
-- [ ] Add `tdmd/backends/base.py` ZoneComputeBackend.
-- [ ] Add `tdmd/backends/cpu.py` CPUBackend.
-- [ ] Wire td_local + td_full_mpi compute path through backend.
-- [ ] Add backend equivalence tests.
-- [ ] Keep `pytest -q` green.
-
-
 # Task Board (Unified CPU + GPU, PR-sized)
 
 > Orchestrator maintains this file.
 > Strategy focus: TD-correct MD for metals and alloys, with CPU reference first and GPU as refinement.
 > Baseline plan here is completed; post-baseline hardening (`v1`) is tracked in `docs/RISK_BURNDOWN_PLAN.md`; risk burndown `v2` is completed in `docs/RISK_BURNDOWN_PLAN_V2.md`.
-> Active next cycle: GPU portability via Kokkos (`docs/PORTABILITY_KOKKOS_PLAN.md`, PR-K01..PR-K10).
+> Active next cycle: CUDA execution plan (`docs/CUDA_EXECUTION_PLAN.md`, PR-C01..PR-C08).
 
 ## Mandatory Rules (all PRs)
 - [ ] Preserve TD semantics: no bypass/merge of F/D/P/W/S, no implicit global barriers.
@@ -25,7 +17,7 @@
   - [ ] if PR touches ensemble behavior: `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset nvt_smoke --strict`
   - [ ] if PR touches ensemble behavior: `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset npt_smoke --strict`
   - [ ] if PR touches GPU: `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke --strict`
-  - [ ] if PR touches portability-track GPU backend policy: keep hardware-strict no-fallback rule active (`require_effective_gpu` / compatibility alias policy).
+  - [ ] if PR touches GPU backend policy: keep hardware-strict no-fallback rule active (`gpu_smoke_hw` must reject CPU fallback).
 - [ ] Required docs updates when behavior changes:
   - [ ] `docs/SPEC_TD_AUTOMATON.md`
   - [ ] `docs/INVARIANTS.md`
@@ -42,7 +34,7 @@
 5. Expand interop + materials verification (PR-09, PR-10).
 6. Optimize time-blocking/performance (PR-11).
 7. GPU track only after CPU reference is valid: PR-G01 -> PR-G02 -> PR-G03 -> PR-G04 -> PR-G05 -> PR-G06 -> PR-G07 -> PR-G08 -> PR-G09 -> PR-G10.
-8. GPU portability cycle (vendor-neutral backend via Kokkos): PR-K01 -> PR-K02 -> PR-K03 -> PR-K04 -> PR-K05 -> PR-K06 -> PR-K07 -> PR-K08 -> PR-K09 -> PR-K10.
+8. CUDA execution cycle: PR-C01 -> PR-C02 -> PR-C03 -> PR-C04 -> PR-C05 -> PR-C06 -> PR-C07 -> PR-C08.
 
 ## Phase A - Verification/Gating and Contract
 - [x] PR-01 VerifyLab strict gating split (`smoke_ci` vs `smoke_regression`).
@@ -132,24 +124,21 @@
 - [x] PR-VZ08 Documentation/prompt consolidation for visualization workflows.
   - DoD: `README.md`, `docs/VERIFYLAB.md`, `CODEX_MASTER_PROMPT.md`, and `AGENTS.md` aligned.
 
-## Phase H - GPU Portability via Kokkos (active)
-- [x] PR-K01 Portability governance + contract freeze (docs/prompts only).
-  - DoD: `docs/PORTABILITY_KOKKOS_PLAN.md` created and all core prompts/governance docs aligned.
-- [ ] PR-K02 Backend API expansion (`run.device=auto|cpu|cuda|hip|kokkos`) with safe fallback.
-  - DoD: parser/CLI/tests updated; no TD semantic changes.
-- [ ] PR-K03 VerifyLab hardware-strict generalization (`require_effective_gpu` + compatibility alias).
-  - DoD: no-fallback policy is backend-agnostic and evidence artifacts updated.
-- [ ] PR-K04 Kokkos runtime bridge + build integration.
-  - DoD: reproducible build/runtime capability discovery without changing physics semantics.
-- [ ] PR-K05 Kokkos LJ/Morse kernels for `serial`/`td_local`.
+## Phase H - CUDA Execution Cycle (active)
+- [x] PR-C01 Governance refresh (docs/prompts only).
+  - DoD: `AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`, `docs/PR_PLAN_GPU.md`,
+    `docs/MODE_CONTRACTS.md`, `CODEX_MASTER_PROMPT.md` are CUDA-cycle consistent.
+- [ ] PR-C02 Numba-CUDA backend scaffold (control-plane, no kernel migration).
+  - DoD: backend detection/evidence updated, current CUDA path preserved, no TD semantic changes.
+- [ ] PR-C03 Numba-CUDA LJ/Morse kernels (`serial`/`td_local`).
   - DoD: strict parity vs CPU within documented tolerances.
-- [ ] PR-K06 Kokkos `table` + `eam/alloy` kernels.
+- [ ] PR-C04 Numba-CUDA `table` + `eam/alloy` kernels.
   - DoD: materials strict gates + parity packs pass.
-- [ ] PR-K07 td_local hardening on Kokkos path (sync/async).
+- [ ] PR-C05 td_local hardening on Numba-CUDA path (sync/async).
   - DoD: longrun envelope and ensemble strict lanes remain green.
-- [ ] PR-K08 td_full_mpi vendor-neutral multi-GPU mapping and transport hardening.
+- [ ] PR-C06 td_full_mpi CUDA mapping and transport hardening.
   - DoD: overlap/cluster/transport strict lanes pass without new barriers.
-- [ ] PR-K09 Vendor lanes and cross-vendor strict parity governance.
-  - DoD: NVIDIA+AMD hardware-strict lanes reject fallback and produce backend evidence.
-- [ ] PR-K10 Consolidation (docs/prompts/ops handoff).
-  - DoD: governance/docs/prompt set fully synchronized with implemented portability behavior.
+- [ ] PR-C07 Plan B performance track.
+  - DoD: evaluate/implement `CuPy RawKernel` or C++/CUDA extension only after PR-C06 strict stability.
+- [ ] PR-C08 Consolidation (docs/prompts/ops handoff).
+  - DoD: governance/docs/prompt set fully synchronized with implemented CUDA behavior.

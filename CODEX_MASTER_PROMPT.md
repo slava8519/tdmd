@@ -24,13 +24,13 @@ BOOTSTRAP (before touching code)
    - Do NOT commit `.venv/`, `results/`, or other generated artifacts.
 2) Python env
    - Use `.venv/bin/python` if present.
-   - If missing/broken: create `.venv` (Python 3.11+) and `pip install -r requirements.txt`.
+   - If missing/broken: create `.venv` (Python 3.11+) and `pip install -e '.[dev]'`.
 3) Read the governing contracts (min set)
    - Always: `AGENTS.md`, `docs/TODO.md`, `docs/MODE_CONTRACTS.md`,
      `docs/INVARIANTS.md`, `docs/SPEC_TD_AUTOMATON.md`, `docs/THEORY_VS_CODE.md`,
      `docs/VERIFYLAB.md`, `README.md`, `RELEASE_NOTES.md`.
-   - If GPU touched or PR-K portability cycle: `docs/GPU_BACKEND.md`, `docs/VERIFYLAB_GPU.md`,
-     `docs/PORTABILITY_KOKKOS_PLAN.md` (gate mapping + execution order).
+   - If GPU touched: `docs/GPU_BACKEND.md`, `docs/VERIFYLAB_GPU.md`,
+     `docs/CUDA_EXECUTION_PLAN.md` (gate mapping + execution order).
    - If IO/interop/schema touched: `docs/PR0_DATA_CONTRACT.md`, `docs/CONTRACTS.md`.
    - If visualization/output touched: `docs/VISUALIZATION.md`.
 4) Classify the change (so you run the right strict gates)
@@ -63,11 +63,7 @@ Conditional strict gates (run when relevant):
   `scripts/materials_parity_pack.py ... --strict` (v1 + v2 fixtures),
   `metal_property_smoke`, `interop_metal_property_smoke` per `docs/VERIFYLAB.md`.
 - GPU (non-hardware-strict): `gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`.
-- GPU hardware-strict / portability (PR-K): follow `docs/PORTABILITY_KOKKOS_PLAN.md` exactly, including:
-  - backend-agnostic `require_effective_gpu` policy,
-  - vendor lanes (`gpu_cuda_smoke_hw`, `gpu_hip_smoke_hw`),
-  - cross-vendor parity lane (`gpu_portability_smoke`),
-  - and strict failure on CPU fallback.
+- GPU hardware-strict (CUDA): run `gpu_smoke_hw` and enforce strict failure on CPU fallback.
 - MPI overlap / cuda-aware: `mpi_overlap_smoke`, `mpi_overlap_cudaaware_smoke`.
 - Cluster v2: `cluster_scale_smoke`, `cluster_stability_smoke`, `mpi_transport_matrix_smoke`.
 - Visualization contract: `viz_smoke`.
