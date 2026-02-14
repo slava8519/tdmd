@@ -547,6 +547,10 @@ def main() -> int:
     run_env = apply_profile_env(
         dict(os.environ), profile.runtime.env if profile is not None else {}
     )
+    if hasattr(os, "geteuid") and int(os.geteuid()) == 0:
+        # OpenMPI blocks root by default; enable explicit override for controlled CI/dev runners.
+        run_env.setdefault("OMPI_ALLOW_RUN_AS_ROOT", "1")
+        run_env.setdefault("OMPI_ALLOW_RUN_AS_ROOT_CONFIRM", "1")
 
     mpirun = _find_mpirun(
         str(args.mpirun).strip() or (profile.runtime.mpirun if profile is not None else "")

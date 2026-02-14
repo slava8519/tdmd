@@ -58,6 +58,7 @@ class _TDMPIRuntimeInit:
     backend: object
     cuda_aware_active: bool
     use_async_send: bool
+    owns_mpi_init: bool
 
 
 _WireRecord = tuple[int, int, int, np.ndarray, int]
@@ -172,8 +173,10 @@ def _init_td_full_mpi_runtime(
 ) -> _TDMPIRuntimeInit:
     if MPI is None:
         raise RuntimeError("mpi4py required")
+    owns_mpi_init = False
     if not MPI.Is_initialized():
         MPI.Init()
+        owns_mpi_init = True
     batch = int(batch_size)
     if batch < 1:
         raise ValueError("batch_size/time_block_k must be >= 1")
@@ -236,6 +239,7 @@ def _init_td_full_mpi_runtime(
         backend=backend,
         cuda_aware_active=cuda_aware_active,
         use_async_send=use_async_send,
+        owns_mpi_init=owns_mpi_init,
     )
 
 
@@ -2043,88 +2047,92 @@ def _run_td_full_mpi_1d_legacy(
     def flush_async_sends() -> None:
         _drain_async_sends(comm_ctx, block=True)
 
-    # --- initial output ---
-    if output_enabled:
-        update_buffers(step=0)
-        _write_td_output_step(
-            step=0,
-            output_enabled=output_enabled,
+    try:
+        # --- initial output ---
+        if output_enabled:
+            update_buffers(step=0)
+            _write_td_output_step(
+                step=0,
+                output_enabled=output_enabled,
+                output_due_fn=_output_due,
+                gather_fn=_gather_for_output,
+                output=output,
+                rank=rank,
+                box=float(sim.box),
+            )
+
+        # --- warmup ---
+        _run_td_warmup_phase(
+            warmup_steps=config.warmup_steps,
+            warmup_compute=bool(config.warmup_compute),
+            rank=rank,
+            formal_core=bool(config.formal_core),
+            batch_size=int(batch_size),
+            overlap_mode=str(config.overlap_mode),
+            enable_step_id=bool(config.enable_step_id),
+            max_step_lag=int(config.max_step_lag),
+            table_max_age=int(config.table_max_age),
+            update_buffers_fn=update_buffers,
+            get_skin_global_fn=lambda: sim.skin_global,
+            cutoff=float(cutoff),
+            recv_phase_fn=recv_phase,
+            can_start_compute_fn=autom.can_start_compute,
+            start_compute_fn=_start_compute_with_trace,
+            finish_compute_fn=_finish_compute_with_trace,
+            send_phase_fn=send_phase,
+            flush_async_sends_fn=flush_async_sends,
+            comm=comm,
+            use_verlet=bool(config.use_verlet),
+            verlet_k_steps=int(config.verlet_k_steps),
+            r=r,
+            v=v,
+            mass=mass,
+            dt=float(dt),
+            potential=potential_compute,
+        )
+
+        # --- main simulation ---
+        _run_td_main_phase(
+            n_steps=int(n_steps),
+            rank=rank,
+            update_buffers_fn=update_buffers,
+            get_skin_global_fn=lambda: sim.skin_global,
+            cutoff=float(cutoff),
+            recv_phase_fn=recv_phase,
+            can_start_compute_fn=autom.can_start_compute,
+            start_compute_fn=_start_compute_with_trace,
+            finish_compute_fn=_finish_compute_with_trace,
+            send_phase_fn=send_phase,
+            apply_ensemble_fn=_apply_ensemble,
+            output_enabled=bool(output_enabled),
             output_due_fn=_output_due,
             gather_fn=_gather_for_output,
             output=output,
-            rank=rank,
-            box=float(sim.box),
+            box_ref_fn=lambda: sim.box,
+            thermo_every=int(config.thermo_every),
+            v=v,
+            mass=mass,
+            r=r,
+            zones=zones,
+            autom=autom,
+            batch_size=int(batch_size),
+            use_verlet=bool(config.use_verlet),
+            verlet_k_steps=int(config.verlet_k_steps),
+            dt=float(dt),
+            potential=potential_compute,
+            cutoff_runtime=float(cutoff),
+            enable_step_id=bool(config.enable_step_id),
         )
-
-    # --- warmup ---
-    _run_td_warmup_phase(
-        warmup_steps=config.warmup_steps,
-        warmup_compute=bool(config.warmup_compute),
-        rank=rank,
-        formal_core=bool(config.formal_core),
-        batch_size=int(batch_size),
-        overlap_mode=str(config.overlap_mode),
-        enable_step_id=bool(config.enable_step_id),
-        max_step_lag=int(config.max_step_lag),
-        table_max_age=int(config.table_max_age),
-        update_buffers_fn=update_buffers,
-        get_skin_global_fn=lambda: sim.skin_global,
-        cutoff=float(cutoff),
-        recv_phase_fn=recv_phase,
-        can_start_compute_fn=autom.can_start_compute,
-        start_compute_fn=_start_compute_with_trace,
-        finish_compute_fn=_finish_compute_with_trace,
-        send_phase_fn=send_phase,
-        flush_async_sends_fn=flush_async_sends,
-        comm=comm,
-        use_verlet=bool(config.use_verlet),
-        verlet_k_steps=int(config.verlet_k_steps),
-        r=r,
-        v=v,
-        mass=mass,
-        dt=float(dt),
-        potential=potential_compute,
-    )
-
-    # --- main simulation ---
-    _run_td_main_phase(
-        n_steps=int(n_steps),
-        rank=rank,
-        update_buffers_fn=update_buffers,
-        get_skin_global_fn=lambda: sim.skin_global,
-        cutoff=float(cutoff),
-        recv_phase_fn=recv_phase,
-        can_start_compute_fn=autom.can_start_compute,
-        start_compute_fn=_start_compute_with_trace,
-        finish_compute_fn=_finish_compute_with_trace,
-        send_phase_fn=send_phase,
-        apply_ensemble_fn=_apply_ensemble,
-        output_enabled=bool(output_enabled),
-        output_due_fn=_output_due,
-        gather_fn=_gather_for_output,
-        output=output,
-        box_ref_fn=lambda: sim.box,
-        thermo_every=int(config.thermo_every),
-        v=v,
-        mass=mass,
-        r=r,
-        zones=zones,
-        autom=autom,
-        batch_size=int(batch_size),
-        use_verlet=bool(config.use_verlet),
-        verlet_k_steps=int(config.verlet_k_steps),
-        dt=float(dt),
-        potential=potential_compute,
-        cutoff_runtime=float(cutoff),
-        enable_step_id=bool(config.enable_step_id),
-    )
-
-    # --- cleanup ---
-    flush_async_sends()
-    if output is not None:
-        output.close()
-    if trace is not None:
-        trace.close()
+    finally:
+        # Ensure MPI send requests are drained even on failures.
+        flush_async_sends()
+        if output is not None:
+            output.close()
+        if trace is not None:
+            trace.close()
+        if runtime.owns_mpi_init and MPI is not None and MPI.Is_initialized() and not MPI.Is_finalized():
+            comm.Barrier()
+            MPI.Finalize()
     return TDStats(rank=rank, size=size)
 
 
