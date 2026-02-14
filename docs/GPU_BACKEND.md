@@ -1,6 +1,7 @@
 # GPU Backend
 
-Portability-cycle planning reference: `docs/PORTABILITY_KOKKOS_PLAN.md` (PR-K01..PR-K10).
+Active CUDA execution cycle: `docs/CUDA_EXECUTION_PLAN.md` (PR-C01..PR-C08, CuPy RawKernel).
+Historical portability reference (archived): `docs/PORTABILITY_KOKKOS_PLAN.md`.
 
 ## Scope
 GPU support is implemented as a refinement path over the CPU reference semantics.
@@ -19,15 +20,13 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - otherwise runtime warns and falls back to `cpu`.
 - `TDMD_FORCE_CPU=1` forces CPU when `run.device=auto`.
 
-## Portability Target (Planned, PR-K Cycle)
-- Extend backend selector contract to:
-  - `auto`, `cpu`, `cuda`, `hip`, `kokkos`.
-- Introduce backend-agnostic hardware-strict verification key:
-  - `require_effective_gpu` (with compatibility support for `require_effective_cuda` during migration).
-- Preserve all semantics guarantees from current CUDA-first implementation:
-  - CPU remains formal reference,
-  - GPU remains refinement,
-  - no TD automaton changes.
+## Active CUDA Cycle (CuPy RawKernel)
+- Migrating from CuPy high-level API to CuPy RawKernel (real CUDA C kernels).
+- Key improvements: O(N) neighbor lists, single-launch force kernels, fused EAM,
+  persistent GPU state, CUDA stream overlap.
+- Stack: CuPy RawKernel primary; C++/CUDA extension as Plan B.
+- Numba-CUDA is not in scope.
+- Full plan: `docs/CUDA_EXECUTION_PLAN.md`.
 
 ## Semantics Guarantee
 - CPU path remains the formal reference.
@@ -86,15 +85,11 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - `gpu_smoke_hw`, `gpu_interop_smoke_hw`, `gpu_metal_smoke_hw`.
 - This changes verification policy only and does not alter runtime TD semantics.
 
-## Portability-Cycle Strict-Gate Plan
+## Strict-Gate Plan (CUDA Cycle)
 - Existing strict GPU gates remain mandatory throughout migration:
   - `gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`,
-  - `gpu_smoke_hw` (legacy CUDA hardware lane).
-- Planned additions:
-  - `gpu_cuda_smoke_hw` (NVIDIA hardware-strict),
-  - `gpu_hip_smoke_hw` (AMD hardware-strict),
-  - `gpu_portability_smoke` (cross-vendor parity lane).
-- No-fallback acceptance rule remains mandatory for all hardware-strict vendor lanes.
+  - `gpu_smoke_hw` (CUDA hardware-strict lane).
+- No-fallback acceptance rule remains mandatory for hardware-strict lanes.
 
 ## Post-Baseline Hardening (PR-H02)
 - Added strict TD-MPI overlap A/B presets in `scripts/run_verifylab_matrix.py`:

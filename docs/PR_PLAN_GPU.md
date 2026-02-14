@@ -5,18 +5,18 @@ Source of truth (full details): `docs/CUDA_EXECUTION_PLAN.md`.
 
 ## Current Direction
 - Backend target: NVIDIA CUDA only.
-- Primary implementation stack: `numba-cuda`.
-- Plan B after stabilization: `CuPy RawKernel` or C++/CUDA extension.
+- Primary implementation stack: **CuPy RawKernel** (CUDA C via CuPy).
+- Plan B (if performance ceiling reached): C++/CUDA extension module.
 
 ## Active PR Queue
-- PR-C01: CUDA governance refresh (docs/prompts only).
-- PR-C02: Numba-CUDA backend scaffold (no kernel migration yet).
-- PR-C03: Numba-CUDA LJ/Morse kernels (`serial`/`td_local`).
-- PR-C04: Numba-CUDA table + EAM/eam-alloy kernels.
-- PR-C05: TD-local hardening + longrun envelope.
-- PR-C06: TD-MPI CUDA mapping + overlap hardening.
-- PR-C07: Plan B performance track (RawKernel or C++/CUDA extension).
-- PR-C08: consolidation (docs/ops/playbook).
+- PR-C01: CUDA governance refresh (docs/prompts only). **COMPLETE**
+- PR-C02: GPU neighbor list kernel (CuPy RawKernel, O(N) cell-list on device).
+- PR-C03: LJ/Morse pair force kernel (CuPy RawKernel, single launch per evaluation).
+- PR-C04: Table + EAM/alloy fused kernels (CuPy RawKernel, no Python element loops).
+- PR-C05: Persistent GPU state + host↔device transfer elimination.
+- PR-C06: TD-MPI CUDA integration + CUDA stream overlap hardening.
+- PR-C07: Profiling + kernel optimization (Plan B decision point).
+- PR-C08: Consolidation (docs/ops/playbook).
 
 ## Invariants
 - Preserve TD semantics (`F/D/P/W/S`) and formal-core invariant `W<=1`.

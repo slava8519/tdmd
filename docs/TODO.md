@@ -124,21 +124,21 @@
 - [x] PR-VZ08 Documentation/prompt consolidation for visualization workflows.
   - DoD: `README.md`, `docs/VERIFYLAB.md`, `CODEX_MASTER_PROMPT.md`, and `AGENTS.md` aligned.
 
-## Phase H - CUDA Execution Cycle (active)
+## Phase H - CUDA Execution Cycle (active, CuPy RawKernel)
 - [x] PR-C01 Governance refresh (docs/prompts only).
   - DoD: `AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`, `docs/PR_PLAN_GPU.md`,
     `docs/MODE_CONTRACTS.md`, `CODEX_MASTER_PROMPT.md` are CUDA-cycle consistent.
-- [ ] PR-C02 Numba-CUDA backend scaffold (control-plane, no kernel migration).
-  - DoD: backend detection/evidence updated, current CUDA path preserved, no TD semantic changes.
-- [ ] PR-C03 Numba-CUDA LJ/Morse kernels (`serial`/`td_local`).
-  - DoD: strict parity vs CPU within documented tolerances.
-- [ ] PR-C04 Numba-CUDA `table` + `eam/alloy` kernels.
-  - DoD: materials strict gates + parity packs pass.
-- [ ] PR-C05 td_local hardening on Numba-CUDA path (sync/async).
-  - DoD: longrun envelope and ensemble strict lanes remain green.
-- [ ] PR-C06 td_full_mpi CUDA mapping and transport hardening.
+- [ ] PR-C02 GPU neighbor list kernel (CuPy RawKernel).
+  - DoD: O(N) cell-list discovery on device, parity vs CPU `build_cell_list`, no TD semantic changes.
+- [ ] PR-C03 LJ/Morse pair force kernel (CuPy RawKernel).
+  - DoD: single kernel launch per evaluation, O(N) memory, strict parity vs CPU.
+- [ ] PR-C04 Table + EAM/alloy fused kernels (CuPy RawKernel).
+  - DoD: device-side interpolation and two-pass EAM without Python element loops; materials strict gates pass.
+- [ ] PR-C05 Persistent GPU state + transfer elimination.
+  - DoD: positions/types stay on device across timesteps; longrun envelope and ensemble strict lanes green.
+- [ ] PR-C06 TD-MPI CUDA integration + CUDA stream overlap hardening.
   - DoD: overlap/cluster/transport strict lanes pass without new barriers.
-- [ ] PR-C07 Plan B performance track.
-  - DoD: evaluate/implement `CuPy RawKernel` or C++/CUDA extension only after PR-C06 strict stability.
-- [ ] PR-C08 Consolidation (docs/prompts/ops handoff).
-  - DoD: governance/docs/prompt set fully synchronized with implemented CUDA behavior.
+- [ ] PR-C07 Profiling + kernel optimization (Plan B decision point).
+  - DoD: documented speedup vs Phase E baseline and CPU reference; evaluate C++/CUDA if needed.
+- [ ] PR-C08 Consolidation (docs/ops/playbook).
+  - DoD: governance/docs fully synchronized; Phase E CuPy high-level code archived if replaced.

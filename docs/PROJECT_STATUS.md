@@ -1,4 +1,4 @@
-# Project status (as of v4.5.0)
+# Project status (as of v4.5.4)
 
 TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD automaton.
 
@@ -30,8 +30,18 @@ TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD au
   `from_legacy_kwargs()` for backward compatibility; replaces 50+ loose keyword arguments.
 - **Test suite**: 169 tests (28 added for `constants` and `zones` modules).
 
-## Next
-- GPU as compute-backend refinement (see GPU docs).
-- GPU portability via Kokkos (see `docs/PORTABILITY_KOKKOS_PLAN.md`).
+## GPU Backend Status
+- **Phase E (complete)**: CuPy high-level API path — functionally correct, all strict gates pass.
+  Known performance limitations: O(N²) broadcast matrices, Python for-loops in cell-list
+  and EAM paths, no persistent GPU state.
+- **Phase H (active)**: CUDA execution cycle migrating to **CuPy RawKernel** — real CUDA C
+  kernels for neighbor lists, pair forces, EAM, with O(N) memory and single-launch execution.
+  See `docs/CUDA_EXECUTION_PLAN.md` for full PR queue (PR-C02..C08).
+- **Stack decision**: CuPy RawKernel chosen over Numba-CUDA. CuPy is already a dependency;
+  RawKernel provides full CUDA C control without adding a new runtime. Plan B: C++/CUDA
+  extension if RawKernel performance ceiling is reached.
 
-See `docs/GPU_BACKEND_API.md` for the strict backend contract.
+## Next
+- Execute PR-C02 (GPU neighbor list kernel via CuPy RawKernel).
+- See `docs/CUDA_EXECUTION_PLAN.md` for the active cycle.
+- See `docs/GPU_BACKEND_API.md` for the strict backend contract.
