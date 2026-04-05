@@ -7,6 +7,7 @@ import sys
 def test_profile_gpu_backend_script(tmp_path):
     out_csv = tmp_path / "gpu_profile.csv"
     out_md = tmp_path / "gpu_profile.md"
+    out_json = tmp_path / "gpu_profile.summary.json"
     cmd = [
         sys.executable,
         "scripts/profile_gpu_backend.py",
@@ -16,6 +17,8 @@ def test_profile_gpu_backend_script(tmp_path):
         str(out_csv),
         "--out-md",
         str(out_md),
+        "--out-json",
+        str(out_json),
         "--timeout",
         "120",
     ]
@@ -23,5 +26,9 @@ def test_profile_gpu_backend_script(tmp_path):
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert out_csv.is_file()
     assert out_md.is_file()
+    assert out_json.is_file()
     text = out_md.read_text(encoding="utf-8")
     assert "GPU Backend Profile" in text
+    assert "GPU Perf Smoke" in text
+    assert "EAM Decomposition" in text
+    assert "Plan B Decision" in text

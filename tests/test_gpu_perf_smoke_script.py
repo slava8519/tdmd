@@ -21,3 +21,8 @@ def test_gpu_perf_smoke_script_writes_summary(tmp_path):
     data = json.loads(out_json.read_text(encoding="utf-8"))
     assert "ok_all" in data
     assert "total" in data
+    assert "calibration" in data
+    assert "thresholds" in data
+    calibration = data["calibration"]
+    assert "kernel_loop_iters" in calibration
+    assert "min_kernel_ms" in calibration
