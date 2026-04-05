@@ -134,9 +134,18 @@ The consolidated profiler keeps the legacy preset timing CSV and adds:
 - `eam_decomp_zone_sweep_gpu` extends that benchmark into a manual zone-layout sweep so operators
   can see which valid TD/space zone counts are favorable before any future automation.
 - `eam_td_breakdown_gpu` profiles the current best observed `10K`-atom layout and splits the GPU
-  runtime into `forces_full`, nested device sync, cell-list build, candidate enumeration, and zone
-  bookkeeping. Use it when TD speedup looks smaller than theory suggests and you need to separate
-  backend overhead from true TD headroom.
+  runtime into `forces_full`, `target_local_force`, nested device sync, cell-list build,
+  candidate enumeration, and zone bookkeeping. It also records the current many-body force-scope
+  contract (`evaluation_scope`, `consumption_scope`, `target_local_available`) plus
+  `baseline_reference_version=pr_mb01_v1`, so the large-run baseline stays stable while current
+  CUDA runs can be compared against the frozen pre-locality ceiling. After `PR-MB03`, current GPU
+  runs should report `target_local` scope and reduced `forces_full` share. Use it when TD speedup
+  looks smaller than theory suggests and you need to separate backend overhead from true TD
+  headroom.
+- `td_autozoning_advisor_gpu` turns that corrected locality evidence into a recommendation-only
+  zoning report. It detects visible CPU/GPU/MPI resources, benchmarks strict-valid candidate
+  layouts, and emits markdown/json/csv artifacts with a recommended TD layout and optional
+  `pr_za01_v1` breakdown evidence. It does not auto-apply runtime zoning policy.
 - Current decision policy:
   stay on `CuPy RawKernel` unless representative profiling stops beating both CPU reference and
   the archived `Phase E` baseline.

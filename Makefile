@@ -1,4 +1,4 @@
-.PHONY: test verify-smoke gpu-profile eam-decomp-gpu-heavy eam-zone-sweep-gpu eam-td-breakdown-gpu fmt lint typecheck precommit
+.PHONY: test verify-smoke gpu-profile eam-decomp-gpu-heavy eam-zone-sweep-gpu eam-td-breakdown-gpu td-autozoning-advisor-gpu ml-reference-smoke ml-reference-parity fmt lint typecheck precommit
 
 PY ?= .venv/bin/python
 ifeq ($(wildcard $(PY)),)
@@ -26,6 +26,15 @@ eam-zone-sweep-gpu:
 
 eam-td-breakdown-gpu:
 	$(PY) scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_td_breakdown_gpu --strict
+
+td-autozoning-advisor-gpu:
+	$(PY) scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset td_autozoning_advisor_gpu --strict
+
+ml-reference-smoke:
+	$(PY) scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset ml_reference_smoke --strict
+
+ml-reference-parity:
+	$(PY) scripts/ml_reference_parity_pack.py --fixture examples/interop/ml_reference_suite_v1.json --config examples/td_1d_morse.yaml --strict
 
 
 fmt:

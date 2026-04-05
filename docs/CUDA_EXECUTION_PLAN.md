@@ -160,10 +160,15 @@ These are the problems the current cycle solves.
   `EAM/eam-alloy` profiling shows the current single-GPU TD ceiling is still dominated by repeated
   full-system many-body `forces_full`.
 - Handoff order:
-  1. define the many-body TD force-scope contract explicitly,
-  2. deliver CPU-reference target-local `EAM/eam-alloy` TD evaluation,
-  3. refine the GPU path on top of that corrected locality model,
-  4. only then build resource-aware TD auto-zoning recommendations.
+  1. define the many-body TD force-scope contract explicitly, **complete**
+     (`pr_mb01_v1` large-run baseline via `eam_td_breakdown_gpu`),
+  2. deliver CPU-reference target-local `EAM/eam-alloy` TD evaluation, **complete**
+     (`td_local` CPU async many-body now uses `potential.forces_on_targets(...)`),
+  3. refine the GPU path on top of that corrected locality model, **complete**
+     (`td_local` CUDA async many-body now tries target/candidate-local GPU dispatch first),
+  4. only then build resource-aware TD auto-zoning recommendations, **complete**
+     (`td_autozoning_advisor_gpu` now emits recommendation-only markdown/json/csv artifacts from
+     detected resources, strict-valid layout search, and `eam_td_breakdown_gpu` evidence).
 - Future ML-potential work should reuse the same many-body locality contract and still follow the
   existing rule: CPU reference first, GPU refinement second.
 

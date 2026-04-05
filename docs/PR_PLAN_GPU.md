@@ -20,21 +20,25 @@ Current local dirty-worktree decomposition: `docs/WORKTREE_SLICE_PLAN.md`.
 - PR-C08: Consolidation (docs/ops/playbook). **COMPLETE**
 
 ## Active Maintenance Queue
-- PR-MB01: many-body TD force-scope contract + baseline observability. **NEXT**
+- PR-MB01: many-body TD force-scope contract + baseline observability. **COMPLETE**
   - Goal: make the distinction between full-system many-body evaluation and target-local
     evaluation explicit for TD runtimes.
   - Evidence: freeze `eam_td_breakdown_gpu` as the representative large-run artifact.
-- PR-MB02: CPU-reference target-local `EAM/eam-alloy` TD path.
+- PR-MB02: CPU-reference target-local `EAM/eam-alloy` TD path. **COMPLETE**
   - Goal: remove repeated full-system `forces_full(ctx.r)[ids0]` dependence from async many-body
     `td_local` half-steps without changing TD semantics.
-- PR-MB03: GPU target-local many-body refinement for `EAM/eam-alloy`.
+- PR-MB03: GPU target-local many-body refinement for `EAM/eam-alloy`. **COMPLETE**
   - Goal: make CUDA consume the corrected target/candidate-local many-body path rather than the
     current full-system ceiling.
-- PR-ZA01: resource-aware TD auto-zoning advisor.
+- PR-ZA01: resource-aware TD auto-zoning advisor. **COMPLETE**
   - Goal: detect resources, enumerate strict-valid layouts, and emit recommendations only after
     PR-MB02/PR-MB03 make the many-body cost model trustworthy.
+  - Delivery: manual preset `td_autozoning_advisor_gpu`, recommendation-only markdown/json/csv
+    artifacts, and no runtime zoning-policy mutation.
 
 ## Future ML-Potential Dependency
+- `PR-ML01` CPU-reference ML-potential runtime contract. **COMPLETE**
+- `PR-ML02` fixture-driven VerifyLab/interop groundwork. **COMPLETE**
 - Any ML-potential acceleration track should start only after PR-MB01..PR-MB03 define the
   many-body locality contract clearly.
 - ML potentials should arrive CPU-reference first, then strict VerifyLab/interop coverage, then GPU

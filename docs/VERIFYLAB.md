@@ -191,6 +191,12 @@ For each row in `metrics.csv`:
   `h2d_full_ms`, `h2d_delta_ms`, `kernel_ms`, `d2h_ms`, `delta_over_full`, `transfer_over_kernel`.
   The synthetic kernel is calibrated to a minimum timing floor before thresholding so the
   micro-perf guardrail is less sensitive to sub-0.1 ms timer noise.
+- `ml_reference_smoke`: strict CPU task-based VerifyLab lane for the `quadratic_density`
+  `ml/reference` family. It uses `examples/interop/task_ml_reference.yaml` in `sync_mode=True` to
+  enforce serial-vs-`td_local` parity on the CPU reference harness.
+- `ml_reference_parity_smoke`: strict external fixture lane for the same `quadratic_density`
+  family. It wraps `scripts/ml_reference_parity_pack.py` over
+  `examples/interop/ml_reference_suite_v1.json`.
 - `eam_decomp_perf_smoke`: standard PR benchmark for `EAM/alloy` that emits a four-column table
   (`space_cpu`, `space_gpu`, `time_cpu`, `time_gpu`) plus derived speedup rows for
   GPU-vs-CPU and time-vs-space comparisons. This is an execution/observability benchmark, not a hard performance-threshold gate.
@@ -203,9 +209,19 @@ For each row in `metrics.csv`:
   layout summary. This is observability-only and is not a PR gate.
 - `eam_td_breakdown_gpu`: manual GPU-only `10K`-atom `EAM/eam-alloy` breakdown for the current
   best observed `2-zone` layout. It compares `space_gpu` vs `time_gpu` and attributes runtime to
-  `forces_full`, nested device sync, cell-list build, candidate enumeration, and zone bookkeeping.
-  Use it to distinguish TD algorithmic headroom from backend/runtime overhead before changing
-  zoning policy.
+  `forces_full`, `target_local_force`, nested device sync, cell-list build, candidate enumeration,
+  and zone bookkeeping. The artifact also records the current many-body force-scope contract
+  (`evaluation_scope`, `consumption_scope`, `target_local_available`) plus
+  `baseline_reference_version=pr_mb01_v1`, so current runs can be measured against the frozen
+  pre-locality ceiling. After `PR-MB03`, current GPU runs should report `target_local` scope with
+  reduced or eliminated `forces_full` share relative to that baseline. Use it to distinguish TD
+  algorithmic headroom from backend/runtime overhead before changing zoning policy.
+- `td_autozoning_advisor_gpu`: manual resource-aware GPU-only TD zoning advisor for `EAM/eam-alloy`.
+  It detects visible CPU/GPU/MPI resources, enumerates strict-valid layout candidates, benchmarks
+  paired `space_gpu` vs `time_gpu` rows, and emits a recommendation-only zoning plan. When
+  breakdown is enabled, it also attaches `pr_za01_v1` force-scope evidence for the recommended
+  layout using `baseline_reference_version=pr_mb03_v1`. This is observability/operator guidance,
+  not a runtime policy switch.
 - `scripts/profile_gpu_backend.py`: consolidated CUDA-cycle profiling helper for operator use.
   It combines verify-preset timing ratios, `gpu_perf_smoke`, `EAM/alloy` decomposition benchmarking,
   and optional `Phase E` comparison into one markdown/json report.
@@ -258,6 +274,12 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `results/<run_id>/eam_td_breakdown_gpu.csv`,
   - `results/<run_id>/eam_td_breakdown_gpu.md`,
   - `results/<run_id>/eam_td_breakdown_gpu.summary.json`.
+- `td_autozoning_advisor_gpu` additionally persists:
+  - `results/<run_id>/td_autozoning_advisor_gpu.csv`,
+  - `results/<run_id>/td_autozoning_advisor_gpu.md`,
+  - `results/<run_id>/td_autozoning_advisor_gpu.summary.json`.
+- `ml_reference_parity_smoke` additionally persists:
+  - `results/<run_id>/ml_reference_parity.summary.json`.
 - `scripts/profile_gpu_backend.py` additionally persists:
   - `results/gpu_profile.csv`,
   - `results/gpu_profile.md`,
@@ -320,9 +342,21 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `td_full_mpi` compute path supports EAM backend through automaton target-force callback (`forces_on_targets`), preserving TD state machine.
   - task-driven `td_full_mpi` accepts non-uniform per-atom masses and forwards mass arrays to the TD-MPI integrator path.
   - `scripts/run_verifylab_matrix.py --preset metal_smoke` and `--preset interop_metal_smoke` provide strict material smoke gates.
+- ML reference runtime status (`PR-ML01`):
+  - `potential.kind=ml/reference` is a CPU-reference many-body harness with versioned
+    `contract.cutoff`, `contract.descriptor`, `contract.neighbor`, and `contract.inference`.
+  - `serial`, `td_local`, task-driven CLI runtime, and task-based VerifyLab sweep path accept it.
+  - runtime compatibility requires `task.cutoff >= contract.cutoff.radius`.
+  - `contract.neighbor.requires_full_system_barrier` must stay `false`; hidden global barriers are
+    rejected at task validation time.
+  - `PR-ML02` adds strict acceptance for the `quadratic_density` family via
+    `ml_reference_smoke` plus versioned fixture suite
+    `examples/interop/ml_reference_suite_v1.json` checked by
+    `scripts/ml_reference_parity_pack.py --strict`.
 - Interop-only fields for now (parsed/exported but not executed in TDMD run):
   - legacy top-level `thermostat` (backward-compatible alias, non-executable),
   - charged atoms.
+  - `ml/reference` LAMMPS export (explicitly rejected by `tdmd/io/lammps.py` today).
 
 ## Zone Width Guardrail
 For 1D slab mode, `ZoneLayout1DCells` enforces `min_zone_width >= cutoff`:

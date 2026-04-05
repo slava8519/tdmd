@@ -1,3 +1,55 @@
+## 4.5.20
+- Completed `PR-ML02`: added strict VerifyLab and fixture-driven acceptance for the
+  `quadratic_density` `ml/reference` family.
+- Added task-based strict preset `ml_reference_smoke`, interop tasks under `examples/interop/`,
+  and versioned fixture suite `examples/interop/ml_reference_suite_v1.json`.
+- Added `scripts/ml_reference_parity_pack.py --strict` and explicit LAMMPS export rejection tests
+  for `ml/reference`, so the current interop boundary is clear rather than implicit.
+
+## 4.5.19
+- Completed `PR-ML01`: added `potential.kind=ml/reference` as a versioned CPU-reference many-body
+  contract for future ML-potential work.
+- The new contract explicitly validates `cutoff`, `descriptor`, `neighbor`, and `inference`
+  fields, rejects hidden global barriers, and requires `task.cutoff >= contract.cutoff.radius`.
+- Added CPU reference harness coverage for `serial`, `td_local`, task-driven CLI runtime, and
+  task-based VerifyLab sweep path, while intentionally leaving fixture-driven ML strict presets and
+  interop coverage for `PR-ML02`.
+
+## 4.5.18
+- Completed `PR-ZA01`: added `scripts/bench_td_autozoning_advisor.py` and manual VerifyLab preset
+  `td_autozoning_advisor_gpu` for resource-aware TD zoning recommendations on `EAM/eam-alloy`.
+- The advisor detects visible CPU/GPU/MPI resources, enumerates strict-valid layouts, benchmarks
+  paired `space_gpu` vs `time_gpu`, and emits recommendation-only markdown/json/csv artifacts.
+- Added optional `pr_za01_v1` breakdown evidence for the recommended layout, referencing the
+  corrected `PR-MB03` many-body locality baseline instead of mutating runtime zoning policy.
+
+## 4.5.17
+- Completed `PR-MB03`: CUDA async `td_local` many-body now uses target/candidate-local GPU
+  dispatch first, with full-system GPU fallback only if that refinement path is unavailable.
+- Updated `eam_td_breakdown_gpu` observability so current runs report contract version
+  `pr_mb03_v1` and reference the frozen pre-locality baseline `pr_mb01_v1`.
+- On the representative `10K` `EAM/eam-alloy` benchmark, current GPU runs now report
+  `target_local_force_calls=3072` and `forces_full_share=0` for both `space_gpu` and `time_gpu`.
+
+## 4.5.16
+- Completed `PR-MB02`: CPU async `td_local` many-body now uses target-local
+  `potential.forces_on_targets(...)` instead of repeated full-system
+  `forces_full(ctx.r)[ids0]`.
+- Added regression coverage proving the new CPU target-local path matches the legacy full-system
+  behavior for representative async `1d` and `3d` `EAM/eam-alloy` cases.
+- Kept the GPU many-body baseline unchanged for now; `eam_td_breakdown_gpu` should still report
+  the pre-`PR-MB03` full-system CUDA force scope.
+
+## 4.5.15
+- Added explicit many-body force-scope contract helpers in `tdmd/many_body_scope.py` and
+  `tdmd/td_local.py::describe_many_body_force_scope`.
+- Froze `eam_td_breakdown_gpu` baseline contract as `pr_mb01_v1`, including explicit
+  `evaluation_scope`, `consumption_scope`, `target_local_available`, and
+  `target_local_force_calls` observability fields.
+- Marked the next algorithmic step as `PR-MB02`: replace the current repeated full-system
+  many-body `td_local` path with a CPU-reference target-local implementation before further
+  zoning or ML-potential policy work.
+
 ## 4.5.14
 - Added `scripts/bench_eam_td_breakdown_gpu.py` and manual preset `eam_td_breakdown_gpu` for
   GPU-only `10K`-atom `EAM/eam-alloy` runtime attribution.

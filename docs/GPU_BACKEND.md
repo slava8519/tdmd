@@ -58,9 +58,17 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
    representative point and `eam_decomp_zone_sweep_gpu` for a manual layout sweep before changing
    any zoning policy.
 7. If large-run TD speedup is smaller than expected, run `eam_td_breakdown_gpu` before changing
-   kernels or zoning heuristics. It separates current runtime into `forces_full`, real device sync,
-   cell-list build, candidate enumeration, and zone bookkeeping so optimization work targets the
-   actual dominant cost.
+   kernels or zoning heuristics. It separates current runtime into `forces_full`,
+   `target_local_force`, real device sync, cell-list build, candidate enumeration, and zone
+   bookkeeping, and it records the current many-body force-scope contract explicitly. That keeps
+   optimization work pointed at the actual dominant cost instead of assuming TD locality the
+   runtime does not yet have.
+   Use `baseline_reference_version=pr_mb01_v1` in the artifact to compare current CUDA behavior
+   against the frozen pre-locality ceiling.
+8. Once `eam_td_breakdown_gpu` confirms the corrected many-body locality model, use
+   `td_autozoning_advisor_gpu` to turn current resource availability plus benchmark evidence into
+   a recommendation-only TD zoning plan. This advisor must not mutate runtime policy implicitly;
+   it is an operator decision aid, not an auto-applied scheduler.
 
 ## Historical Milestone (PR-G02)
 - Added CUDA pair-force kernels for `LJ/Morse` in `tdmd/forces_gpu.py`.
@@ -183,7 +191,8 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - optional `Phase E` comparison against commit `efb864e` via `--phase-e-worktree`.
 - Added `scripts/bench_eam_td_breakdown_gpu.py` and manual preset `eam_td_breakdown_gpu` for
   profiling why large single-GPU `EAM/eam-alloy` TD speedups may remain modest even when CUDA is
-  effective.
+  effective; the artifact now records the explicit many-body force-scope baseline
+  (`pr_mb01_v1`) alongside the timing breakdown and current contract version.
 - Current PR-C07 decision point result:
   stay on CuPy RawKernel.
   Representative `EAM/alloy` profiling (`512 atoms`, `2 steps`) shows current CUDA path beating

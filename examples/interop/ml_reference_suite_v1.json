@@ -1,0 +1,169 @@
+{
+  "suite_version": 1,
+  "family": "ml/reference:quadratic_density",
+  "description": "CPU-reference parity suite for the ml/reference quadratic_density family.",
+  "thresholds": {
+    "force_abs": 1e-12,
+    "energy_abs": 1e-12,
+    "virial_abs": 1e-12,
+    "temp_abs": 1e-12,
+    "press_abs": 1e-12,
+    "traj_r_abs": 1e-12,
+    "traj_v_abs": 1e-12,
+    "verify_abs": 1e-12
+  },
+  "cases": [
+    {
+      "name": "ml_reference_binary_serial_td_sync",
+      "task": "examples/interop/task_ml_reference.yaml",
+      "steps": 4,
+      "zones_total": 2,
+      "expected": {
+        "contract": {
+          "version": "ml_ref_v1",
+          "cutoff": {
+            "radius": 2.4,
+            "smoothing": "cosine"
+          },
+          "descriptor": {
+            "family": "radial_density",
+            "width": 0.85
+          },
+          "neighbor": {
+            "mode": "candidate_local",
+            "requires_full_system_barrier": false
+          },
+          "inference": {
+            "family": "quadratic_density",
+            "cpu_reference": true,
+            "target_local_supported": true
+          }
+        },
+        "initial": {
+          "forces": [
+            [-1.666417833996702, -1.5737917077834565, 0.0],
+            [1.666417833996702, -1.7658204438756646, 0.0],
+            [-1.666417833996702, 1.5737917077834565, 0.0],
+            [1.666417833996702, 1.7658204438756646, 0.0]
+          ],
+          "pe": 1.9712072710088406,
+          "virial": 6.672447819652525,
+          "T": 0.0,
+          "P": 0.0022241492732175084
+        },
+        "serial_final": {
+          "positions": [
+            [0.9999866687918166, 0.9999874098067157, 1.0],
+            [2.0000088874721222, 0.9999905823743575, 1.0],
+            [0.9999866687918166, 2.000012590193284, 1.0],
+            [2.0000088874721222, 2.0000094176256424, 1.0]
+          ],
+          "velocities": [
+            [-0.006665523399974111, -0.006295012416626356, 0.0],
+            [0.004443682266649408, -0.004708762787289636, 0.0],
+            [-0.0066655233999741124, 0.006295012416626356, 0.0],
+            [0.004443682266649407, 0.004708762787289637, 0.0]
+          ],
+          "E": 1.97120727071218,
+          "KE": 0.00014693452213192956,
+          "PE": 1.971060336190048,
+          "T": 2.448908702198826e-05,
+          "P": 0.0022241536913632665
+        },
+        "sync_verify": {
+          "max_dr": 0.0,
+          "max_dv": 0.0,
+          "max_dE": 0.0,
+          "max_dT": 0.0,
+          "max_dP": 0.0,
+          "final_dr": 0.0,
+          "final_dv": 0.0,
+          "final_dE": 0.0,
+          "final_dT": 0.0,
+          "final_dP": 0.0,
+          "rms_dr": 0.0,
+          "rms_dv": 2.909219710836648e-19,
+          "rms_dE": 0.0,
+          "rms_dT": 0.0,
+          "rms_dP": 0.0
+        }
+      }
+    },
+    {
+      "name": "ml_reference_uniform_serial_td_sync",
+      "task": "examples/interop/task_ml_reference_uniform.yaml",
+      "steps": 4,
+      "zones_total": 2,
+      "expected": {
+        "contract": {
+          "version": "ml_ref_v1",
+          "cutoff": {
+            "radius": 2.4,
+            "smoothing": "cosine"
+          },
+          "descriptor": {
+            "family": "radial_density",
+            "width": 0.85
+          },
+          "neighbor": {
+            "mode": "candidate_local",
+            "requires_full_system_barrier": false
+          },
+          "inference": {
+            "family": "quadratic_density",
+            "cpu_reference": true,
+            "target_local_supported": true
+          }
+        },
+        "initial": {
+          "forces": [
+            [-1.6310713517736193, -1.6310713517736193, 0.0],
+            [1.6310713517736193, -1.6310713517736193, 0.0],
+            [-1.6310713517736193, 1.6310713517736193, 0.0],
+            [1.6310713517736193, 1.6310713517736193, 0.0]
+          ],
+          "pe": 1.9089100578793126,
+          "virial": 6.524285407094476,
+          "T": 0.0,
+          "P": 0.0021747618023648255
+        },
+        "serial_final": {
+          "positions": [
+            [0.9999891262992653, 0.9999891262992653, 1.0],
+            [2.0000108737007345, 0.9999891262992653, 1.0],
+            [0.9999891262992653, 2.0000108737007345, 1.0],
+            [2.0000108737007345, 2.0000108737007345, 1.0]
+          ],
+          "velocities": [
+            [-0.005436785402228636, -0.005436785402228636, 0.0],
+            [0.005436785402228636, -0.005436785402228636, 0.0],
+            [-0.005436785402228636, 0.005436785402228636, 0.0],
+            [0.005436785402228636, 0.005436785402228636, 0.0]
+          ],
+          "E": 1.9089100575967617,
+          "KE": 0.00014188145044745468,
+          "PE": 1.9087681761463142,
+          "T": 2.3646908407909113e-05,
+          "P": 0.002174765090692056
+        },
+        "sync_verify": {
+          "max_dr": 0.0,
+          "max_dv": 0.0,
+          "max_dE": 0.0,
+          "max_dT": 0.0,
+          "max_dP": 0.0,
+          "final_dr": 0.0,
+          "final_dv": 0.0,
+          "final_dE": 0.0,
+          "final_dT": 0.0,
+          "final_dP": 0.0,
+          "rms_dr": 0.0,
+          "rms_dv": 1.3714193236627739e-19,
+          "rms_dE": 0.0,
+          "rms_dT": 9.470116246213047e-23,
+          "rms_dP": 0.0
+        }
+      }
+    }
+  ]
+}

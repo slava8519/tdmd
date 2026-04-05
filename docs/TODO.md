@@ -5,39 +5,53 @@
 > Baseline plan here is completed; post-baseline hardening (`v1`) is tracked in `docs/RISK_BURNDOWN_PLAN.md`; risk burndown `v2` is completed in `docs/RISK_BURNDOWN_PLAN_V2.md`.
 > Completed current cycle: CUDA execution plan (`docs/CUDA_EXECUTION_PLAN.md`, PR-C01..PR-C08).
 > Ongoing work is maintenance/refinement of the completed CUDA stack and its strict gates.
-> Planned next maintenance theme: many-body TD locality hardening for `EAM/eam-alloy`, then
-> resource-aware TD auto-zoning on top of the corrected cost model.
+> Completed post-CUDA maintenance theme: many-body TD locality hardening for `EAM/eam-alloy`
+> plus a recommendation-only resource-aware TD auto-zoning advisor on top of the corrected cost
+> model.
 > Future ML-potential work should build on the same CPU-reference-first many-body contract.
 
 ## Planned Maintenance - Many-Body TD Locality
-- [ ] PR-MB01 Many-body TD force-scope contract.
-  - DoD: make the runtime/observability distinction between full-system many-body evaluation and
-    target-local many-body evaluation explicit; freeze `eam_td_breakdown_gpu` as the large-run
-    baseline artifact for this track.
-- [ ] PR-MB02 CPU reference target-local `EAM/eam-alloy` TD path.
-  - DoD: async `td_local` many-body half-steps no longer rely on repeated full-system
-    `forces_full(ctx.r)[ids0]`; strict materials gates and `longrun_envelope_ci` stay green.
-- [ ] PR-MB03 GPU refinement for target-local many-body TD path.
+- [x] PR-MB01 Many-body TD force-scope contract.
+  - DoD: the runtime/observability distinction between full-system many-body evaluation and
+    target-local many-body evaluation is explicit; `eam_td_breakdown_gpu` now records the frozen
+    `pr_mb01_v1` baseline contract (`evaluation_scope`, `consumption_scope`,
+    `target_local_available`, `target_local_force_calls`) for this track.
+- [x] PR-MB02 CPU reference target-local `EAM/eam-alloy` TD path.
+  - DoD: async CPU `td_local` many-body half-steps no longer rely on repeated full-system
+    `forces_full(ctx.r)[ids0]`; they use `potential.forces_on_targets(...)` while preserving TD
+    scheduling semantics. Strict materials gates and `longrun_envelope_ci` stay green.
+- [x] PR-MB03 GPU refinement for target-local many-body TD path.
+  - DoD: CUDA `EAM/eam-alloy` path consumes target/candidate-local work without repeated
+    full-system many-body passes; `eam_td_breakdown_gpu` now reports current contract `pr_mb03_v1`
+    against baseline `pr_mb01_v1` with `forces_full_share=0` on the representative `10K` benchmark.
   - DoD: CUDA `EAM/eam-alloy` path consumes target/candidate-local work without repeated
     full-system many-body passes; `eam_td_breakdown_gpu` shows reduced `forces_full` share on the
     representative `10K` benchmark.
 
 ## Planned Maintenance - TD Auto-Zoning
-- [ ] PR-ZA01 Resource-aware TD auto-zoning advisor.
+- [x] PR-ZA01 Resource-aware TD auto-zoning advisor.
   - DoD: detect available CPU/GPU/MPI resources, enumerate geometry-valid TD/space layouts,
     and emit a recommended zoning plan from benchmark evidence without changing runtime semantics.
   - Evidence sources should include `eam_decomp_zone_sweep_gpu` for layout search and
     `eam_td_breakdown_gpu` for separating true TD headroom from backend/runtime overhead.
   - Depends on: `PR-MB02` and `PR-MB03`, so zoning recommendations are not built on a false
     many-body ceiling.
+  - Delivery note: `td_autozoning_advisor_gpu` is an operator-side VerifyLab preset and artifact
+    workflow. It recommends a layout but does not auto-apply zoning policy at runtime.
 
 ## Planned Future Extension - ML Potentials
-- [ ] PR-ML01 ML-potential runtime contract + CPU reference harness.
+- [x] PR-ML01 ML-potential runtime contract + CPU reference harness.
   - DoD: versioned cutoff/descriptor/neighbor contract, CPU reference inference path, and explicit
     no-hidden-barrier semantics suitable for TD scheduling.
-- [ ] PR-ML02 ML-potential VerifyLab/interop groundwork.
+  - Delivery note: `potential.kind=ml/reference` now provides the contract-bearing CPU harness for
+    serial / `td_local` / task-driven verification paths. Dedicated fixture-driven VerifyLab and
+    interop acceptance remain the next step.
+- [x] PR-ML02 ML-potential VerifyLab/interop groundwork.
   - DoD: strict fixture-driven CPU acceptance for at least one ML-potential family before any
     GPU refinement or auto-zoning policy is introduced for that track.
+  - Delivery note: `ml_reference_smoke` now provides a strict task-based VerifyLab lane for the
+    `quadratic_density` `ml/reference` family, and `scripts/ml_reference_parity_pack.py --strict`
+    validates `examples/interop/ml_reference_suite_v1.json`.
 
 ## Mandatory Rules (all PRs)
 - [ ] Preserve TD semantics: no bypass/merge of F/D/P/W/S, no implicit global barriers.

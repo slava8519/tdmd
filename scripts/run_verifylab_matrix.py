@@ -186,6 +186,24 @@ PRESETS = {
         sync_mode=True,
         task_path="examples/interop/task_eam_alloy.yaml",
     ),
+    "ml_reference_smoke": dict(
+        steps=4,
+        every=1,
+        zones_total_list=[2],
+        use_verlet_list=[False],
+        verlet_k_steps_list=[10],
+        chaos_mode_list=[False],
+        chaos_delay_prob_list=[0.0],
+        tol=SMOKE_CI_THRESHOLDS,
+        task_mode=True,
+        sync_mode=True,
+        task_path="examples/interop/task_ml_reference.yaml",
+    ),
+    "ml_reference_parity_smoke": dict(
+        ml_reference_parity_mode=True,
+        ml_reference_fixture="examples/interop/ml_reference_suite_v1.json",
+        timeout=180,
+    ),
     "gpu_smoke": dict(
         steps=2,
         every=1,
@@ -719,10 +737,7 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             and (not strict_invariants or all(int(x) == 1 for x in strict_ok))
             and (not require_async_evidence or all(int(x) == 1 for x in async_evidence_ok))
             and (not require_overlap_window or all(int(x) == 1 for x in overlap_window_ok))
-            and (
-                not require_cuda_aware_active
-                or all(int(x) == 1 for x in cuda_aware_active_ok)
-            )
+            and (not require_cuda_aware_active or all(int(x) == 1 for x in cuda_aware_active_ok))
         )
         reasons: list[str] = []
         if not mpirun:
@@ -735,16 +750,22 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
             reasons.append("inner_run_failed")
         if strict_invariants and strict_ok and any(int(x) != 1 for x in strict_ok):
             reasons.append("strict_invariants_failed")
-        if require_async_evidence and async_evidence_ok and any(
-            int(x) != 1 for x in async_evidence_ok
+        if (
+            require_async_evidence
+            and async_evidence_ok
+            and any(int(x) != 1 for x in async_evidence_ok)
         ):
             reasons.append("async_evidence_missing")
-        if require_overlap_window and overlap_window_ok and any(
-            int(x) != 1 for x in overlap_window_ok
+        if (
+            require_overlap_window
+            and overlap_window_ok
+            and any(int(x) != 1 for x in overlap_window_ok)
         ):
             reasons.append("overlap_window_missing")
-        if require_cuda_aware_active and cuda_aware_active_ok and any(
-            int(x) != 1 for x in cuda_aware_active_ok
+        if (
+            require_cuda_aware_active
+            and cuda_aware_active_ok
+            and any(int(x) != 1 for x in cuda_aware_active_ok)
         ):
             reasons.append("cuda_aware_inactive")
 
@@ -777,11 +798,16 @@ def _run_mpi_overlap_sweep(*, preset: dict, out_dir: str) -> dict[str, object]:
                     else 0
                 ),
                 "overlap_window_ok": int(
-                    1 if (not require_overlap_window or all(int(x) == 1 for x in overlap_window_ok)) else 0
+                    1
+                    if (not require_overlap_window or all(int(x) == 1 for x in overlap_window_ok))
+                    else 0
                 ),
                 "cuda_aware_active_ok": int(
                     1
-                    if (not require_cuda_aware_active or all(int(x) == 1 for x in cuda_aware_active_ok))
+                    if (
+                        not require_cuda_aware_active
+                        or all(int(x) == 1 for x in cuda_aware_active_ok)
+                    )
                     else 0
                 ),
                 "reasons": reasons,
@@ -1042,6 +1068,66 @@ def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, obj
                         "by_property": dict(loaded.get("by_property", {}) or {}),
                     }
                 )
+        except Exception as exc:
+            summary["parse_error"] = str(exc)
+    summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
+    return summary
+
+
+def _run_ml_reference_parity_gate(*, preset: dict, out_dir: str) -> dict[str, object]:
+    fixture = str(preset.get("ml_reference_fixture", "examples/interop/ml_reference_suite_v1.json"))
+    timeout = int(preset.get("timeout", 180))
+    out_json = os.path.join(out_dir, "ml_reference_parity.summary.json")
+    cmd = [
+        sys.executable,
+        "scripts/ml_reference_parity_pack.py",
+        "--fixture",
+        fixture,
+        "--config",
+        "examples/td_1d_morse.yaml",
+        "--out",
+        out_json,
+        "--strict",
+    ]
+    timed_out = False
+    proc_rc = 1
+    proc_out = ""
+    proc_err = ""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
+        proc_rc = int(proc.returncode)
+        proc_out = str(proc.stdout or "")
+        proc_err = str(proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc_rc = 124
+        proc_out = str(getattr(exc, "stdout", "") or "")
+        proc_err = str(getattr(exc, "stderr", "") or "")
+
+    summary: dict[str, object] = {
+        "n": 0,
+        "total": 0,
+        "ok": 0,
+        "fail": 1,
+        "ok_all": False,
+        "worst": {},
+        "by_case": {},
+        "external_script": "scripts/ml_reference_parity_pack.py",
+        "external_returncode": int(proc_rc),
+        "external_timed_out": bool(timed_out),
+        "external_stdout": proc_out,
+        "external_stderr": proc_err,
+        "external_fixture": fixture,
+        "external_artifacts": {"json": out_json},
+    }
+    if os.path.exists(out_json):
+        try:
+            with open(out_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                summary.update(loaded)
         except Exception as exc:
             summary["parse_error"] = str(exc)
     summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
@@ -1547,6 +1633,9 @@ def main():
     elif bool(p.get("materials_property_mode", False)):
         mode_summary = _run_materials_property_gate(preset=p, out_dir=out_dir)
         mode_kind = "materials_property"
+    elif bool(p.get("ml_reference_parity_mode", False)):
+        mode_summary = _run_ml_reference_parity_gate(preset=p, out_dir=out_dir)
+        mode_kind = "ml_reference_parity"
     elif bool(p.get("gpu_perf_mode", False)):
         mode_summary = _run_gpu_perf_smoke(preset=p, out_dir=out_dir)
         mode_kind = "gpu_perf"
@@ -1758,7 +1847,9 @@ def main():
             f"fallback_from_cuda=`{backend['fallback_from_cuda']}`\n"
         )
         if mode_kind == "eam_decomp_perf":
-            f.write("- benchmark: mixed CPU/CUDA benchmark; per-case effective device is reported in the table below.\n")
+            f.write(
+                "- benchmark: mixed CPU/CUDA benchmark; per-case effective device is reported in the table below.\n"
+            )
         f.write(f"- strict_guardrails: `{strict_guardrails}`\n")
         f.write(f"- require_effective_cuda: `{require_effective_cuda}`\n")
         if envelope_summary is not None:

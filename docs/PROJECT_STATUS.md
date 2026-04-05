@@ -28,7 +28,7 @@ TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD au
   direct `config.X` access; thin closure adapters bind helpers to local state.
 - **Config objects** (`tdmd/run_configs.py`): `TDLocalRunConfig`, `TDFullMPIRunConfig` with
   `from_legacy_kwargs()` for backward compatibility; replaces 50+ loose keyword arguments.
-- **Test suite**: 206 tests passing, 3 skipped in the current post-CUDA maintenance worktree.
+- **Test suite**: 227 tests passing, 3 skipped in the current post-CUDA maintenance worktree.
 
 ## GPU Backend Status
 - **Phase E (complete, historical)**: CuPy high-level API path — functionally correct but
@@ -48,11 +48,28 @@ TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD au
 - Current large-run `EAM/eam-alloy` evidence shows single-GPU TD remains dominated by repeated
   many-body `forces_full`, so the next algorithmic step is target-local many-body TD evaluation
   rather than auto-zoning first.
+- `PR-MB01` is complete: the current `td_local` many-body force scope is explicit in code and in
+  `eam_td_breakdown_gpu` artifacts (`pr_mb01_v1`), including the distinction between
+  full-system evaluation and target-only consumption.
+- `PR-MB02` is complete: CPU async `td_local` many-body now uses target-local
+  `potential.forces_on_targets(...)` while preserving TD scheduling semantics.
+- `PR-MB03` is complete: CUDA async `td_local` many-body now uses target/candidate-local GPU
+  dispatch, and `eam_td_breakdown_gpu` reports current contract `pr_mb03_v1` against baseline
+  `pr_mb01_v1` with `forces_full_share=0` on the representative `10K` benchmark.
+- `PR-ZA01` is complete: `td_autozoning_advisor_gpu` now detects available CPU/GPU/MPI
+  resources, enumerates strict-valid `TD/space` layouts, and emits recommendation-only
+  markdown/json/csv artifacts without changing runtime zoning policy.
+- `PR-ML01` is complete: `potential.kind=ml/reference` now formalizes a versioned CPU-reference
+  many-body contract (`cutoff`, `descriptor`, `neighbor`, `inference`) with explicit
+  no-hidden-barrier semantics and target-local `forces_on_targets(...)` support for TD runtimes.
+- `PR-ML02` is complete: the `quadratic_density` `ml/reference` family now has both a strict
+  task-based VerifyLab lane (`ml_reference_smoke`) and a versioned fixture-driven parity suite
+  (`examples/interop/ml_reference_suite_v1.json` via `scripts/ml_reference_parity_pack.py`).
 - Planned follow-up order:
-  1. make many-body TD force scope explicit,
-  2. deliver CPU-reference target-local `EAM/eam-alloy` TD path,
-  3. refine the GPU path on top of that corrected locality model,
-  4. only then build resource-aware TD auto-zoning as a recommendation layer.
+  1. keep any future ML work on CPU-reference + explicit-contract discipline until a real
+     scientific model family is chosen for expansion,
+  2. keep any future auto-zoning automation recommendation-first until an explicit runtime
+     contract is defined and verified.
 - Future ML-potential work should reuse the same many-body locality contract and still start from
   CPU reference semantics before any GPU or zoning policy extension.
 - See `docs/CUDA_EXECUTION_PLAN.md` for the consolidated runbook and `docs/GPU_BACKEND_API.md`

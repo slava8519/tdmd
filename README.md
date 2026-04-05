@@ -123,6 +123,16 @@ python -m tdmd.main run --task examples/interop/task_eam_al.yaml --mode serial -
 python -m tdmd.main run --task examples/interop/task_eam_alloy.yaml --mode serial --device cpu
 ```
 
+ML reference contract example (CPU reference harness):
+```bash
+python -m tdmd.main run --task examples/interop/task_ml_reference.yaml --mode serial --device cpu
+python -m tdmd.main run --task examples/interop/task_ml_reference.yaml --mode td_local --device cpu
+```
+
+`examples/interop/task_ml_reference.yaml` is the `PR-ML01/ML02` reference harness for the
+`quadratic_density` `ml/reference` family. LAMMPS export is intentionally unsupported for this
+contract at this stage.
+
 ### Outputs (Trajectory + Metrics + Manifests)
 
 Trajectory and metrics with schema sidecars:
@@ -146,6 +156,12 @@ python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset intero
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_perf_smoke --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset metal_smoke --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_metal_smoke --strict
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset ml_reference_smoke --strict
+```
+
+Fixture-driven ML parity check:
+```bash
+python scripts/ml_reference_parity_pack.py --fixture examples/interop/ml_reference_suite_v1.json --config examples/td_1d_morse.yaml --strict
 ```
 
 `eam_decomp_perf_smoke` is the standard PR benchmark for `EAM/alloy`. It prints a four-column
@@ -179,6 +195,16 @@ This manual benchmark compares `space_gpu` and `time_gpu` at the same `2-zone` l
 breakdown for `forces_full`, device sync, cell-list build, candidate enumeration, and zone
 bookkeeping. Use it before making claims about the TD optimization ceiling or changing zoning
 policy.
+
+To turn that corrected many-body cost model plus visible machine resources into a recommendation-
+only TD zoning plan, run:
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset td_autozoning_advisor_gpu --strict
+```
+
+This manual advisor detects visible CPU/GPU/MPI resources, benchmarks strict-valid candidate
+layouts, and emits markdown/json/csv artifacts with a recommended TD layout. It does not change
+runtime zoning policy automatically.
 
 For a broader CUDA-cycle profiling report, run:
 ```bash

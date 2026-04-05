@@ -79,6 +79,13 @@ def test_lammps_in_export_eam_alloy_coeff_line(tmp_path):
     assert "eam_al_ni_demo.setfl Al Ni" in text
 
 
+def test_lammps_in_export_rejects_ml_reference(tmp_path):
+    task = load_task("examples/interop/task_ml_reference.yaml")
+    in_path = tmp_path / "in.lammps"
+    with pytest.raises(ValueError, match="unsupported potential kind"):
+        export_lammps_in(task, str(in_path), data_filename="data.lammps")
+
+
 def test_lammps_data_export_rejects_non_contiguous_types(tmp_path):
     task = {
         "task_version": 1,

@@ -35,9 +35,35 @@ Mode-level guarantees and strict gate mapping are documented in `docs/MODE_CONTR
 - **EAM/alloy CPU reference**:
   - `potential.kind=eam/alloy` (`eam_alloy` alias) is parsed via DYNAMO setfl reader and executed in `serial` by `EAMAlloyPotential` (two-pass density+force)
   - type-to-element mapping comes from `potential.params.elements` (`type t -> elements[t-1]`)
+- **ML reference contract (`PR-ML01`)**:
+  - `potential.kind=ml/reference` (`ml_reference` alias) is parsed by `tdmd/io/task.py` and
+    instantiated by `make_potential -> MLReferencePotential`
+  - the contract is explicit and versioned: `contract.version`, `contract.cutoff`,
+    `contract.descriptor`, `contract.neighbor`, `contract.inference`
+  - runtime compatibility requires `task.cutoff >= contract.cutoff.radius`
+  - `contract.neighbor.requires_full_system_barrier` is required to stay `false`, so TD runtimes
+    do not hide global synchronization behind ML inference
+  - current CPU-reference inference family is `quadratic_density`; this is a reference harness,
+    not yet a fixture-driven scientific acceptance lane
 - **EAM in TD-local**:
   - `td_local` supports many-body backend calls via `EAMAlloyPotential.forces_energy_virial` (zone-wise integration path preserved)
+  - async `td_local` many-body now uses backend-specific force scope:
+    - `cpu`: `target_local` evaluation via `potential.forces_on_targets(...)`,
+    - `cuda`: `target_local` evaluation via target/candidate-local GPU dispatch with guarded
+      full-system GPU fallback if that refinement is unavailable for a call
+  - this runtime contract is exposed explicitly via `tdmd/many_body_scope.py` and
+    `tdmd/td_local.py::describe_many_body_force_scope`
+  - `PR-MB02` moved the CPU reference path to target-local many-body evaluation without changing TD
+    scheduling semantics; `PR-MB03` applies the corresponding CUDA refinement without changing CPU reference behavior
   - verification parity path uses `sync_mode=True` for serial-equivalent snapshot updates
+- **ML reference in TD-local / task paths**:
+  - `MLReferencePotential` implements both `forces_energy_virial(...)` and
+    `forces_on_targets(...)`, so it follows the same CPU target-local many-body path as `EAM`
+  - `tdmd/verify_lab.py::sweep_verify_task` and task-driven CLI runtime now admit `ml/reference`
+    explicitly
+  - `PR-ML02` adds a strict task-based lane (`ml_reference_smoke`) and fixture-driven parity pack
+    (`examples/interop/ml_reference_suite_v1.json`, `scripts/ml_reference_parity_pack.py`)
+    for the concrete `quadratic_density` family
 - **EAM in TD-MPI (`td_full_mpi`)**:
   - `td_automaton.compute_step_for_work_zone` uses `potential.forces_on_targets(...)` when available (many-body support without automaton state changes)
   - EAM target-zone forces use table support candidate set (`table.support_ids`) plus local zone ids
@@ -57,6 +83,8 @@ Mode-level guarantees and strict gate mapping are documented in `docs/MODE_CONTR
     `pair_coeff * * <setfl> <elem(type=1)> ... <elem(type=N)>` from `potential.params.elements`.
   - `tdmd/io/lammps.py::export_lammps_in` emits `fix nve/nvt/npt` according to `task.ensemble`.
   - `tdmd/io/lammps.py::export_lammps_data` enforces LAMMPS-compatible contiguous atom types (`1..N`) for exported data files.
+  - `ml/reference` export is intentionally unsupported today; the interop boundary is explicit and
+    tested rather than silently approximated.
 
 ## Halo / Migration
 - **Migration DELTA**: `tdmd/td_full_mpi.py` (`REC_DELTA`, `DELTA_MIGRATION`)

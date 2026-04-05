@@ -46,6 +46,20 @@ def test_verifylab_interop_metal_smoke_strict():
     subprocess.check_call(cmd)
 
 
+def test_verifylab_ml_reference_smoke_strict():
+    cmd = [
+        sys.executable,
+        "scripts/run_verifylab_matrix.py",
+        "examples/td_1d_morse.yaml",
+        "--preset",
+        "ml_reference_smoke",
+        "--strict",
+        "--run-id",
+        "pytest_ml_reference_smoke",
+    ]
+    subprocess.check_call(cmd)
+
+
 def test_verifylab_gpu_smoke_strict():
     cmd = [
         sys.executable,
