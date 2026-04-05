@@ -8,7 +8,12 @@ import numpy as np
 import yaml
 
 from ..constants import GEOM_EPSILON
-from ..potentials import canonical_potential_kind, ensure_pair_coeffs_complete, parse_pair_coeffs
+from ..potentials import (
+    canonical_potential_kind,
+    ensure_pair_coeffs_complete,
+    parse_ml_reference_params,
+    parse_pair_coeffs,
+)
 
 _LAMMPS_UNITS = {
     "lj",
@@ -26,6 +31,7 @@ _RUNTIME_POTENTIAL_PARAMS = {
     "morse": {"D_e", "a", "r0", "pair_coeffs"},
     "table": {"file", "keyword", "style"},
     "eam/alloy": {"file", "elements"},
+    "ml/reference": {"contract", "species"},
 }
 
 
@@ -195,7 +201,7 @@ def _parse_potential(d: dict, atom_types: np.ndarray) -> TaskPotential:
         params = {}
     if not isinstance(params, dict):
         raise _err("potential.params must be a mapping")
-    if kind not in ("lj", "morse", "table", "eam/alloy"):
+    if kind not in ("lj", "morse", "table", "eam/alloy", "ml/reference"):
         raise _err(f"unsupported potential.kind: {kind}")
     if kind == "table":
         if "file" not in params or "keyword" not in params:
@@ -214,6 +220,12 @@ def _parse_potential(d: dict, atom_types: np.ndarray) -> TaskPotential:
         for i, nm in enumerate(elems):
             if not isinstance(nm, str) or not nm.strip():
                 raise _err(f"potential.params.elements[{i}] must be a non-empty string")
+    if kind == "ml/reference":
+        max_type = int(np.max(atom_types)) if atom_types.size else 0
+        try:
+            parse_ml_reference_params(params, max_atom_type=max_type)
+        except ValueError as exc:
+            raise _err(str(exc)) from exc
     if kind in ("lj", "morse"):
         try:
             pair_coeffs = parse_pair_coeffs(kind, params)
@@ -393,6 +405,19 @@ def validate_task_for_run(
             f"unsupported potential.params for '{task.potential.kind}' in TDMD run: {unknown}; "
             f"allowed: {sorted(allowed_params)}"
         )
+    if task.potential.kind == "ml/reference":
+        try:
+            contract, _bias, _quadratic, _neighbor_weight = parse_ml_reference_params(
+                task.potential.params,
+                max_atom_type=max(int(a.type) for a in task.atoms),
+            )
+        except ValueError as exc:
+            raise _err(str(exc)) from exc
+        if float(task.cutoff) + GEOM_EPSILON < float(contract.cutoff_radius):
+            raise _err(
+                "TDMD run cutoff is smaller than ml/reference contract cutoff: "
+                f"run={float(task.cutoff)} contract={float(contract.cutoff_radius)}"
+            )
     if task.units != "lj":
         # The runtime computes in the numeric values as provided by the task and does not perform
         # unit conversion; make this explicit to avoid schema/runtime ambiguity.

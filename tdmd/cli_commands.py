@@ -261,7 +261,7 @@ def _cmd_run_legacy(
 
     if task is not None:
         arr = task_to_arrays(task)
-        allowed_kinds = ("lj", "morse", "table", "eam/alloy")
+        allowed_kinds = ("lj", "morse", "table", "eam/alloy", "ml/reference")
         allowed_ensembles = ("nve", "nvt", "npt")
         masses = validate_task_for_run(
             task,

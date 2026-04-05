@@ -253,7 +253,7 @@ def sweep_verify_task(
     task = load_task(task_path)
     masses = validate_task_for_run(
         task,
-        allowed_potential_kinds=("lj", "morse", "table", "eam/alloy"),
+        allowed_potential_kinds=("lj", "morse", "table", "eam/alloy", "ml/reference"),
         allowed_ensemble_kinds=("nve", "nvt", "npt"),
     )
     arr = task_to_arrays(task)

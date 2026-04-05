@@ -13,7 +13,12 @@ def canonical_potential_kind(kind: str) -> str:
     k = str(kind).strip().lower()
     if k in ("eam_alloy", "eam/alloy"):
         return "eam/alloy"
+    if k in ("ml_reference", "ml/reference"):
+        return "ml/reference"
     return k
+
+
+ML_REFERENCE_CONTRACT_VERSION = "ml_ref_v1"
 
 
 _PAIR_PARAM_NAMES: dict[str, tuple[str, ...]] = {
@@ -592,6 +597,344 @@ class EAMAlloyPotential:
         return out
 
 
+def _as_bool(value: Any, *, key: str) -> bool:
+    if isinstance(value, bool):
+        return bool(value)
+    raise ValueError(f"{key} must be a bool")
+
+
+@dataclass(frozen=True)
+class MLReferenceContract:
+    version: str
+    cutoff_radius: float
+    cutoff_smoothing: str
+    descriptor_family: str
+    descriptor_width: float
+    neighbor_mode: str
+    requires_full_system_barrier: bool
+    inference_family: str
+    cpu_reference: bool
+    target_local_supported: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "cutoff": {
+                "radius": float(self.cutoff_radius),
+                "smoothing": self.cutoff_smoothing,
+            },
+            "descriptor": {
+                "family": self.descriptor_family,
+                "width": float(self.descriptor_width),
+            },
+            "neighbor": {
+                "mode": self.neighbor_mode,
+                "requires_full_system_barrier": bool(self.requires_full_system_barrier),
+            },
+            "inference": {
+                "family": self.inference_family,
+                "cpu_reference": bool(self.cpu_reference),
+                "target_local_supported": bool(self.target_local_supported),
+            },
+        }
+
+
+def parse_ml_reference_params(
+    params: dict[str, Any],
+    *,
+    max_atom_type: int | None = None,
+) -> tuple[MLReferenceContract, np.ndarray, np.ndarray, np.ndarray]:
+    if not isinstance(params, dict):
+        raise ValueError("ml/reference params must be a mapping")
+    contract_raw = params.get("contract")
+    if not isinstance(contract_raw, dict):
+        raise ValueError("ml/reference requires params.contract mapping")
+    version = str(contract_raw.get("version", "")).strip()
+    if version != ML_REFERENCE_CONTRACT_VERSION:
+        raise ValueError(f"ml/reference contract.version must be '{ML_REFERENCE_CONTRACT_VERSION}'")
+
+    cutoff_raw = contract_raw.get("cutoff")
+    if not isinstance(cutoff_raw, dict):
+        raise ValueError("ml/reference contract.cutoff must be a mapping")
+    cutoff_radius = float(cutoff_raw.get("radius", 0.0))
+    cutoff_smoothing = str(cutoff_raw.get("smoothing", "")).strip().lower()
+    if cutoff_radius <= 0.0:
+        raise ValueError("ml/reference contract.cutoff.radius must be positive")
+    if cutoff_smoothing != "cosine":
+        raise ValueError("ml/reference contract.cutoff.smoothing must be 'cosine'")
+
+    descriptor_raw = contract_raw.get("descriptor")
+    if not isinstance(descriptor_raw, dict):
+        raise ValueError("ml/reference contract.descriptor must be a mapping")
+    descriptor_family = str(descriptor_raw.get("family", "")).strip().lower()
+    descriptor_width = float(descriptor_raw.get("width", 0.0))
+    if descriptor_family != "radial_density":
+        raise ValueError("ml/reference contract.descriptor.family must be 'radial_density'")
+    if descriptor_width <= 0.0:
+        raise ValueError("ml/reference contract.descriptor.width must be positive")
+
+    neighbor_raw = contract_raw.get("neighbor")
+    if not isinstance(neighbor_raw, dict):
+        raise ValueError("ml/reference contract.neighbor must be a mapping")
+    neighbor_mode = str(neighbor_raw.get("mode", "")).strip().lower()
+    requires_full_system_barrier = _as_bool(
+        neighbor_raw.get("requires_full_system_barrier", False),
+        key="ml/reference contract.neighbor.requires_full_system_barrier",
+    )
+    if neighbor_mode != "candidate_local":
+        raise ValueError("ml/reference contract.neighbor.mode must be 'candidate_local'")
+    if requires_full_system_barrier:
+        raise ValueError(
+            "ml/reference contract.neighbor.requires_full_system_barrier must be false"
+        )
+
+    inference_raw = contract_raw.get("inference")
+    if not isinstance(inference_raw, dict):
+        raise ValueError("ml/reference contract.inference must be a mapping")
+    inference_family = str(inference_raw.get("family", "")).strip().lower()
+    cpu_reference = _as_bool(
+        inference_raw.get("cpu_reference", False),
+        key="ml/reference contract.inference.cpu_reference",
+    )
+    target_local_supported = _as_bool(
+        inference_raw.get("target_local_supported", True),
+        key="ml/reference contract.inference.target_local_supported",
+    )
+    if inference_family != "quadratic_density":
+        raise ValueError("ml/reference contract.inference.family must be 'quadratic_density'")
+    if not cpu_reference:
+        raise ValueError("ml/reference contract.inference.cpu_reference must be true")
+    if not target_local_supported:
+        raise ValueError("ml/reference contract.inference.target_local_supported must be true")
+
+    species_raw = params.get("species")
+    if not isinstance(species_raw, (list, tuple)) or not species_raw:
+        raise ValueError("ml/reference requires params.species as non-empty list")
+    bias: list[float] = []
+    quadratic: list[float] = []
+    neighbor_weight: list[float] = []
+    for idx, item in enumerate(species_raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"ml/reference params.species[{idx}] must be a mapping")
+        try:
+            bias_i = float(item.get("bias", 0.0))
+            quadratic_i = float(item.get("quadratic", 0.0))
+            neighbor_weight_i = float(item.get("neighbor_weight", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"ml/reference params.species[{idx}] numeric fields are invalid"
+            ) from exc
+        if neighbor_weight_i <= 0.0:
+            raise ValueError(f"ml/reference params.species[{idx}].neighbor_weight must be positive")
+        bias.append(bias_i)
+        quadratic.append(quadratic_i)
+        neighbor_weight.append(neighbor_weight_i)
+
+    if max_atom_type is not None and int(max_atom_type) > len(species_raw):
+        raise ValueError(
+            "ml/reference species list length "
+            f"({len(species_raw)}) is smaller than max atom type ({int(max_atom_type)})"
+        )
+
+    contract = MLReferenceContract(
+        version=version,
+        cutoff_radius=float(cutoff_radius),
+        cutoff_smoothing=cutoff_smoothing,
+        descriptor_family=descriptor_family,
+        descriptor_width=float(descriptor_width),
+        neighbor_mode=neighbor_mode,
+        requires_full_system_barrier=bool(requires_full_system_barrier),
+        inference_family=inference_family,
+        cpu_reference=bool(cpu_reference),
+        target_local_supported=bool(target_local_supported),
+    )
+    return (
+        contract,
+        np.asarray(bias, dtype=float),
+        np.asarray(quadratic, dtype=float),
+        np.asarray(neighbor_weight, dtype=float),
+    )
+
+
+@dataclass(frozen=True)
+class MLReferencePotential:
+    contract: MLReferenceContract
+    center_bias: np.ndarray
+    center_quadratic: np.ndarray
+    neighbor_weight: np.ndarray
+
+    def _resolve_cutoff(self, cutoff: float) -> float:
+        runtime_cutoff = float(cutoff)
+        contract_cutoff = float(self.contract.cutoff_radius)
+        if runtime_cutoff + NUMERICAL_ZERO < contract_cutoff:
+            raise ValueError(
+                "runtime cutoff is smaller than ml/reference contract cutoff: "
+                f"runtime={runtime_cutoff} contract={contract_cutoff}"
+            )
+        return contract_cutoff
+
+    def _types_to_species_idx(self, atom_types: np.ndarray) -> np.ndarray:
+        t = np.asarray(atom_types, dtype=np.int32)
+        if t.ndim != 1:
+            raise ValueError("atom_types must be 1D for ml/reference")
+        idx = t - 1
+        if np.any(idx < 0) or np.any(idx >= self.center_bias.shape[0]):
+            raise ValueError(
+                "ml/reference type->species mapping out of range; "
+                f"seen types={sorted({int(x) for x in t.tolist()})}"
+            )
+        return idx.astype(np.int32)
+
+    def _feature_and_grad(self, rij: float, cutoff: float) -> tuple[float, float]:
+        if rij <= 0.0 or rij >= float(cutoff):
+            return 0.0, 0.0
+        width = float(self.contract.descriptor_width)
+        base = float(np.exp(-0.5 * (rij / width) ** 2))
+        dbase = float(base * (-rij / (width * width)))
+        switch = float(0.5 * (np.cos(np.pi * rij / cutoff) + 1.0))
+        dswitch = float(-0.5 * np.pi / cutoff * np.sin(np.pi * rij / cutoff))
+        feature = base * switch
+        dfeature = dbase * switch + base * dswitch
+        return float(feature), float(dfeature)
+
+    def _subset_state(
+        self,
+        r: np.ndarray,
+        box: float,
+        cutoff: float,
+        atom_types: np.ndarray,
+        candidate_ids: np.ndarray,
+    ) -> tuple[
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        list[tuple[int, int, np.ndarray, float, float, float]],
+    ]:
+        cand = np.asarray(candidate_ids, dtype=np.int32)
+        if cand.ndim != 1:
+            raise ValueError("candidate_ids must be 1D")
+        if cand.size == 0:
+            return cand, np.empty((0,), np.int32), np.empty((0,), dtype=float), []
+        cand = np.unique(cand)
+        species_idx = self._types_to_species_idx(atom_types)[cand]
+        rho_acc = np.zeros((cand.size,), dtype=float)
+        pairs: list[tuple[int, int, np.ndarray, float, float, float]] = []
+        rc = self._resolve_cutoff(cutoff)
+        for li in range(cand.size):
+            i = int(cand[li])
+            for lj in range(li + 1, cand.size):
+                j = int(cand[lj])
+                dr = r[i] - r[j]
+                dr = dr - float(box) * np.round(dr / float(box))
+                rij2 = float(np.dot(dr, dr))
+                if rij2 <= 0.0:
+                    continue
+                rij = float(np.sqrt(rij2))
+                if rij >= rc:
+                    continue
+                base_feat, base_grad = self._feature_and_grad(rij, rc)
+                si = int(species_idx[li])
+                sj = int(species_idx[lj])
+                feat_i = float(self.neighbor_weight[sj]) * base_feat
+                feat_j = float(self.neighbor_weight[si]) * base_feat
+                grad_i = float(self.neighbor_weight[sj]) * base_grad
+                grad_j = float(self.neighbor_weight[si]) * base_grad
+                rho_acc[li] += feat_i
+                rho_acc[lj] += feat_j
+                pairs.append((li, lj, dr, rij, grad_i, grad_j))
+        return cand, species_idx, rho_acc, pairs
+
+    def _inference_state(
+        self,
+        rho_acc: np.ndarray,
+        species_idx: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        bias = self.center_bias[species_idx]
+        quadratic = self.center_quadratic[species_idx]
+        atom_energy = bias * rho_acc + 0.5 * quadratic * rho_acc * rho_acc
+        dE_drho = bias + quadratic * rho_acc
+        return atom_energy.astype(float), dE_drho.astype(float)
+
+    def forces_energy_virial(
+        self,
+        r: np.ndarray,
+        box: float,
+        cutoff: float,
+        atom_types: np.ndarray,
+    ) -> tuple[np.ndarray, float, float]:
+        n = int(r.shape[0])
+        cand, species_idx, rho_acc, pairs = self._subset_state(
+            r, box, cutoff, atom_types, np.arange(n, dtype=np.int32)
+        )
+        forces = np.zeros((n, 3), dtype=float)
+        atom_energy, dE_drho = self._inference_state(rho_acc, species_idx)
+        virial = 0.0
+        for li, lj, dr, rij, grad_i, grad_j in pairs:
+            dEdr = float(dE_drho[li]) * grad_i + float(dE_drho[lj]) * grad_j
+            fij = (-dEdr / (rij + NUMERICAL_ZERO)) * dr
+            i = int(cand[li])
+            j = int(cand[lj])
+            forces[i] += fij
+            forces[j] -= fij
+            virial += float(np.dot(dr, fij))
+        return forces, float(atom_energy.sum()), float(virial)
+
+    def energy_virial(
+        self,
+        r: np.ndarray,
+        box: float,
+        cutoff: float,
+        atom_types: np.ndarray,
+    ) -> tuple[float, float]:
+        _forces, pe, virial = self.forces_energy_virial(r, box, cutoff, atom_types)
+        return pe, virial
+
+    def forces_on_targets(
+        self,
+        r: np.ndarray,
+        box: float,
+        cutoff: float,
+        atom_types: np.ndarray,
+        target_ids: np.ndarray,
+        candidate_ids: np.ndarray,
+        rc: float | None = None,
+    ) -> np.ndarray:
+        del rc
+        tgt = np.asarray(target_ids, dtype=np.int32)
+        cand_in = np.asarray(candidate_ids, dtype=np.int32)
+        if tgt.ndim != 1 or cand_in.ndim != 1:
+            raise ValueError("target_ids/candidate_ids must be 1D")
+        if tgt.size == 0:
+            return np.zeros((0, 3), dtype=float)
+        cand_union = np.unique(np.concatenate([cand_in, tgt]).astype(np.int32))
+        cand, species_idx, rho_acc, pairs = self._subset_state(
+            r, box, cutoff, atom_types, cand_union
+        )
+        if cand.size == 0:
+            return np.zeros((tgt.size, 3), dtype=float)
+        _atom_energy, dE_drho = self._inference_state(rho_acc, species_idx)
+        out = np.zeros((tgt.size, 3), dtype=float)
+        pos_tgt = {int(gid): int(i) for i, gid in enumerate(tgt.tolist())}
+        for li, lj, dr, rij, grad_i, grad_j in pairs:
+            dEdr = float(dE_drho[li]) * grad_i + float(dE_drho[lj]) * grad_j
+            fij = (-dEdr / (rij + NUMERICAL_ZERO)) * dr
+            gi = int(cand[li])
+            gj = int(cand[lj])
+            ti = pos_tgt.get(gi, -1)
+            tj = pos_tgt.get(gj, -1)
+            if ti >= 0:
+                out[ti] += fij
+            if tj >= 0:
+                out[tj] -= fij
+        return out
+
+
+def describe_ml_reference_contract(potential: object) -> dict[str, object] | None:
+    if not isinstance(potential, MLReferencePotential):
+        return None
+    return potential.contract.as_dict()
+
+
 def make_potential(kind: str, params: dict):
     kind = canonical_potential_kind(kind)
     pair_coeffs = parse_pair_coeffs(kind, params)
@@ -653,5 +996,13 @@ def make_potential(kind: str, params: dict):
             embed_table=F_sel,
             density_table=rho_sel,
             phi_table=phi_sel,
+        )
+    if kind == "ml/reference":
+        contract, bias, quadratic, neighbor_weight = parse_ml_reference_params(params)
+        return MLReferencePotential(
+            contract=contract,
+            center_bias=bias,
+            center_quadratic=quadratic,
+            neighbor_weight=neighbor_weight,
         )
     raise ValueError(kind)

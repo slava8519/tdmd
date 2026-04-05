@@ -21,6 +21,29 @@ def _base_task_dict() -> dict:
     }
 
 
+def _ml_reference_params() -> dict:
+    return {
+        "contract": {
+            "version": "ml_ref_v1",
+            "cutoff": {"radius": 2.0, "smoothing": "cosine"},
+            "descriptor": {"family": "radial_density", "width": 0.8},
+            "neighbor": {
+                "mode": "candidate_local",
+                "requires_full_system_barrier": False,
+            },
+            "inference": {
+                "family": "quadratic_density",
+                "cpu_reference": True,
+                "target_local_supported": True,
+            },
+        },
+        "species": [
+            {"bias": 0.5, "quadratic": 0.4, "neighbor_weight": 1.0},
+            {"bias": 0.7, "quadratic": 0.2, "neighbor_weight": 1.3},
+        ],
+    }
+
+
 def test_validate_task_for_run_accepts_base_task():
     task = parse_task_dict(_base_task_dict())
     assert task.ensemble.kind == "nve"
@@ -229,6 +252,37 @@ def test_validate_task_for_run_accepts_eam_alloy_when_allowed():
     task = load_task("examples/interop/task_eam_alloy.yaml")
     masses = validate_task_for_run(task, allowed_potential_kinds=("eam/alloy",))
     assert masses.tolist() == pytest.approx([26.9815386, 58.6934])
+
+
+def test_validate_task_for_run_accepts_ml_reference_when_allowed():
+    d = _base_task_dict()
+    d["atoms"] = [
+        {"id": 1, "type": 1, "mass": 1.0, "r": [1.0, 1.0, 1.0], "v": [0.0, 0.0, 0.0]},
+        {"id": 2, "type": 2, "mass": 1.5, "r": [2.0, 1.0, 1.0], "v": [0.0, 0.0, 0.0]},
+    ]
+    d["potential"] = {"kind": "ml/reference", "params": _ml_reference_params()}
+    d["cutoff"] = 2.5
+    task = parse_task_dict(d)
+    masses = validate_task_for_run(task, allowed_potential_kinds=("ml/reference",))
+    assert masses.tolist() == pytest.approx([1.0, 1.5])
+
+
+def test_parse_task_rejects_ml_reference_hidden_barrier_contract():
+    d = _base_task_dict()
+    bad = _ml_reference_params()
+    bad["contract"]["neighbor"]["requires_full_system_barrier"] = True
+    d["potential"] = {"kind": "ml/reference", "params": bad}
+    with pytest.raises(TaskValidationError, match="requires_full_system_barrier"):
+        parse_task_dict(d)
+
+
+def test_validate_task_for_run_rejects_ml_reference_cutoff_smaller_than_contract():
+    d = _base_task_dict()
+    d["potential"] = {"kind": "ml/reference", "params": _ml_reference_params()}
+    d["cutoff"] = 1.5
+    task = parse_task_dict(d)
+    with pytest.raises(TaskValidationError, match="smaller than ml/reference contract cutoff"):
+        validate_task_for_run(task, allowed_potential_kinds=("ml/reference",))
 
 
 def test_validate_task_for_run_rejects_nonuniform_mass_when_uniform_is_required():
