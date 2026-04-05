@@ -1,4 +1,4 @@
+# Legacy mirror of [project.dependencies] from pyproject.toml.
 numpy>=1.23
 pyyaml>=6.0
 mpi4py>=3.1; platform_system != "Windows"
-pytest>=7.0
