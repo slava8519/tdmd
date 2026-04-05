@@ -357,6 +357,20 @@ PRESETS = {
         require_effective_cuda=True,
         artifact_stem="eam_td_breakdown_gpu",
     ),
+    "td_autozoning_advisor_gpu": dict(
+        td_autozoning_advisor_mode=True,
+        device="cuda",
+        timeout=900,
+        n_atoms=4096,
+        steps=64,
+        repeats=1,
+        warmup=1,
+        seed=42,
+        zone_cells_w=1,
+        zone_cells_s=2,
+        require_effective_cuda=True,
+        artifact_stem="td_autozoning_advisor_gpu",
+    ),
     "mpi_overlap_smoke": dict(
         mpi_overlap_mode=True,
         mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
@@ -1376,6 +1390,95 @@ def _run_eam_td_breakdown_gpu(*, preset: dict, out_dir: str) -> dict[str, object
     return summary
 
 
+def _run_td_autozoning_advisor_gpu(*, preset: dict, out_dir: str) -> dict[str, object]:
+    timeout = int(preset.get("timeout", 900))
+    artifact_stem = str(preset.get("artifact_stem", "td_autozoning_advisor_gpu"))
+    out_csv = os.path.join(out_dir, f"{artifact_stem}.csv")
+    out_md = os.path.join(out_dir, f"{artifact_stem}.md")
+    out_json = os.path.join(out_dir, f"{artifact_stem}.summary.json")
+    cmd = [
+        sys.executable,
+        "scripts/bench_td_autozoning_advisor.py",
+        "--out",
+        out_csv,
+        "--md",
+        out_md,
+        "--json",
+        out_json,
+        "--n-atoms",
+        str(int(preset.get("n_atoms", 4096))),
+        "--steps",
+        str(int(preset.get("steps", 64))),
+        "--repeats",
+        str(int(preset.get("repeats", 1))),
+        "--warmup",
+        str(int(preset.get("warmup", 1))),
+        "--seed",
+        str(int(preset.get("seed", 42))),
+        "--zone-cells-w",
+        str(int(preset.get("zone_cells_w", 1))),
+        "--zone-cells-s",
+        str(int(preset.get("zone_cells_s", 2))),
+        "--strict",
+    ]
+    zone_totals = str(preset.get("zone_totals", "")).strip()
+    if zone_totals:
+        cmd.extend(["--zone-totals", zone_totals])
+    max_zones_total = int(preset.get("max_zones_total", 0) or 0)
+    if max_zones_total > 0:
+        cmd.extend(["--max-zones-total", str(max_zones_total)])
+    if bool(preset.get("require_effective_cuda", False)):
+        cmd.append("--require-effective-cuda")
+    if bool(preset.get("skip_breakdown", False)):
+        cmd.append("--skip-breakdown")
+
+    timed_out = False
+    proc_rc = 1
+    proc_out = ""
+    proc_err = ""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
+        proc_rc = int(proc.returncode)
+        proc_out = str(proc.stdout or "")
+        proc_err = str(proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc_rc = 124
+        proc_out = str(getattr(exc, "stdout", "") or "")
+        proc_err = str(getattr(exc, "stderr", "") or "")
+
+    summary: dict[str, object] = {
+        "n": 0,
+        "total": 0,
+        "ok": 0,
+        "fail": 0,
+        "ok_all": False,
+        "worst": {},
+        "rows": [],
+        "by_layout": {},
+        "recommendation": {},
+        "breakdown": None,
+        "external_script": "scripts/bench_td_autozoning_advisor.py",
+        "external_returncode": int(proc_rc),
+        "external_timed_out": bool(timed_out),
+        "external_stdout": proc_out,
+        "external_stderr": proc_err,
+        "external_artifacts": {"csv": out_csv, "md": out_md, "json": out_json},
+    }
+    if os.path.exists(out_json):
+        try:
+            with open(out_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                summary.update(loaded)
+        except Exception as exc:
+            summary["parse_error"] = str(exc)
+    summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("yaml", help="Path to YAML config (examples/*.yaml)")
@@ -1456,6 +1559,9 @@ def main():
     elif bool(p.get("eam_td_breakdown_mode", False)):
         mode_summary = _run_eam_td_breakdown_gpu(preset=p, out_dir=out_dir)
         mode_kind = "eam_td_breakdown"
+    elif bool(p.get("td_autozoning_advisor_mode", False)):
+        mode_summary = _run_td_autozoning_advisor_gpu(preset=p, out_dir=out_dir)
+        mode_kind = "td_autozoning_advisor"
     elif bool(p.get("task_mode", False)):
         task_path = args.task or str(p.get("task_path", "examples/interop/task.yaml"))
         rows = sweep_verify_task(

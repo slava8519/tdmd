@@ -84,3 +84,18 @@ def test_verifylab_eam_td_breakdown_gpu_preset_contract():
     assert int(preset.get("zones_ny", 0)) == 1
     assert int(preset.get("zones_nz", 0)) == 1
     assert str(preset.get("artifact_stem", "")) == "eam_td_breakdown_gpu"
+
+
+def test_verifylab_td_autozoning_advisor_gpu_preset_contract():
+    from scripts.run_verifylab_matrix import PRESETS
+
+    preset = dict(PRESETS["td_autozoning_advisor_gpu"])
+    assert bool(preset.get("td_autozoning_advisor_mode")) is True
+    assert int(preset.get("n_atoms", 0)) == 4096
+    assert int(preset.get("steps", 0)) == 64
+    assert int(preset.get("repeats", 0)) == 1
+    assert int(preset.get("warmup", 0)) == 1
+    assert int(preset.get("zone_cells_w", 0)) == 1
+    assert int(preset.get("zone_cells_s", 0)) == 2
+    assert bool(preset.get("require_effective_cuda")) is True
+    assert str(preset.get("artifact_stem", "")) == "td_autozoning_advisor_gpu"
