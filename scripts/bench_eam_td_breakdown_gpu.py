@@ -5,10 +5,12 @@ import argparse
 import csv
 import json
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
+
+import numpy as np
 
 from tdmd.backend import resolve_backend
 from tdmd.forces_gpu import get_last_device_state_sync_diagnostics, reset_device_state_cache
@@ -108,6 +110,13 @@ def _profiled_run(
 ) -> tuple[float, dict[str, object]]:
     timer = _NestedTimer()
     reset_device_state_cache()
+    effective_device = str(getattr(resolve_backend(str(requested_device)), "device", "cpu"))
+    many_body_scope = td_local.describe_many_body_force_scope(
+        potential,
+        sync_mode=False,
+        decomposition=decomposition,
+        device=effective_device,
+    ) or {}
 
     orig_forces_full = td_local._TDLocalCtx.forces_full
     orig_build_cell_list = td_local.build_cell_list
@@ -117,6 +126,9 @@ def _profiled_run(
     orig_overlap_3d = td_local.zones_overlapping_aabb_pbc
     orig_buffer_skin = td_local.compute_zone_buffer_skin
     orig_get_device_state = forces_gpu._get_device_state
+    orig_try_gpu_forces = td_local.try_gpu_forces_on_targets
+    target_local_owner = type(potential)
+    orig_target_local_force = getattr(target_local_owner, "forces_on_targets", None)
 
     def wrap_with_section(name: str, fn):
         def _wrapped(*args, **kwargs):
@@ -137,16 +149,79 @@ def _profiled_run(
         )
         return out
 
-    with (
-        mock.patch.object(td_local._TDLocalCtx, "forces_full", new=wrap_with_section("forces_full", orig_forces_full)),
-        mock.patch.object(td_local, "build_cell_list", new=wrap_with_section("build_cell_list", orig_build_cell_list)),
-        mock.patch.object(td_local, "assign_atoms_to_zones", new=wrap_with_section("zone_assign_1d", orig_zone_assign_1d)),
-        mock.patch.object(td_local, "assign_atoms_to_zones_3d", new=wrap_with_section("zone_assign_3d", orig_zone_assign_3d)),
-        mock.patch.object(td_local, "zones_overlapping_range_pbc", new=wrap_with_section("candidate_enum_1d", orig_overlap_1d)),
-        mock.patch.object(td_local, "zones_overlapping_aabb_pbc", new=wrap_with_section("candidate_enum_3d", orig_overlap_3d)),
-        mock.patch.object(td_local, "compute_zone_buffer_skin", new=wrap_with_section("zone_buffer_skin", orig_buffer_skin)),
-        mock.patch.object(forces_gpu, "_get_device_state", new=wrapped_get_device_state),
-    ):
+    def wrapped_target_local_force(self, *args, **kwargs):
+        with timer.section("target_local_force"):
+            return orig_target_local_force(self, *args, **kwargs)
+
+    def wrapped_try_gpu_forces_on_targets(*args, **kwargs):
+        target_ids = np.asarray(kwargs.get("target_ids"), dtype=np.int32)
+        candidate_ids = np.asarray(kwargs.get("candidate_ids"), dtype=np.int32)
+        n_atoms = int(np.asarray(kwargs.get("r")).shape[0])
+        full_targets = bool(target_ids.size == n_atoms and np.array_equal(target_ids, np.arange(n_atoms, dtype=np.int32)))
+        full_candidates = bool(candidate_ids.size == n_atoms and np.array_equal(candidate_ids, np.arange(n_atoms, dtype=np.int32)))
+        if full_targets and full_candidates:
+            return orig_try_gpu_forces(*args, **kwargs)
+        with timer.section("target_local_force"):
+            return orig_try_gpu_forces(*args, **kwargs)
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            mock.patch.object(
+                td_local._TDLocalCtx,
+                "forces_full",
+                new=wrap_with_section("forces_full", orig_forces_full),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                td_local,
+                "build_cell_list",
+                new=wrap_with_section("build_cell_list", orig_build_cell_list),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                td_local,
+                "assign_atoms_to_zones",
+                new=wrap_with_section("zone_assign_1d", orig_zone_assign_1d),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                td_local,
+                "assign_atoms_to_zones_3d",
+                new=wrap_with_section("zone_assign_3d", orig_zone_assign_3d),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                td_local,
+                "zones_overlapping_range_pbc",
+                new=wrap_with_section("candidate_enum_1d", orig_overlap_1d),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                td_local,
+                "zones_overlapping_aabb_pbc",
+                new=wrap_with_section("candidate_enum_3d", orig_overlap_3d),
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(
+                td_local,
+                "compute_zone_buffer_skin",
+                new=wrap_with_section("zone_buffer_skin", orig_buffer_skin),
+            )
+        )
+        stack.enter_context(mock.patch.object(forces_gpu, "_get_device_state", new=wrapped_get_device_state))
+        stack.enter_context(
+            mock.patch.object(td_local, "try_gpu_forces_on_targets", new=wrapped_try_gpu_forces_on_targets)
+        )
+        if orig_target_local_force is not None:
+            stack.enter_context(
+                mock.patch.object(target_local_owner, "forces_on_targets", new=wrapped_target_local_force)
+            )
         r = r0.copy()
         v = v0.copy()
         started = time.perf_counter()
@@ -183,6 +258,7 @@ def _profiled_run(
         elapsed = float(time.perf_counter() - started)
 
     forces_full = timer.stat("forces_full")
+    target_local_force = timer.stat("target_local_force")
     device_sync = timer.stat("device_sync")
     build_cell_list = timer.stat("build_cell_list")
     zone_buffer_skin = timer.stat("zone_buffer_skin")
@@ -196,11 +272,13 @@ def _profiled_run(
     zone_assign_sec = zone_assign_1d.inclusive_sec + zone_assign_3d.inclusive_sec
     zone_assign_calls = zone_assign_1d.calls + zone_assign_3d.calls
     forces_full_compute_self_sec = max(0.0, forces_full.exclusive_sec)
+    target_local_force_compute_self_sec = max(0.0, target_local_force.exclusive_sec)
     other_sec = max(
         0.0,
         elapsed
         - (
             forces_full_compute_self_sec
+            + target_local_force_compute_self_sec
             + device_sync.inclusive_sec
             + build_cell_list.inclusive_sec
             + zone_buffer_skin.inclusive_sec
@@ -208,7 +286,6 @@ def _profiled_run(
             + zone_assign_sec
         ),
     )
-    effective_device = str(getattr(resolve_backend(str(requested_device)), "device", "cpu"))
     fallback_from_cuda = bool(str(requested_device) == "cuda" and effective_device != "cuda")
 
     breakdown = {
@@ -217,10 +294,21 @@ def _profiled_run(
         "fallback_from_cuda": int(fallback_from_cuda),
         "elapsed_sec": float(elapsed),
         "steps_per_sec": (float(steps) / float(elapsed)) if float(elapsed) > 0.0 else 0.0,
+        "many_body_runtime_kind": str(many_body_scope.get("runtime_kind", "")),
+        "many_body_evaluation_scope": str(many_body_scope.get("evaluation_scope", "")),
+        "many_body_consumption_scope": str(many_body_scope.get("consumption_scope", "")),
+        "many_body_target_local_available": int(bool(many_body_scope.get("target_local_available", False))),
+        "many_body_scope_rationale": str(many_body_scope.get("rationale", "")),
         "forces_full_total_sec": float(forces_full.inclusive_sec),
         "forces_full_compute_self_sec": float(forces_full_compute_self_sec),
         "forces_full_calls": int(forces_full.calls),
         "forces_full_calls_per_step": (float(forces_full.calls) / float(steps)) if int(steps) > 0 else 0.0,
+        "target_local_force_total_sec": float(target_local_force.inclusive_sec),
+        "target_local_force_compute_self_sec": float(target_local_force_compute_self_sec),
+        "target_local_force_calls": int(target_local_force.calls),
+        "target_local_force_calls_per_step": (
+            float(target_local_force.calls) / float(steps) if int(steps) > 0 else 0.0
+        ),
         "device_sync_sec": float(device_sync.inclusive_sec),
         "device_sync_calls": int(device_sync.calls),
         "device_sync_atoms_total": int(device_sync.synced_atoms),
@@ -240,6 +328,9 @@ def _profiled_run(
         "other_sec": float(other_sec),
         "forces_full_share": (
             float(forces_full.inclusive_sec) / float(elapsed) if float(elapsed) > 0.0 else 0.0
+        ),
+        "target_local_force_share": (
+            float(target_local_force.inclusive_sec) / float(elapsed) if float(elapsed) > 0.0 else 0.0
         ),
         "device_sync_share": (
             float(device_sync.inclusive_sec) / float(elapsed) if float(elapsed) > 0.0 else 0.0
@@ -339,10 +430,15 @@ def _run_case(
     aggregate_keys = [
         "elapsed_sec",
         "steps_per_sec",
+        "many_body_target_local_available",
         "forces_full_total_sec",
         "forces_full_compute_self_sec",
         "forces_full_calls",
         "forces_full_calls_per_step",
+        "target_local_force_total_sec",
+        "target_local_force_compute_self_sec",
+        "target_local_force_calls",
+        "target_local_force_calls_per_step",
         "device_sync_sec",
         "device_sync_calls",
         "device_sync_atoms_total",
@@ -359,6 +455,7 @@ def _run_case(
         "zone_assign_calls",
         "other_sec",
         "forces_full_share",
+        "target_local_force_share",
         "device_sync_share",
         "build_cell_list_share",
         "zone_buffer_skin_share",
@@ -376,11 +473,19 @@ def _run_case(
         aggregated["requested_device"] = str(last.get("requested_device", requested_device))
         aggregated["effective_device"] = str(last.get("effective_device", "cpu"))
         aggregated["fallback_from_cuda"] = int(last.get("fallback_from_cuda", 0))
+        aggregated["many_body_runtime_kind"] = str(last.get("many_body_runtime_kind", ""))
+        aggregated["many_body_evaluation_scope"] = str(last.get("many_body_evaluation_scope", ""))
+        aggregated["many_body_consumption_scope"] = str(last.get("many_body_consumption_scope", ""))
+        aggregated["many_body_scope_rationale"] = str(last.get("many_body_scope_rationale", ""))
     else:
         effective = str(getattr(resolve_backend(str(requested_device)), "device", "cpu"))
         aggregated["requested_device"] = str(requested_device)
         aggregated["effective_device"] = effective
         aggregated["fallback_from_cuda"] = int(str(requested_device) == "cuda" and effective != "cuda")
+        aggregated["many_body_runtime_kind"] = ""
+        aggregated["many_body_evaluation_scope"] = ""
+        aggregated["many_body_consumption_scope"] = ""
+        aggregated["many_body_scope_rationale"] = ""
 
     return {
         "case": str(label),
@@ -422,6 +527,9 @@ def _build_report(
     def _b(case: str, key: str) -> float:
         return float(dict(rows_by_case[case].get("breakdown", {}) or {}).get(key, 0.0) or 0.0)
 
+    def _s(case: str, key: str) -> str:
+        return str(dict(rows_by_case[case].get("breakdown", {}) or {}).get(key, "") or "")
+
     lines = [
         "# EAM TD GPU Breakdown",
         "",
@@ -432,16 +540,22 @@ def _build_report(
         f"- zones_total: `{int(zones_total)}`",
         f"- space_layout: `{int(zones_nx)}x{int(zones_ny)}x{int(zones_nz)}`",
         "- interpretation: `space_gpu` uses `decomposition=3d`; `time_gpu` uses `decomposition=1d` with the same total zone count.",
+        "- `force_scope_contract.version` reports the current many-body td_local contract, while `baseline_reference_version` points to the frozen pre-locality baseline (`pr_mb01_v1`). `evaluation_scope` tells where forces are evaluated, and `consumption_scope` tells whether td_local uses the full result or slices it to target ids.",
         "- timing rows below are exclusive where noted: `forces_full_compute_self_sec` excludes nested device-sync time.",
         "",
         "| metric | space_gpu | time_gpu |",
         "|---|---:|---:|",
         _row("effective_device", lambda case: f"`{rows_by_case[case].get('effective_device', 'cpu')}`"),
         _row("fallback_from_cuda", lambda case: str(int(rows_by_case[case].get("fallback_from_cuda", 0)))),
+        _row("many_body_eval_scope", lambda case: f"`{_s(case, 'many_body_evaluation_scope') or 'n/a'}`"),
+        _row("many_body_consumption_scope", lambda case: f"`{_s(case, 'many_body_consumption_scope') or 'n/a'}`"),
+        _row("many_body_target_local_available", lambda case: str(int(round(_b(case, "many_body_target_local_available"))))),
         _row("median_sec", lambda case: _fmt_time(float(rows_by_case[case].get("elapsed_sec_median", 0.0) or 0.0))),
         _row("steps_per_sec", lambda case: _fmt_rate(float(rows_by_case[case].get("steps_per_sec_median", 0.0) or 0.0))),
         _row("forces_full_total_sec", lambda case: _fmt_time(_b(case, "forces_full_total_sec"))),
         _row("forces_full_compute_self_sec", lambda case: _fmt_time(_b(case, "forces_full_compute_self_sec"))),
+        _row("target_local_force_total_sec", lambda case: _fmt_time(_b(case, "target_local_force_total_sec"))),
+        _row("target_local_force_compute_self_sec", lambda case: _fmt_time(_b(case, "target_local_force_compute_self_sec"))),
         _row("device_sync_sec", lambda case: _fmt_time(_b(case, "device_sync_sec"))),
         _row("build_cell_list_sec", lambda case: _fmt_time(_b(case, "build_cell_list_sec"))),
         _row("zone_buffer_skin_sec", lambda case: _fmt_time(_b(case, "zone_buffer_skin_sec"))),
@@ -449,11 +563,14 @@ def _build_report(
         _row("zone_assign_sec", lambda case: _fmt_time(_b(case, "zone_assign_sec"))),
         _row("other_sec", lambda case: _fmt_time(_b(case, "other_sec"))),
         _row("forces_full_share", lambda case: _fmt_share(_b(case, "forces_full_share"))),
+        _row("target_local_force_share", lambda case: _fmt_share(_b(case, "target_local_force_share"))),
         _row("device_sync_share", lambda case: _fmt_share(_b(case, "device_sync_share"))),
         _row("candidate_enum_share", lambda case: _fmt_share(_b(case, "candidate_enum_share"))),
         _row("zone_assign_share", lambda case: _fmt_share(_b(case, "zone_assign_share"))),
         _row("forces_full_calls", lambda case: f"{int(round(_b(case, 'forces_full_calls')))}"),
         _row("forces_full_calls_per_step", lambda case: f"{_b(case, 'forces_full_calls_per_step'):.3f}"),
+        _row("target_local_force_calls", lambda case: f"{int(round(_b(case, 'target_local_force_calls')))}"),
+        _row("target_local_force_calls_per_step", lambda case: f"{_b(case, 'target_local_force_calls_per_step'):.3f}"),
         _row("device_sync_calls", lambda case: f"{int(round(_b(case, 'device_sync_calls')))}"),
         _row("device_sync_atoms_total", lambda case: f"{int(round(_b(case, 'device_sync_atoms_total')))}"),
         _row("avg_synced_atoms_per_call", lambda case: f"{_b(case, 'avg_synced_atoms_per_call'):.3f}"),
@@ -467,8 +584,11 @@ def _build_report(
         breakdown = dict(row.get("breakdown", {}) or {})
         lines.append(
             f"- `{case}` ok={bool(row.get('ok', False))} effective=`{row.get('effective_device', '')}` "
+            f"eval_scope=`{breakdown.get('many_body_evaluation_scope', '')}` "
+            f"consume_scope=`{breakdown.get('many_body_consumption_scope', '')}` "
             f"median={_fmt_time(float(row.get('elapsed_sec_median', 0.0) or 0.0))} "
             f"forces_full_share={_fmt_share(float(breakdown.get('forces_full_share', 0.0) or 0.0))} "
+            f"target_local_calls={int(round(float(breakdown.get('target_local_force_calls', 0.0) or 0.0)))} "
             f"device_sync_share={_fmt_share(float(breakdown.get('device_sync_share', 0.0) or 0.0))} "
             f"error=`{row.get('error', '')}`"
         )
@@ -580,8 +700,13 @@ def main() -> int:
                 "ok",
                 "median_sec",
                 "steps_per_sec",
+                "many_body_evaluation_scope",
+                "many_body_consumption_scope",
+                "many_body_target_local_available",
                 "forces_full_total_sec",
                 "forces_full_compute_self_sec",
+                "target_local_force_total_sec",
+                "target_local_force_compute_self_sec",
                 "device_sync_sec",
                 "build_cell_list_sec",
                 "zone_buffer_skin_sec",
@@ -590,6 +715,8 @@ def main() -> int:
                 "other_sec",
                 "forces_full_calls",
                 "forces_full_calls_per_step",
+                "target_local_force_calls",
+                "target_local_force_calls_per_step",
                 "device_sync_calls",
                 "device_sync_atoms_total",
                 "avg_synced_atoms_per_call",
@@ -604,8 +731,13 @@ def main() -> int:
                     int(bool(row["ok"])),
                     f"{float(row['elapsed_sec_median']):.6f}",
                     f"{float(row['steps_per_sec_median']):.6f}",
+                    str(breakdown.get("many_body_evaluation_scope", "")),
+                    str(breakdown.get("many_body_consumption_scope", "")),
+                    int(bool(breakdown.get("many_body_target_local_available", 0))),
                     f"{float(breakdown.get('forces_full_total_sec', 0.0) or 0.0):.6f}",
                     f"{float(breakdown.get('forces_full_compute_self_sec', 0.0) or 0.0):.6f}",
+                    f"{float(breakdown.get('target_local_force_total_sec', 0.0) or 0.0):.6f}",
+                    f"{float(breakdown.get('target_local_force_compute_self_sec', 0.0) or 0.0):.6f}",
                     f"{float(breakdown.get('device_sync_sec', 0.0) or 0.0):.6f}",
                     f"{float(breakdown.get('build_cell_list_sec', 0.0) or 0.0):.6f}",
                     f"{float(breakdown.get('zone_buffer_skin_sec', 0.0) or 0.0):.6f}",
@@ -614,6 +746,8 @@ def main() -> int:
                     f"{float(breakdown.get('other_sec', 0.0) or 0.0):.6f}",
                     f"{float(breakdown.get('forces_full_calls', 0.0) or 0.0):.3f}",
                     f"{float(breakdown.get('forces_full_calls_per_step', 0.0) or 0.0):.6f}",
+                    f"{float(breakdown.get('target_local_force_calls', 0.0) or 0.0):.3f}",
+                    f"{float(breakdown.get('target_local_force_calls_per_step', 0.0) or 0.0):.6f}",
                     f"{float(breakdown.get('device_sync_calls', 0.0) or 0.0):.3f}",
                     f"{float(breakdown.get('device_sync_atoms_total', 0.0) or 0.0):.3f}",
                     f"{float(breakdown.get('avg_synced_atoms_per_call', 0.0) or 0.0):.6f}",
@@ -631,6 +765,21 @@ def main() -> int:
         "gpu_effective_ok": bool(gpu_effective_ok),
         "comparisons": {
             "td_speedup_gpu": td_speedup,
+        },
+        "force_scope_contract": {
+            "version": "pr_mb03_v1",
+            "baseline_reference_version": "pr_mb01_v1",
+            "by_case": {
+                str(row["case"]): {
+                    "runtime_kind": str(dict(row.get("breakdown", {}) or {}).get("many_body_runtime_kind", "")),
+                    "evaluation_scope": str(dict(row.get("breakdown", {}) or {}).get("many_body_evaluation_scope", "")),
+                    "consumption_scope": str(dict(row.get("breakdown", {}) or {}).get("many_body_consumption_scope", "")),
+                    "target_local_available": int(
+                        bool(dict(row.get("breakdown", {}) or {}).get("many_body_target_local_available", 0))
+                    ),
+                }
+                for row in rows
+            },
         },
         "worst": {
             "max_elapsed_sec_median": max(

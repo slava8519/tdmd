@@ -32,6 +32,7 @@ from .forces_gpu import (
     supports_pair_gpu,
 )
 from .integrator import vv_finish_velocities, vv_update_positions
+from .many_body_scope import ManyBodyForceScope, td_local_many_body_force_scope
 from .observer import emit_observer, observer_accepts_box
 from .run_configs import TDLocalRunConfig
 from .zone_bins_localz import PersistentZoneLocalZBinsCache
@@ -74,6 +75,7 @@ class _TDLocalCtx:
     use_gpu_pair: bool
     ensemble: EnsembleSpec
     many_body: bool
+    many_body_force_scope: ManyBodyForceScope | None
     rc_full: float
 
     # observer
@@ -404,14 +406,21 @@ def _run_async_3d(ctx: _TDLocalCtx) -> None:
                 candidate_ids = np.concatenate(cand) if cand else np.empty((0,), np.int32)
 
                 if candidate_ids.size or ctx.many_body:
-                    f = _forces_3d(ctx, ids0, ids_all, cell, rc)
+                    f = _forces_3d(ctx, ids0, ids_all, cell, rc, candidate_ids)
                     vv_update_positions(ctx.r, ctx.v, ctx.mass, ctx.dt, ctx.box, ids0, f)
                     if ctx.backend.device == "cuda":
                         mark_device_state_dirty(ctx.r, ids0)
                     processed[ids0] = True
                     assign_atoms_to_zones_3d(ctx.r, layout3)
 
-                    f2 = _forces_3d_post(ctx, ids0, ids_all, cell, rc)
+                    cand2 = []
+                    for did in deps:
+                        dz = zones3[did]
+                        if dz.atom_ids.size:
+                            cand2.append(dz.atom_ids)
+                    candidate_ids2 = np.concatenate(cand2) if cand2 else np.empty((0,), np.int32)
+
+                    f2 = _forces_3d_post(ctx, ids0, ids_all, cell, rc, candidate_ids2)
                     vv_finish_velocities(ctx.v, ctx.mass, ctx.dt, ids0, f2)
 
                 state_before = z.ztype
@@ -523,7 +532,7 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
                 if candidate_ids.size or ctx.many_body:
                     # ---- position update (VV half-step 1) ----
                     if ctx.many_body:
-                        f = ctx.forces_full(ctx.r)[ids0]
+                        f = _forces_many_body_targets(ctx, ids0, candidate_ids, rc)
                     else:
                         f = _forces_on_zone_1d_async(
                             ctx, ids0, candidate_ids, cache, zid, rc, skin_global, step, z0p, z1p
@@ -541,7 +550,7 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
                             cand2.append(nz.atom_ids)
                     candidate_ids2 = np.concatenate(cand2) if cand2 else np.empty((0,), np.int32)
                     if ctx.many_body:
-                        f2 = ctx.forces_full(ctx.r)[ids0]
+                        f2 = _forces_many_body_targets(ctx, ids0, candidate_ids2, rc)
                     elif candidate_ids2.size:
                         f2 = _forces_on_zone_1d_async(
                             ctx, ids0, candidate_ids2, cache, zid, rc, skin_global, step, z0p, z1p
@@ -670,16 +679,72 @@ def _forces_on_zone_1d_async(
     )
 
 
+def _forces_many_body_targets(
+    ctx: _TDLocalCtx,
+    target_ids: np.ndarray,
+    candidate_ids: np.ndarray,
+    rc: float,
+) -> np.ndarray:
+    """Many-body target-force evaluation for async td_local paths.
+
+    Contract:
+    - CPU path is the reference semantics and uses target-local
+      `potential.forces_on_targets(...)` when available.
+    - CUDA path first tries the target/candidate-local GPU refinement path.
+    - If the CUDA target-local refinement is unavailable for a call, it falls back to
+      the existing full-system GPU evaluation instead of silently falling back to CPU.
+    """
+    if ctx.backend.device == "cuda":
+        f_gpu = try_gpu_forces_on_targets(
+            r=ctx.r,
+            box=ctx.box,
+            cutoff=ctx.cutoff,
+            rc=float(rc),
+            potential=ctx.potential,
+            target_ids=np.asarray(target_ids, dtype=np.int32),
+            candidate_ids=np.asarray(candidate_ids, dtype=np.int32),
+            atom_types=ctx.atom_types,
+            backend=ctx.backend,
+            prefer_marked_dirty=True,
+        )
+        if f_gpu is not None:
+            return np.asarray(f_gpu, dtype=float)
+        return ctx.forces_full(ctx.r)[target_ids]
+    if hasattr(ctx.potential, "forces_on_targets"):
+        try:
+            f = ctx.potential.forces_on_targets(
+                r=ctx.r,
+                box=ctx.box,
+                cutoff=ctx.cutoff,
+                rc=float(rc),
+                atom_types=ctx.atom_types,
+                target_ids=target_ids,
+                candidate_ids=candidate_ids,
+            )
+        except TypeError:
+            f = ctx.potential.forces_on_targets(
+                r=ctx.r,
+                box=ctx.box,
+                cutoff=ctx.cutoff,
+                atom_types=ctx.atom_types,
+                target_ids=target_ids,
+                candidate_ids=candidate_ids,
+            )
+        return np.asarray(f, dtype=float)
+    return ctx.forces_full(ctx.r)[target_ids]
+
+
 def _forces_3d(
     ctx: _TDLocalCtx,
     ids0: np.ndarray,
     ids_all: np.ndarray,
     cell: Any,
     rc: float,
+    candidate_ids: np.ndarray,
 ) -> np.ndarray:
     """Force computation for async 3D path (position-update half)."""
     if ctx.many_body:
-        return ctx.forces_full(ctx.r)[ids0]
+        return _forces_many_body_targets(ctx, ids0, candidate_ids, rc)
     if ctx.use_gpu_pair:
         f = forces_on_targets_celllist_backend(
             r=ctx.r,
@@ -706,10 +771,11 @@ def _forces_3d_post(
     ids_all: np.ndarray,
     cell: Any,
     rc: float,
+    candidate_ids: np.ndarray,
 ) -> np.ndarray:
     """Force computation for async 3D path (velocity-finish half)."""
     if ctx.many_body:
-        return ctx.forces_full(ctx.r)[ids0]
+        return _forces_many_body_targets(ctx, ids0, candidate_ids, rc)
     if ctx.use_gpu_pair:
         f2 = forces_on_targets_celllist_backend(
             r=ctx.r,
@@ -791,6 +857,12 @@ def _run_td_local_legacy(
         kind=ensemble_kind, thermostat=thermostat, barostat=barostat, source="td_local"
     )
     many_body = hasattr(potential, "forces_energy_virial")
+    many_body_force_scope = td_local_many_body_force_scope(
+        potential,
+        sync_mode=bool(sync_mode),
+        decomposition=str(decomposition),
+        device=str(backend.device),
+    )
 
     ctx = _TDLocalCtx(
         r=r,
@@ -809,6 +881,7 @@ def _run_td_local_legacy(
         use_gpu_pair=use_gpu_pair,
         ensemble=ensemble,
         many_body=many_body,
+        many_body_force_scope=many_body_force_scope,
         rc_full=max(float(cutoff), GEOM_EPSILON),
         observer=observer,
         observer_every=observer_every,
@@ -842,6 +915,25 @@ def _run_td_local_legacy(
         _run_async_3d(ctx)
     else:
         _run_async_1d(ctx)
+
+
+def describe_many_body_force_scope(
+    potential: object,
+    *,
+    sync_mode: bool = False,
+    decomposition: str = "1d",
+    device: str = "cpu",
+) -> dict[str, object] | None:
+    """Describe the current td_local many-body force scope without executing the runtime."""
+    scope = td_local_many_body_force_scope(
+        potential,
+        sync_mode=bool(sync_mode),
+        decomposition=str(decomposition),
+        device=str(device),
+    )
+    if scope is None:
+        return None
+    return scope.as_dict()
 
 
 def run_td_local(

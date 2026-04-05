@@ -5,6 +5,7 @@ import numpy as np
 from tdmd.io import load_task, task_to_arrays, validate_task_for_run
 from tdmd.potentials import make_potential
 from tdmd.serial import run_serial
+import tdmd.td_local as td_local_mod
 from tdmd.td_local import run_td_local
 
 
@@ -57,6 +58,47 @@ def _run_serial_vs_td_local(
     return r_serial, v_serial, r_td, v_td
 
 
+def _run_td_local_case(
+    task_path: str,
+    *,
+    decomposition: str,
+    zones_total: int,
+    zones_nx: int = 1,
+    zones_ny: int = 1,
+    zones_nz: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    task = load_task(task_path)
+    arr = task_to_arrays(task)
+    masses = validate_task_for_run(task, allowed_potential_kinds=("eam/alloy",))
+    pot = make_potential(task.potential.kind, task.potential.params)
+
+    r = arr.r.copy()
+    v = arr.v.copy()
+    run_td_local(
+        r,
+        v,
+        masses,
+        float(task.box.x),
+        pot,
+        float(task.dt),
+        float(task.cutoff),
+        n_steps=int(task.steps),
+        atom_types=arr.atom_types,
+        cell_size=max(1.0, float(task.cutoff) / 2.0),
+        zones_total=int(zones_total),
+        zone_cells_w=1,
+        zone_cells_s=1,
+        traversal="forward",
+        use_verlet=False,
+        decomposition=str(decomposition),
+        sync_mode=False,
+        zones_nx=int(zones_nx),
+        zones_ny=int(zones_ny),
+        zones_nz=int(zones_nz),
+    )
+    return r, v
+
+
 def test_td_local_eam_sync_mode_matches_serial():
     r_s, v_s, r_t, v_t = _run_serial_vs_td_local(
         "examples/interop/task_eam_alloy.yaml",
@@ -75,3 +117,53 @@ def test_td_local_eam_async_single_zone_matches_serial():
     )
     assert np.allclose(r_s, r_t, atol=1e-12, rtol=1e-12)
     assert np.allclose(v_s, v_t, atol=1e-12, rtol=1e-12)
+
+
+def test_td_local_eam_async_target_local_1d_matches_legacy_full_system(monkeypatch):
+    r_target, v_target = _run_td_local_case(
+        "examples/interop/task_eam_alloy.yaml",
+        decomposition="1d",
+        zones_total=2,
+    )
+
+    monkeypatch.setattr(
+        td_local_mod,
+        "_forces_many_body_targets",
+        lambda ctx, target_ids, candidate_ids, rc: ctx.forces_full(ctx.r)[target_ids],
+    )
+    r_legacy, v_legacy = _run_td_local_case(
+        "examples/interop/task_eam_alloy.yaml",
+        decomposition="1d",
+        zones_total=2,
+    )
+
+    assert np.allclose(r_target, r_legacy, atol=1e-12, rtol=1e-12)
+    assert np.allclose(v_target, v_legacy, atol=1e-12, rtol=1e-12)
+
+
+def test_td_local_eam_async_target_local_3d_matches_legacy_full_system(monkeypatch):
+    r_target, v_target = _run_td_local_case(
+        "examples/interop/task_eam_alloy.yaml",
+        decomposition="3d",
+        zones_total=2,
+        zones_nx=2,
+        zones_ny=1,
+        zones_nz=1,
+    )
+
+    monkeypatch.setattr(
+        td_local_mod,
+        "_forces_many_body_targets",
+        lambda ctx, target_ids, candidate_ids, rc: ctx.forces_full(ctx.r)[target_ids],
+    )
+    r_legacy, v_legacy = _run_td_local_case(
+        "examples/interop/task_eam_alloy.yaml",
+        decomposition="3d",
+        zones_total=2,
+        zones_nx=2,
+        zones_ny=1,
+        zones_nz=1,
+    )
+
+    assert np.allclose(r_target, r_legacy, atol=1e-12, rtol=1e-12)
+    assert np.allclose(v_target, v_legacy, atol=1e-12, rtol=1e-12)

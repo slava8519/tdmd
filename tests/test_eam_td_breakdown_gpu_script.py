@@ -45,9 +45,18 @@ def test_eam_td_breakdown_gpu_script_writes_artifacts(tmp_path):
     assert bool(data.get("ok_all")) is True
     assert int(data.get("total", 0)) == 2
     assert list(sorted(data.get("by_case", {}).keys())) == ["space_gpu", "time_gpu"]
+    assert data.get("force_scope_contract", {}).get("version") == "pr_mb03_v1"
+    time_breakdown = data["by_case"]["time_gpu"]["breakdown"]
+    effective_device = str(data["by_case"]["time_gpu"]["effective_device"])
+    assert time_breakdown["many_body_evaluation_scope"] == "target_local"
+    assert time_breakdown["many_body_consumption_scope"] == "target_ids"
+    assert int(time_breakdown["many_body_target_local_available"]) == 1
+    assert int(time_breakdown["target_local_force_calls"]) > 0
 
     report = out_md.read_text(encoding="utf-8")
     assert "EAM TD GPU Breakdown" in report
+    assert "many_body_eval_scope" in report
+    assert "target_local_force_calls" in report
     assert "forces_full_total_sec" in report
     assert "device_sync_sec" in report
     assert "zone_assign_sec" in report
