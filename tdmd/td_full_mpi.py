@@ -23,6 +23,7 @@ from .deps_provider import ZoneGeomAABB
 from .deps_provider_3d import DepsProvider3DBlock
 from .ensembles import apply_ensemble_step, build_ensemble_spec
 from .force_dispatch import try_gpu_forces_on_targets
+from .forces_gpu import mark_device_state_dirty
 from .geom_pbc import mask_in_aabb_pbc
 from .output import OutputSpec, make_output_bundle
 from .overlap_cells import overlap_atoms_src_in_next_zonecells
@@ -64,6 +65,20 @@ class _TDMPIRuntimeInit:
 _WireRecord = tuple[int, int, int, np.ndarray, int]
 
 
+def _backend_is_cuda(backend: object | None) -> bool:
+    return str(getattr(backend, "device", "cpu")) == "cuda"
+
+
+def _mark_device_state_dirty_if_cuda(
+    *,
+    backend: object | None,
+    r: np.ndarray,
+    ids: np.ndarray | None = None,
+) -> None:
+    if _backend_is_cuda(backend):
+        mark_device_state_dirty(r, ids)
+
+
 class _GPUPotentialRefinement:
     """GPU refinement wrapper for force callbacks in TD-MPI compute path.
 
@@ -102,6 +117,7 @@ class _GPUPotentialRefinement:
             candidate_ids=np.asarray(candidate_ids, dtype=np.int32),
             atom_types=np.asarray(atom_types, dtype=np.int32),
             backend=self._backend,
+            prefer_marked_dirty=True,
         )
         if f_gpu is not None:
             return np.asarray(f_gpu, dtype=float)
@@ -129,6 +145,7 @@ class _TDMPICommContext:
     comm: object
     prev_rank: int
     next_rank: int
+    backend: object
     use_async_send: bool
     batch_size: int
     box: float
@@ -997,6 +1014,7 @@ def _handle_record(
     if ids.size:
         ctx.r[ids] = rr
         ctx.v[ids] = vv
+        _mark_device_state_dirty_if_cuda(backend=ctx.backend, r=ctx.r, ids=ids)
 
     if rectype == REC_HOLDER:
         ver = int(step_id)
@@ -1416,8 +1434,12 @@ def _finish_compute_with_trace_impl(
     step: int,
     verlet_k_steps: int,
     enable_step_id: bool = True,
+    backend: object | None = None,
 ):
     pre = [z.ztype for z in zones] if trace is not None else None
+    dirty_ids = None
+    if _backend_is_cuda(backend) and autom.work_zid is not None:
+        dirty_ids = np.asarray(zones[int(autom.work_zid)].atom_ids, dtype=np.int32).copy()
     zid = autom.compute_step_for_work_zone(
         r=r,
         v=v,
@@ -1432,6 +1454,8 @@ def _finish_compute_with_trace_impl(
         atom_types=atom_types,
         enable_step_id=enable_step_id,
     )
+    if zid is not None and dirty_ids is not None and dirty_ids.size:
+        _mark_device_state_dirty_if_cuda(backend=backend, r=r, ids=dirty_ids)
     if zid is not None and trace is not None and pre is not None:
         _trace_event_impl(
             trace,
@@ -1630,6 +1654,7 @@ def _apply_ensemble_impl(
     atom_types,
     dt: float,
     step: int,
+    backend: object | None = None,
 ) -> None:
     new_box, _lam_t, lam_b = apply_ensemble_step(
         step=int(step),
@@ -1643,6 +1668,8 @@ def _apply_ensemble_impl(
         atom_types=atom_types,
         dt=dt,
     )
+    if abs(float(lam_b) - 1.0) > FLOAT_EQ_ATOL:
+        _mark_device_state_dirty_if_cuda(backend=backend, r=r)
     if ensemble.kind == "npt":
         _scale_zone_geometry_impl(zones, autom, cutoff, lam_b, new_box)
         sim.box = float(new_box)
@@ -1929,7 +1956,14 @@ def _run_td_full_mpi_1d_legacy(
         return _start_compute_with_trace_impl(trace, autom, zones, **kw)
 
     def _finish_compute_with_trace(**kw):
-        return _finish_compute_with_trace_impl(trace, autom, zones, atom_types, **kw)
+        return _finish_compute_with_trace_impl(
+            trace,
+            autom,
+            zones,
+            atom_types,
+            backend=runtime.backend,
+            **kw,
+        )
 
     def _geom_aabb(zid: int) -> ZoneGeomAABB:
         return _geom_aabb_impl(deps_provider_3d, zid)
@@ -1961,6 +1995,7 @@ def _run_td_full_mpi_1d_legacy(
             zones,
             autom,
             sim,
+            backend=runtime.backend,
             r=r,
             v=v,
             mass=mass,
@@ -2002,6 +2037,7 @@ def _run_td_full_mpi_1d_legacy(
         comm=comm,
         prev_rank=prev_rank,
         next_rank=next_rank,
+        backend=runtime.backend,
         use_async_send=bool(use_async_send),
         batch_size=int(batch_size),
         box=float(sim.box),

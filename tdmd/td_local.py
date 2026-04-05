@@ -28,6 +28,7 @@ from .forces_cells import forces_on_targets_celllist_compact, forces_on_targets_
 from .forces_gpu import (
     forces_on_targets_celllist_backend,
     forces_on_targets_pair_backend,
+    mark_device_state_dirty,
     supports_pair_gpu,
 )
 from .integrator import vv_finish_velocities, vv_update_positions
@@ -158,6 +159,7 @@ class _TDLocalCtx:
                 candidate_ids=ids_all,
                 atom_types=self.atom_types,
                 backend=self.backend,
+                prefer_marked_dirty=True,
             )
             if f_gpu is not None:
                 return f_gpu
@@ -220,9 +222,13 @@ def _run_sync_global(ctx: _TDLocalCtx) -> None:
         f0 = ctx.forces_full(ctx.r)
         v_half = ctx.v + 0.5 * ctx.dt * ctx.accel(f0, ids_all)
         ctx.r[:] = (ctx.r + ctx.dt * v_half) % ctx.box
+        if ctx.backend.device == "cuda":
+            mark_device_state_dirty(ctx.r, ids_all)
         f1 = ctx.forces_full(ctx.r)
         ctx.v[:] = v_half + 0.5 * ctx.dt * ctx.accel(f1, ids_all)
         ctx.box, _lam_b = ctx.apply_ensemble(step, atom_box=ctx.box)
+        if ctx.backend.device == "cuda":
+            mark_device_state_dirty(ctx.r, ids_all)
         if ctx.observer is not None and ctx.observer_every and (step % ctx.observer_every == 0):
             ctx.emit_observer(step)
 
@@ -282,6 +288,8 @@ def _run_sync_1d_zones(ctx: _TDLocalCtx) -> None:
 
         v_half = ctx.v + 0.5 * ctx.dt * ctx.accel(f0)
         ctx.r[:] = (ctx.r + ctx.dt * v_half) % ctx.box
+        if ctx.backend.device == "cuda":
+            mark_device_state_dirty(ctx.r)
 
         assign_atoms_to_zones(ctx.r, zones, ctx.box)
         for z in zones:
@@ -309,6 +317,8 @@ def _run_sync_1d_zones(ctx: _TDLocalCtx) -> None:
 
         ctx.v[:] = v_half + 0.5 * ctx.dt * ctx.accel(f1)
         ctx.box, lam_b = ctx.apply_ensemble(step, atom_box=ctx.box)
+        if ctx.backend.device == "cuda":
+            mark_device_state_dirty(ctx.r)
         if ctx.ensemble_kind == "npt":
             _scale_zones_1d(zones, lam_b, ctx.cutoff)
         if ctx.observer is not None and ctx.observer_every and (step % ctx.observer_every == 0):
@@ -396,6 +406,8 @@ def _run_async_3d(ctx: _TDLocalCtx) -> None:
                 if candidate_ids.size or ctx.many_body:
                     f = _forces_3d(ctx, ids0, ids_all, cell, rc)
                     vv_update_positions(ctx.r, ctx.v, ctx.mass, ctx.dt, ctx.box, ids0, f)
+                    if ctx.backend.device == "cuda":
+                        mark_device_state_dirty(ctx.r, ids0)
                     processed[ids0] = True
                     assign_atoms_to_zones_3d(ctx.r, layout3)
 
@@ -418,6 +430,8 @@ def _run_async_3d(ctx: _TDLocalCtx) -> None:
                     )
 
         ctx.box, lam_b = ctx.apply_ensemble(step, atom_box=ctx.box)
+        if ctx.backend.device == "cuda":
+            mark_device_state_dirty(ctx.r)
         if ctx.ensemble_kind == "npt":
             _scale_layout3(layout3, lam_b, ctx.box, ctx.cutoff)
 
@@ -515,6 +529,8 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
                             ctx, ids0, candidate_ids, cache, zid, rc, skin_global, step, z0p, z1p
                         )
                     vv_update_positions(ctx.r, ctx.v, ctx.mass, ctx.dt, ctx.box, ids0, f)
+                    if ctx.backend.device == "cuda":
+                        mark_device_state_dirty(ctx.r, ids0)
                     assign_atoms_to_zones(ctx.r, zones, ctx.box)
 
                     # ---- velocity finish (VV half-step 2) ----
@@ -550,6 +566,8 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
                     )
 
         ctx.box, lam_b = ctx.apply_ensemble(step, atom_box=ctx.box)
+        if ctx.backend.device == "cuda":
+            mark_device_state_dirty(ctx.r)
         if ctx.ensemble_kind == "npt":
             _scale_zones_1d(zones, lam_b, ctx.cutoff)
 
@@ -585,6 +603,7 @@ def _forces_on_zone_1d(
             candidate_ids=candidate_ids,
             atom_types=ctx.atom_types,
             backend=ctx.backend,
+            prefer_marked_dirty=True,
         )
         if f_zone is None:
             f_zone = np.zeros((z.atom_ids.size, 3), dtype=np.float64)
@@ -629,6 +648,7 @@ def _forces_on_zone_1d_async(
             candidate_ids=candidate_ids,
             atom_types=ctx.atom_types,
             backend=ctx.backend,
+            prefer_marked_dirty=True,
         )
         if f is not None:
             return f
@@ -671,6 +691,7 @@ def _forces_3d(
             candidate_ids=ids_all,
             atom_types=ctx.atom_types,
             backend=ctx.backend,
+            prefer_marked_dirty=True,
         )
         if f is not None:
             return f
@@ -700,6 +721,7 @@ def _forces_3d_post(
             candidate_ids=ids_all,
             atom_types=ctx.atom_types,
             backend=ctx.backend,
+            prefer_marked_dirty=True,
         )
         if f2 is not None:
             return f2

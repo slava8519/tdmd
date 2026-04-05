@@ -21,6 +21,7 @@ def try_gpu_forces_on_targets(
     candidate_ids: np.ndarray,
     atom_types: np.ndarray,
     backend: ComputeBackend,
+    prefer_marked_dirty: bool = False,
 ) -> np.ndarray | None:
     """Try the GPU force path (CUDA) and return forces or None if unavailable.
 
@@ -42,6 +43,7 @@ def try_gpu_forces_on_targets(
         candidate_ids=candidate_ids,
         atom_types=atom_types,
         backend=backend,
+        prefer_marked_dirty=prefer_marked_dirty,
     )
     if f_gpu is not None:
         return np.asarray(f_gpu, dtype=float)
@@ -55,6 +57,7 @@ def try_gpu_forces_on_targets(
         candidate_ids=candidate_ids,
         atom_types=atom_types,
         backend=backend,
+        prefer_marked_dirty=prefer_marked_dirty,
     )
     if f_pair is not None:
         return np.asarray(f_pair, dtype=float)

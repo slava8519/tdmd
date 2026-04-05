@@ -9,6 +9,7 @@ from .backend import resolve_backend
 from .celllist import forces_on_targets_celllist
 from .ensembles import apply_ensemble_step, build_ensemble_spec
 from .force_dispatch import try_gpu_forces_on_targets
+from .forces_gpu import mark_device_state_dirty
 from .observer import emit_observer, observer_accepts_box
 
 
@@ -70,6 +71,7 @@ def run_serial(
             candidate_ids=ids,
             atom_types=atom_types,
             backend=backend,
+            prefer_marked_dirty=True,
         )
         if f_gpu is not None:
             return f_gpu
@@ -90,6 +92,8 @@ def run_serial(
         else:
             v_half = v + 0.5 * dt * f / masses[:, None]
         r[:] = (r + dt * v_half) % box
+        if backend.device == "cuda":
+            mark_device_state_dirty(r, ids)
         v[:] = v_half
         # new forces
         f2 = _forces(r)
@@ -109,6 +113,8 @@ def run_serial(
             atom_types=atom_types,
             dt=dt,
         )
+        if backend.device == "cuda":
+            mark_device_state_dirty(r, ids)
         if observer is not None and observer_every and (step % observer_every == 0):
             _emit_observer(step)
         if thermo_every and (step % thermo_every == 0):

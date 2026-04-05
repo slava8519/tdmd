@@ -27,15 +27,92 @@ class NeighborListDiagnostics:
 _LAST_NEIGHBOR_DIAGNOSTICS = NeighborListDiagnostics()
 
 
+@dataclass(frozen=True)
+class _DeviceNeighborList:
+    d_ids: object
+    d_counts: object
+
+
 @dataclass
 class _GPUStateCache:
     host_id: int = -1
     shape: tuple[int, int] = (0, 0)
     d_r: object | None = None
     d_atom_types: object | None = None
+    dirty_mask: np.ndarray | None = None
+
+
+@dataclass(frozen=True)
+class DeviceStateSyncDiagnostics:
+    last_synced_atoms: int = 0
+    full_sync: bool = False
+    used_dirty_tracking: bool = False
 
 
 _GPU_STATE_CACHE = _GPUStateCache()
+_LAST_DEVICE_STATE_SYNC_DIAGNOSTICS = DeviceStateSyncDiagnostics()
+
+
+@dataclass(frozen=True)
+class _DeviceTablePotentialState:
+    d_r_grid: object
+    d_f_grid: object
+
+
+@dataclass(frozen=True)
+class _DeviceEAMPotentialState:
+    d_grid_rho: object
+    d_grid_r: object
+    d_embed: object
+    d_density: object
+    d_phi_flat: object
+    nelem: int
+    nrho: int
+    nr: int
+
+
+_GPU_POTENTIAL_CACHE: dict[int, object] = {}
+_RAWKERNEL_CACHE: dict[tuple[int, int, str], object] = {}
+
+
+def _set_last_device_state_sync_diagnostics(diag: DeviceStateSyncDiagnostics) -> None:
+    global _LAST_DEVICE_STATE_SYNC_DIAGNOSTICS
+    _LAST_DEVICE_STATE_SYNC_DIAGNOSTICS = diag
+
+
+def get_last_device_state_sync_diagnostics() -> DeviceStateSyncDiagnostics:
+    return _LAST_DEVICE_STATE_SYNC_DIAGNOSTICS
+
+
+def reset_device_state_cache() -> None:
+    global _GPU_STATE_CACHE
+    _GPU_STATE_CACHE = _GPU_STATE_CACHE.__class__()
+    _set_last_device_state_sync_diagnostics(DeviceStateSyncDiagnostics())
+
+
+def reset_rawkernel_cache() -> None:
+    _RAWKERNEL_CACHE.clear()
+
+
+def mark_device_state_dirty(r: np.ndarray, ids: np.ndarray | None = None) -> None:
+    global _GPU_STATE_CACHE
+
+    rr = np.asarray(r, dtype=np.float64)
+    if (
+        _GPU_STATE_CACHE.d_r is None
+        or _GPU_STATE_CACHE.d_atom_types is None
+        or _GPU_STATE_CACHE.host_id != id(rr)
+        or _GPU_STATE_CACHE.shape != rr.shape
+    ):
+        return
+    if _GPU_STATE_CACHE.dirty_mask is None or _GPU_STATE_CACHE.dirty_mask.shape[0] != rr.shape[0]:
+        _GPU_STATE_CACHE.dirty_mask = np.zeros((rr.shape[0],), dtype=bool)
+    if ids is None:
+        _GPU_STATE_CACHE.dirty_mask[:] = True
+        return
+    idx = np.asarray(ids, dtype=np.int32)
+    if idx.size:
+        _GPU_STATE_CACHE.dirty_mask[np.unique(idx)] = True
 
 
 def _get_device_state(
@@ -44,6 +121,7 @@ def _get_device_state(
     r: np.ndarray,
     atom_types: np.ndarray,
     update_ids: np.ndarray | None = None,
+    prefer_marked_dirty: bool = False,
 ):
     """Maintain persistent device arrays for positions and atom types."""
     global _GPU_STATE_CACHE
@@ -61,14 +139,87 @@ def _get_device_state(
         _GPU_STATE_CACHE.shape = rr.shape
         _GPU_STATE_CACHE.d_r = cp.asarray(rr)
         _GPU_STATE_CACHE.d_atom_types = cp.asarray(at)
-    elif update_ids is not None:
-        ids = np.asarray(update_ids, dtype=np.int32)
-        if ids.size:
-            uniq = np.unique(ids)
-            d_idx = cp.asarray(uniq)
-            _GPU_STATE_CACHE.d_r[d_idx] = cp.asarray(rr[uniq])
-            _GPU_STATE_CACHE.d_atom_types[d_idx] = cp.asarray(at[uniq])
+        _GPU_STATE_CACHE.dirty_mask = np.zeros((rr.shape[0],), dtype=bool)
+        _set_last_device_state_sync_diagnostics(
+            DeviceStateSyncDiagnostics(
+                last_synced_atoms=int(rr.shape[0]),
+                full_sync=True,
+                used_dirty_tracking=bool(prefer_marked_dirty),
+            )
+        )
+    else:
+        if _GPU_STATE_CACHE.dirty_mask is None or _GPU_STATE_CACHE.dirty_mask.shape[0] != rr.shape[0]:
+            _GPU_STATE_CACHE.dirty_mask = np.zeros((rr.shape[0],), dtype=bool)
+        if update_ids is None:
+            if prefer_marked_dirty:
+                sync_ids = np.flatnonzero(_GPU_STATE_CACHE.dirty_mask).astype(np.int32, copy=False)
+            else:
+                sync_ids = np.arange(rr.shape[0], dtype=np.int32)
+        else:
+            uniq = np.unique(np.asarray(update_ids, dtype=np.int32))
+            if prefer_marked_dirty:
+                sync_ids = uniq[_GPU_STATE_CACHE.dirty_mask[uniq]] if uniq.size else uniq
+            else:
+                sync_ids = uniq
+        if sync_ids.size:
+            d_idx = cp.asarray(sync_ids)
+            _GPU_STATE_CACHE.d_r[d_idx] = cp.asarray(rr[sync_ids])
+            _GPU_STATE_CACHE.d_atom_types[d_idx] = cp.asarray(at[sync_ids])
+            _GPU_STATE_CACHE.dirty_mask[sync_ids] = False
+        _set_last_device_state_sync_diagnostics(
+            DeviceStateSyncDiagnostics(
+                last_synced_atoms=int(sync_ids.size),
+                full_sync=False,
+                used_dirty_tracking=bool(prefer_marked_dirty),
+            )
+        )
     return _GPU_STATE_CACHE.d_r, _GPU_STATE_CACHE.d_atom_types
+
+
+def _peek_device_state(*, r: np.ndarray):
+    rr = np.asarray(r, dtype=np.float64)
+    if (
+        _GPU_STATE_CACHE.d_r is None
+        or _GPU_STATE_CACHE.d_atom_types is None
+        or _GPU_STATE_CACHE.host_id != id(rr)
+        or _GPU_STATE_CACHE.shape != rr.shape
+    ):
+        return None, None
+    return _GPU_STATE_CACHE.d_r, _GPU_STATE_CACHE.d_atom_types
+
+
+def _get_device_potential_state(cp, potential):
+    key = int(id(potential))
+    cached = _GPU_POTENTIAL_CACHE.get(key)
+    if isinstance(potential, TablePotential):
+        if isinstance(cached, _DeviceTablePotentialState):
+            return cached
+        state = _DeviceTablePotentialState(
+            d_r_grid=cp.asarray(np.asarray(potential.r_grid, dtype=np.float64)),
+            d_f_grid=cp.asarray(np.asarray(potential.f_grid, dtype=np.float64)),
+        )
+        _GPU_POTENTIAL_CACHE[key] = state
+        return state
+    if isinstance(potential, EAMAlloyPotential):
+        if isinstance(cached, _DeviceEAMPotentialState):
+            return cached
+        nelem = int(potential.embed_table.shape[0])
+        nrho = int(potential.grid_rho.size)
+        nr = int(potential.grid_r.size)
+        phi_flat = np.asarray(potential.phi_table, dtype=np.float64).reshape(nelem * nelem, -1)
+        state = _DeviceEAMPotentialState(
+            d_grid_rho=cp.asarray(np.asarray(potential.grid_rho, dtype=np.float64)),
+            d_grid_r=cp.asarray(np.asarray(potential.grid_r, dtype=np.float64)),
+            d_embed=cp.asarray(np.asarray(potential.embed_table, dtype=np.float64)),
+            d_density=cp.asarray(np.asarray(potential.density_table, dtype=np.float64)),
+            d_phi_flat=cp.asarray(phi_flat),
+            nelem=nelem,
+            nrho=nrho,
+            nr=nr,
+        )
+        _GPU_POTENTIAL_CACHE[key] = state
+        return state
+    return None
 
 
 _NEIGHBOR_RAWKERNEL_NAME = "tdmd_build_neighbor_list"
@@ -141,6 +292,7 @@ void tdmd_lj_force_from_neighbors(
     const double* r,
     const int* target_ids,
     const int* neighbor_ids,
+    const int* neighbor_counts,
     const int n_targets,
     const int max_neighbors,
     const double box,
@@ -158,7 +310,8 @@ void tdmd_lj_force_from_neighbors(
     double fx = 0.0;
     double fy = 0.0;
     double fz = 0.0;
-    for (int k = 0; k < max_neighbors; ++k) {
+    const int count = neighbor_counts[tid];
+    for (int k = 0; k < count; ++k) {
         const int j = neighbor_ids[tid * max_neighbors + k];
         if (j < 0) continue;
         double rx = r[3 * i + 0] - r[3 * j + 0];
@@ -195,6 +348,7 @@ void tdmd_morse_force_from_neighbors(
     const double* r,
     const int* target_ids,
     const int* neighbor_ids,
+    const int* neighbor_counts,
     const int n_targets,
     const int max_neighbors,
     const double box,
@@ -213,7 +367,8 @@ void tdmd_morse_force_from_neighbors(
     double fx = 0.0;
     double fy = 0.0;
     double fz = 0.0;
-    for (int k = 0; k < max_neighbors; ++k) {
+    const int count = neighbor_counts[tid];
+    for (int k = 0; k < count; ++k) {
         const int j = neighbor_ids[tid * max_neighbors + k];
         if (j < 0) continue;
         double rx = r[3 * i + 0] - r[3 * j + 0];
@@ -251,6 +406,7 @@ void tdmd_table_force_from_neighbors(
     const double* r,
     const int* target_ids,
     const int* neighbor_ids,
+    const int* neighbor_counts,
     const int n_targets,
     const int max_neighbors,
     const double box,
@@ -266,7 +422,8 @@ void tdmd_table_force_from_neighbors(
     double fx = 0.0;
     double fy = 0.0;
     double fz = 0.0;
-    for (int k = 0; k < max_neighbors; ++k) {
+    const int count = neighbor_counts[tid];
+    for (int k = 0; k < count; ++k) {
         const int j = neighbor_ids[tid * max_neighbors + k];
         if (j < 0) continue;
         double rx = r[3 * i + 0] - r[3 * j + 0];
@@ -293,6 +450,199 @@ void tdmd_table_force_from_neighbors(
         const double t = (rr - x0) / (x1 - x0);
         const double fmag = y0 + t * (y1 - y0);
         const double coef = fmag / (rr + 1.0e-30);
+        fx += coef * rx;
+        fy += coef * ry;
+        fz += coef * rz;
+    }
+    out_f[3 * tid + 0] = fx;
+    out_f[3 * tid + 1] = fy;
+    out_f[3 * tid + 2] = fz;
+}
+"""
+
+_EAM_DENSITY_RAWKERNEL_NAME = "tdmd_eam_density_from_neighbors"
+_EAM_EMBED_DERIV_RAWKERNEL_NAME = "tdmd_eam_embed_deriv"
+_EAM_FORCE_RAWKERNEL_NAME = "tdmd_eam_force_from_neighbors"
+_EAM_RAWKERNEL_SRC = r"""
+__device__ inline void tdmd_interp_value_grad(
+    const double* x,
+    const double* table_row,
+    const int n,
+    const double q,
+    double* out_val,
+    double* out_grad
+) {
+    if (n < 2 || q < x[0] || q > x[n - 1]) {
+        *out_val = 0.0;
+        *out_grad = 0.0;
+        return;
+    }
+    int lo = 0;
+    int hi = n - 1;
+    while (hi - lo > 1) {
+        const int mid = (lo + hi) / 2;
+        if (x[mid] <= q) lo = mid;
+        else hi = mid;
+    }
+    const double x0 = x[lo];
+    const double x1 = x[lo + 1];
+    const double y0 = table_row[lo];
+    const double y1 = table_row[lo + 1];
+    const double dx = x1 - x0;
+    if (dx == 0.0) {
+        *out_val = y0;
+        *out_grad = 0.0;
+        return;
+    }
+    const double t = (q - x0) / dx;
+    *out_val = y0 + t * (y1 - y0);
+    *out_grad = (y1 - y0) / dx;
+}
+
+extern "C" __global__
+void tdmd_eam_density_from_neighbors(
+    const double* r,
+    const int* target_ids,
+    const int* neighbor_ids,
+    const int* neighbor_counts,
+    const int n_targets,
+    const int max_neighbors,
+    const double box,
+    const double cutoff2,
+    const int* elem_idx,
+    const double* grid_r,
+    const int nr,
+    const double* density_table,
+    double* rho_acc
+) {
+    const int tid = (int)(blockDim.x * blockIdx.x + threadIdx.x);
+    if (tid >= n_targets) return;
+    const int i = target_ids[tid];
+    double rho = 0.0;
+    const int count = neighbor_counts[tid];
+    for (int k = 0; k < count; ++k) {
+        const int j = neighbor_ids[tid * max_neighbors + k];
+        if (j < 0) continue;
+        double rx = r[3 * i + 0] - r[3 * j + 0];
+        double ry = r[3 * i + 1] - r[3 * j + 1];
+        double rz = r[3 * i + 2] - r[3 * j + 2];
+        rx -= box * nearbyint(rx / box);
+        ry -= box * nearbyint(ry / box);
+        rz -= box * nearbyint(rz / box);
+        const double r2 = rx * rx + ry * ry + rz * rz;
+        if (!(r2 > 0.0 && r2 < cutoff2)) continue;
+        const double rr = sqrt(r2 + 1.0e-30);
+        const int aj = elem_idx[j];
+        double rho_ij = 0.0;
+        double drho = 0.0;
+        tdmd_interp_value_grad(grid_r, density_table + aj * nr, nr, rr, &rho_ij, &drho);
+        rho += rho_ij;
+    }
+    rho_acc[tid] = rho;
+}
+
+extern "C" __global__
+void tdmd_eam_embed_deriv(
+    const int* target_ids,
+    const int n_targets,
+    const int* elem_idx,
+    const double* grid_rho,
+    const int nrho,
+    const double* embed_table,
+    const double* rho_acc,
+    double* out_dF
+) {
+    const int tid = (int)(blockDim.x * blockIdx.x + threadIdx.x);
+    if (tid >= n_targets) return;
+    const int i = target_ids[tid];
+    const int ai = elem_idx[i];
+    double F = 0.0;
+    double dF = 0.0;
+    tdmd_interp_value_grad(grid_rho, embed_table + ai * nrho, nrho, rho_acc[tid], &F, &dF);
+    out_dF[tid] = dF;
+}
+
+extern "C" __global__
+void tdmd_eam_force_from_neighbors(
+    const double* r,
+    const int* target_ids,
+    const int* neighbor_ids,
+    const int* neighbor_counts,
+    const int n_targets,
+    const int max_neighbors,
+    const double box,
+    const double cutoff2,
+    const int* elem_idx,
+    const int* gid_to_local,
+    const double* dF,
+    const double* grid_r,
+    const int nr,
+    const double* density_table,
+    const double* phi_table_flat,
+    const int nelem,
+    double* out_f
+) {
+    const int tid = (int)(blockDim.x * blockIdx.x + threadIdx.x);
+    if (tid >= n_targets) return;
+    const int i = target_ids[tid];
+    const int ai = elem_idx[i];
+    const double dFi = dF[tid];
+    double fx = 0.0;
+    double fy = 0.0;
+    double fz = 0.0;
+    const int count = neighbor_counts[tid];
+    for (int k = 0; k < count; ++k) {
+        const int j = neighbor_ids[tid * max_neighbors + k];
+        if (j < 0) continue;
+        const int lj = gid_to_local[j];
+        if (lj < 0) continue;
+        double rx = r[3 * i + 0] - r[3 * j + 0];
+        double ry = r[3 * i + 1] - r[3 * j + 1];
+        double rz = r[3 * i + 2] - r[3 * j + 2];
+        rx -= box * nearbyint(rx / box);
+        ry -= box * nearbyint(ry / box);
+        rz -= box * nearbyint(rz / box);
+        const double r2 = rx * rx + ry * ry + rz * rz;
+        if (!(r2 > 0.0 && r2 < cutoff2)) continue;
+        const double rr = sqrt(r2 + 1.0e-30);
+        const int aj = elem_idx[j];
+        const double dFj = dF[lj];
+
+        double phi = 0.0;
+        double dphi = 0.0;
+        tdmd_interp_value_grad(
+            grid_r,
+            phi_table_flat + (ai * nelem + aj) * nr,
+            nr,
+            rr,
+            &phi,
+            &dphi
+        );
+
+        double rho_ij = 0.0;
+        double drho_col = 0.0;
+        tdmd_interp_value_grad(
+            grid_r,
+            density_table + aj * nr,
+            nr,
+            rr,
+            &rho_ij,
+            &drho_col
+        );
+
+        double rho_ji = 0.0;
+        double drho_row = 0.0;
+        tdmd_interp_value_grad(
+            grid_r,
+            density_table + ai * nr,
+            nr,
+            rr,
+            &rho_ji,
+            &drho_row
+        );
+
+        const double dEdr = dphi + dFi * drho_col + dFj * drho_row;
+        const double coef = -dEdr / (rr + 1.0e-30);
         fx += coef * rx;
         fy += coef * ry;
         fz += coef * rz;
@@ -397,20 +747,50 @@ def _flatten_cell_atoms(cl) -> tuple[np.ndarray, np.ndarray]:
     return flat_arr, starts
 
 
+def _rawkernel_cache_key(cp, name: str) -> tuple[int, int, str]:
+    device_id = -1
+    try:
+        device_id = int(getattr(cp.cuda.Device(), "id"))
+    except Exception:
+        device_id = -1
+    return (id(cp), device_id, str(name))
+
+
+def _cached_rawkernel(cp, src: str, name: str):
+    key = _rawkernel_cache_key(cp, name)
+    kernel = _RAWKERNEL_CACHE.get(key)
+    if kernel is None:
+        kernel = cp.RawKernel(src, name)
+        _RAWKERNEL_CACHE[key] = kernel
+    return kernel
+
+
 def _neighbor_rawkernel(cp):
-    return cp.RawKernel(_NEIGHBOR_RAWKERNEL_SRC, _NEIGHBOR_RAWKERNEL_NAME)
+    return _cached_rawkernel(cp, _NEIGHBOR_RAWKERNEL_SRC, _NEIGHBOR_RAWKERNEL_NAME)
 
 
 def _lj_force_rawkernel(cp):
-    return cp.RawKernel(_LJ_FORCE_RAWKERNEL_SRC, _LJ_FORCE_RAWKERNEL_NAME)
+    return _cached_rawkernel(cp, _LJ_FORCE_RAWKERNEL_SRC, _LJ_FORCE_RAWKERNEL_NAME)
 
 
 def _morse_force_rawkernel(cp):
-    return cp.RawKernel(_MORSE_FORCE_RAWKERNEL_SRC, _MORSE_FORCE_RAWKERNEL_NAME)
+    return _cached_rawkernel(cp, _MORSE_FORCE_RAWKERNEL_SRC, _MORSE_FORCE_RAWKERNEL_NAME)
 
 
 def _table_force_rawkernel(cp):
-    return cp.RawKernel(_TABLE_FORCE_RAWKERNEL_SRC, _TABLE_FORCE_RAWKERNEL_NAME)
+    return _cached_rawkernel(cp, _TABLE_FORCE_RAWKERNEL_SRC, _TABLE_FORCE_RAWKERNEL_NAME)
+
+
+def _eam_density_rawkernel(cp):
+    return _cached_rawkernel(cp, _EAM_RAWKERNEL_SRC, _EAM_DENSITY_RAWKERNEL_NAME)
+
+
+def _eam_embed_deriv_rawkernel(cp):
+    return _cached_rawkernel(cp, _EAM_RAWKERNEL_SRC, _EAM_EMBED_DERIV_RAWKERNEL_NAME)
+
+
+def _eam_force_rawkernel(cp):
+    return _cached_rawkernel(cp, _EAM_RAWKERNEL_SRC, _EAM_FORCE_RAWKERNEL_NAME)
 
 
 def _pair_matrix_lj_dense(pot: LennardJones, atom_types: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -474,7 +854,7 @@ def _build_neighbor_list_once(
     cell_atoms_flat: np.ndarray,
     cell_starts: np.ndarray,
     max_neighbors: int,
-) -> tuple[np.ndarray, np.ndarray, bool]:
+) -> tuple[_DeviceNeighborList, bool]:
     tids = np.asarray(target_ids, dtype=np.int32)
     d_tids = cp.asarray(tids)
     d_tcells = cp.asarray(np.asarray(cl.idx[tids], dtype=np.int32))
@@ -509,7 +889,112 @@ def _build_neighbor_list_once(
         ),
     )
     overflowed = int(cp.asnumpy(d_overflow)[0]) != 0
-    return cp.asnumpy(d_out_ids), cp.asnumpy(d_out_counts), overflowed
+    return _DeviceNeighborList(d_ids=d_out_ids, d_counts=d_out_counts), overflowed
+
+
+def _build_neighbor_list_celllist_backend_device(
+    *,
+    r: np.ndarray,
+    box: float,
+    cutoff: float,
+    rc: float,
+    target_ids: np.ndarray,
+    candidate_ids: np.ndarray,
+    atom_types: np.ndarray | None = None,
+    backend: ComputeBackend | None = None,
+    device: str = "cpu",
+    max_neighbors: int = 256,
+    max_retries: int = 6,
+    prefer_marked_dirty: bool = False,
+) -> _DeviceNeighborList | None:
+    """Build a device-resident per-target neighbor list from CPU-reference cell buckets."""
+    if backend is None:
+        backend = resolve_backend(device)
+    if backend.device != "cuda":
+        return None
+    cp = backend.xp
+
+    tids = np.asarray(target_ids, dtype=np.int32)
+    cids = np.asarray(candidate_ids, dtype=np.int32)
+    if tids.size == 0 or cids.size == 0:
+        _set_last_neighbor_diagnostics(NeighborListDiagnostics())
+        return _DeviceNeighborList(
+            d_ids=cp.full((tids.size, 0), -1, dtype=cp.int32),
+            d_counts=cp.zeros((tids.size,), dtype=cp.int32),
+        )
+
+    if atom_types is None:
+        atom_types_arr = np.zeros((np.asarray(r).shape[0],), dtype=np.int32)
+    else:
+        atom_types_arr = np.asarray(atom_types, dtype=np.int32)
+    update_ids = np.unique(np.concatenate((tids, cids)).astype(np.int32))
+    d_r, _ = _get_device_state(
+        cp=cp,
+        r=r,
+        atom_types=atom_types_arr,
+        update_ids=update_ids,
+        prefer_marked_dirty=bool(prefer_marked_dirty),
+    )
+
+    cl = build_cell_list(r, cids, float(box), rc=float(rc))
+    cell_atoms_flat, cell_starts = _flatten_cell_atoms(cl)
+    max_nei = int(max(1, max_neighbors))
+    upper_bound = int(max(1, cids.size))
+    retries = int(max(0, max_retries))
+
+    attempts = 0
+    overflow_retries = 0
+    last_built: _DeviceNeighborList | None = None
+    last_overflow = True
+
+    for _ in range(retries + 1):
+        attempts += 1
+        built_once, overflowed = _build_neighbor_list_once(
+            cp=cp,
+            d_r=d_r,
+            box=box,
+            cutoff=cutoff,
+            target_ids=tids,
+            cl=cl,
+            cell_atoms_flat=cell_atoms_flat,
+            cell_starts=cell_starts,
+            max_neighbors=max_nei,
+        )
+        last_built, last_overflow = built_once, overflowed
+        if not overflowed:
+            break
+        overflow_retries += 1
+        if max_nei >= upper_bound:
+            break
+        max_nei = min(upper_bound, max_nei * 2)
+
+    if last_built is None:
+        _set_last_neighbor_diagnostics(
+            NeighborListDiagnostics(
+                attempts=attempts,
+                overflow_retries=overflow_retries,
+                final_max_neighbors=max_nei,
+                overflowed=True,
+            )
+        )
+        return None
+
+    last_counts = cp.asnumpy(last_built.d_counts)
+    max_used = int(last_counts.max()) if last_counts.size else 0
+    avg_used = float(last_counts.mean()) if last_counts.size else 0.0
+    _set_last_neighbor_diagnostics(
+        NeighborListDiagnostics(
+            attempts=attempts,
+            overflow_retries=overflow_retries,
+            final_max_neighbors=max_nei,
+            max_neighbors_used=max_used,
+            avg_neighbors=avg_used,
+            overflowed=bool(last_overflow),
+        )
+    )
+    if last_overflow:
+        return None
+    return last_built
 
 
 def build_neighbor_list_celllist_backend(
@@ -525,86 +1010,28 @@ def build_neighbor_list_celllist_backend(
     device: str = "cpu",
     max_neighbors: int = 256,
     max_retries: int = 6,
+    prefer_marked_dirty: bool = False,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Build per-target neighbor list on CUDA from cell-list buckets."""
+    """Build per-target neighbor list on CUDA from cell-list buckets and materialize it on host."""
     if backend is None:
         backend = resolve_backend(device)
-    if backend.device != "cuda":
+    built = _build_neighbor_list_celllist_backend_device(
+        r=r,
+        box=box,
+        cutoff=cutoff,
+        rc=rc,
+        target_ids=target_ids,
+        candidate_ids=candidate_ids,
+        atom_types=atom_types,
+        backend=backend,
+        max_neighbors=max_neighbors,
+        max_retries=max_retries,
+        prefer_marked_dirty=prefer_marked_dirty,
+    )
+    if built is None:
         return None
     cp = backend.xp
-
-    tids = np.asarray(target_ids, dtype=np.int32)
-    cids = np.asarray(candidate_ids, dtype=np.int32)
-    if tids.size == 0 or cids.size == 0:
-        _set_last_neighbor_diagnostics(NeighborListDiagnostics())
-        return np.full((tids.size, 0), -1, dtype=np.int32), np.zeros((tids.size,), dtype=np.int32)
-
-    if atom_types is None:
-        atom_types_arr = np.zeros((np.asarray(r).shape[0],), dtype=np.int32)
-    else:
-        atom_types_arr = np.asarray(atom_types, dtype=np.int32)
-    update_ids = np.unique(np.concatenate((tids, cids)).astype(np.int32))
-    d_r, _ = _get_device_state(cp=cp, r=r, atom_types=atom_types_arr, update_ids=update_ids)
-
-    cl = build_cell_list(r, cids, float(box), rc=float(rc))
-    cell_atoms_flat, cell_starts = _flatten_cell_atoms(cl)
-    max_nei = int(max(1, max_neighbors))
-    upper_bound = int(max(1, cids.size))
-    retries = int(max(0, max_retries))
-
-    attempts = 0
-    overflow_retries = 0
-    last_ids: np.ndarray | None = None
-    last_counts: np.ndarray | None = None
-    last_overflow = True
-
-    for _ in range(retries + 1):
-        attempts += 1
-        out_ids, out_counts, overflowed = _build_neighbor_list_once(
-            cp=cp,
-            d_r=d_r,
-            box=box,
-            cutoff=cutoff,
-            target_ids=tids,
-            cl=cl,
-            cell_atoms_flat=cell_atoms_flat,
-            cell_starts=cell_starts,
-            max_neighbors=max_nei,
-        )
-        last_ids, last_counts, last_overflow = out_ids, out_counts, overflowed
-        if not overflowed:
-            break
-        overflow_retries += 1
-        if max_nei >= upper_bound:
-            break
-        max_nei = min(upper_bound, max_nei * 2)
-
-    if last_counts is None or last_ids is None:
-        _set_last_neighbor_diagnostics(
-            NeighborListDiagnostics(
-                attempts=attempts,
-                overflow_retries=overflow_retries,
-                final_max_neighbors=max_nei,
-                overflowed=True,
-            )
-        )
-        return None
-
-    max_used = int(last_counts.max()) if last_counts.size else 0
-    avg_used = float(last_counts.mean()) if last_counts.size else 0.0
-    _set_last_neighbor_diagnostics(
-        NeighborListDiagnostics(
-            attempts=attempts,
-            overflow_retries=overflow_retries,
-            final_max_neighbors=max_nei,
-            max_neighbors_used=max_used,
-            avg_neighbors=avg_used,
-            overflowed=bool(last_overflow),
-        )
-    )
-    if last_overflow:
-        return None
-    return last_ids, last_counts
+    return cp.asnumpy(built.d_ids), cp.asnumpy(built.d_counts)
 
 
 def _forces_from_neighbor_matrix_cp(
@@ -616,6 +1043,7 @@ def _forces_from_neighbor_matrix_cp(
     potential,
     target_ids: np.ndarray,
     neighbor_ids: np.ndarray,
+    neighbor_counts: np.ndarray | object | None = None,
     atom_types: np.ndarray,
     d_r=None,
     d_types=None,
@@ -623,17 +1051,27 @@ def _forces_from_neighbor_matrix_cp(
     tids = np.asarray(target_ids, dtype=np.int32)
     if tids.size == 0:
         return np.zeros((0, 3), dtype=np.float64)
-    if neighbor_ids.size == 0:
+    if neighbor_ids is None:
+        return np.zeros((tids.size, 3), dtype=np.float64)
+    if isinstance(neighbor_ids, cp.ndarray):
+        d_nei = neighbor_ids.astype(cp.int32, copy=False)
+    else:
+        d_nei = cp.asarray(np.asarray(neighbor_ids, dtype=np.int32))
+    if d_nei.size == 0:
         return np.zeros((tids.size, 3), dtype=np.float64)
 
     d_tids = cp.asarray(tids)
-    d_nei = cp.asarray(np.asarray(neighbor_ids, dtype=np.int32))
     valid = d_nei >= 0
     js_safe = cp.where(valid, d_nei, 0)
-    max_neighbors = int(neighbor_ids.shape[1]) if neighbor_ids.ndim == 2 else 0
+    if neighbor_counts is None:
+        d_counts = cp.sum(valid, axis=1, dtype=cp.int32) if d_nei.ndim == 2 else cp.zeros((tids.size,), dtype=cp.int32)
+    elif isinstance(neighbor_counts, cp.ndarray):
+        d_counts = neighbor_counts.astype(cp.int32, copy=False)
+    else:
+        d_counts = cp.asarray(np.asarray(neighbor_counts, dtype=np.int32))
+    max_neighbors = int(d_nei.shape[1]) if d_nei.ndim == 2 else 0
     if d_r is None or d_types is None:
-        js = np.asarray(neighbor_ids, dtype=np.int32).reshape(-1)
-        js = js[js >= 0]
+        js = cp.asnumpy(d_nei[valid]).astype(np.int32, copy=False)
         update_ids = np.unique(np.concatenate((tids, js)).astype(np.int32))
         d_r, d_types = _get_device_state(
             cp=cp,
@@ -658,6 +1096,7 @@ def _forces_from_neighbor_matrix_cp(
                 d_r.reshape(-1),
                 d_tids,
                 d_nei.reshape(-1),
+                d_counts,
                 np.int32(tids.size),
                 np.int32(max_neighbors),
                 np.float64(float(box)),
@@ -689,6 +1128,7 @@ def _forces_from_neighbor_matrix_cp(
                 d_r.reshape(-1),
                 d_tids,
                 d_nei.reshape(-1),
+                d_counts,
                 np.int32(tids.size),
                 np.int32(max_neighbors),
                 np.float64(float(box)),
@@ -705,8 +1145,9 @@ def _forces_from_neighbor_matrix_cp(
 
     if isinstance(potential, TablePotential):
         d_out = cp.zeros((tids.size, 3), dtype=cp.float64)
-        d_r_grid = cp.asarray(np.asarray(potential.r_grid, dtype=np.float64))
-        d_f_grid = cp.asarray(np.asarray(potential.f_grid, dtype=np.float64))
+        pot_state = _get_device_potential_state(cp, potential)
+        d_r_grid = pot_state.d_r_grid
+        d_f_grid = pot_state.d_f_grid
         kernel = _table_force_rawkernel(cp)
         threads = 128
         blocks = (int(tids.size) + threads - 1) // threads
@@ -717,6 +1158,7 @@ def _forces_from_neighbor_matrix_cp(
                 d_r.reshape(-1),
                 d_tids,
                 d_nei.reshape(-1),
+                d_counts,
                 np.int32(tids.size),
                 np.int32(max_neighbors),
                 np.float64(float(box)),
@@ -739,6 +1181,141 @@ def _forces_from_neighbor_matrix_cp(
     return np.zeros((tids.size, 3), dtype=np.float64)
 
 
+def _forces_eam_on_candidate_union_cp(
+    *,
+    cp,
+    r: np.ndarray,
+    box: float,
+    cutoff: float,
+    potential: EAMAlloyPotential,
+    target_ids: np.ndarray,
+    candidate_ids: np.ndarray,
+    atom_types: np.ndarray,
+    backend: ComputeBackend,
+    prefer_marked_dirty: bool = False,
+) -> np.ndarray | None:
+    tids = np.asarray(target_ids, dtype=np.int32)
+    cids = np.asarray(candidate_ids, dtype=np.int32)
+    if tids.size == 0:
+        return np.zeros((0, 3), dtype=np.float64)
+
+    union = np.unique(np.concatenate((tids, cids)).astype(np.int32))
+    if union.size == 0:
+        return np.zeros((tids.size, 3), dtype=np.float64)
+
+    max_neighbors = int(max(64, min(1024, union.size)))
+    built = _build_neighbor_list_celllist_backend_device(
+        r=r,
+        box=box,
+        cutoff=cutoff,
+        rc=cutoff,
+        target_ids=union,
+        candidate_ids=union,
+        atom_types=atom_types,
+        backend=backend,
+        max_neighbors=max_neighbors,
+        prefer_marked_dirty=prefer_marked_dirty,
+    )
+    if built is None:
+        return None
+
+    d_r, _d_types_all = _peek_device_state(r=r)
+    if d_r is None:
+        d_r, _d_types_all = _get_device_state(
+            cp=cp,
+            r=r,
+            atom_types=np.asarray(atom_types, dtype=np.int32),
+            update_ids=union,
+            prefer_marked_dirty=prefer_marked_dirty,
+        )
+    elem_idx = potential._types_to_elem_idx(np.asarray(atom_types, dtype=np.int32))
+    gid_to_local = np.full((np.asarray(r).shape[0],), -1, dtype=np.int32)
+    gid_to_local[union] = np.arange(union.size, dtype=np.int32)
+    target_local = gid_to_local[tids]
+
+    d_union = cp.asarray(union)
+    d_elem = cp.asarray(elem_idx.astype(np.int32, copy=False))
+    d_gid_to_local = cp.asarray(gid_to_local)
+    d_rho = cp.zeros((union.size,), dtype=cp.float64)
+    d_dF = cp.zeros((union.size,), dtype=cp.float64)
+    d_out = cp.zeros((union.size, 3), dtype=cp.float64)
+
+    pot_state = _get_device_potential_state(cp, potential)
+    d_grid_r = pot_state.d_grid_r
+    d_grid_rho = pot_state.d_grid_rho
+    d_density = pot_state.d_density
+    d_embed = pot_state.d_embed
+    d_phi_flat = pot_state.d_phi_flat
+
+    nelem = int(pot_state.nelem)
+    nr = int(pot_state.nr)
+    nrho = int(pot_state.nrho)
+    cutoff2 = float(cutoff) * float(cutoff)
+    threads = 128
+    blocks = (int(union.size) + threads - 1) // threads
+
+    _eam_density_rawkernel(cp)(
+        (blocks,),
+        (threads,),
+        (
+            d_r.reshape(-1),
+            d_union,
+            built.d_ids.reshape(-1),
+            built.d_counts,
+            np.int32(int(union.size)),
+            np.int32(int(built.d_ids.shape[1])),
+            np.float64(float(box)),
+            np.float64(cutoff2),
+            d_elem,
+            d_grid_r,
+            np.int32(nr),
+            d_density.reshape(-1),
+            d_rho,
+        ),
+    )
+
+    _eam_embed_deriv_rawkernel(cp)(
+        (blocks,),
+        (threads,),
+        (
+            d_union,
+            np.int32(int(union.size)),
+            d_elem,
+            d_grid_rho,
+            np.int32(nrho),
+            d_embed.reshape(-1),
+            d_rho,
+            d_dF,
+        ),
+    )
+
+    _eam_force_rawkernel(cp)(
+        (blocks,),
+        (threads,),
+        (
+            d_r.reshape(-1),
+            d_union,
+            built.d_ids.reshape(-1),
+            built.d_counts,
+            np.int32(int(union.size)),
+            np.int32(int(built.d_ids.shape[1])),
+            np.float64(float(box)),
+            np.float64(cutoff2),
+            d_elem,
+            d_gid_to_local,
+            d_dF,
+            d_grid_r,
+            np.int32(nr),
+            d_density.reshape(-1),
+            d_phi_flat.reshape(-1),
+            np.int32(nelem),
+            d_out.reshape(-1),
+        ),
+    )
+
+    return cp.asnumpy(d_out[cp.asarray(target_local, dtype=cp.int32)])
+
+
 def forces_on_targets_pair_backend(
     *,
     r: np.ndarray,
@@ -750,6 +1327,7 @@ def forces_on_targets_pair_backend(
     atom_types: np.ndarray,
     backend: ComputeBackend | None = None,
     device: str = "cpu",
+    prefer_marked_dirty: bool = False,
 ) -> np.ndarray | None:
     if backend is None:
         backend = resolve_backend(device)
@@ -764,12 +1342,67 @@ def forces_on_targets_pair_backend(
     if tids.size == 0 or cids.size == 0:
         return np.zeros((tids.size, 3), dtype=np.float64)
 
+    if isinstance(potential, (LennardJones, Morse, TablePotential)):
+        max_neighbors = int(max(64, min(1024, cids.size)))
+        built = _build_neighbor_list_celllist_backend_device(
+            r=r,
+            box=box,
+            cutoff=cutoff,
+            rc=cutoff,
+            target_ids=tids,
+            candidate_ids=cids,
+            atom_types=atom_types,
+            backend=backend,
+            max_neighbors=max_neighbors,
+            prefer_marked_dirty=prefer_marked_dirty,
+        )
+        if built is not None:
+            d_r, d_types_all = _peek_device_state(r=r)
+            if d_r is None or d_types_all is None:
+                d_r, d_types_all = _get_device_state(
+                    cp=cp,
+                    r=r,
+                    atom_types=np.asarray(atom_types, dtype=np.int32),
+                    update_ids=np.unique(np.concatenate((tids, cids)).astype(np.int32)),
+                    prefer_marked_dirty=prefer_marked_dirty,
+                )
+            return _forces_from_neighbor_matrix_cp(
+                cp=cp,
+                r=r,
+                box=box,
+                cutoff=cutoff,
+                potential=potential,
+                target_ids=tids,
+                neighbor_ids=built.d_ids,
+                neighbor_counts=built.d_counts,
+                atom_types=atom_types,
+                d_r=d_r,
+                d_types=d_types_all,
+            )
+        if isinstance(potential, TablePotential):
+            return None
+
+    if isinstance(potential, EAMAlloyPotential):
+        return _forces_eam_on_candidate_union_cp(
+            cp=cp,
+            r=r,
+            box=box,
+            cutoff=cutoff,
+            potential=potential,
+            target_ids=tids,
+            candidate_ids=cids,
+            atom_types=atom_types,
+            backend=backend,
+            prefer_marked_dirty=prefer_marked_dirty,
+        )
+
     update_ids = np.unique(np.concatenate((tids, cids)).astype(np.int32))
     d_r, d_types_all = _get_device_state(
         cp=cp,
         r=r,
         atom_types=np.asarray(atom_types, dtype=np.int32),
         update_ids=update_ids,
+        prefer_marked_dirty=prefer_marked_dirty,
     )
     d_tids = cp.asarray(tids)
     d_cids = cp.asarray(cids)
@@ -800,58 +1433,6 @@ def forces_on_targets_pair_backend(
         exp1 = cp.exp(-a * x)
         dUdr = 2.0 * d * a * (1.0 - exp1) * exp1
         coef = cp.where(mask, dUdr / (rr + NUMERICAL_ZERO), 0.0)
-    elif isinstance(potential, TablePotential):
-        rr = cp.sqrt(r2 + NUMERICAL_ZERO)
-        r_grid = cp.asarray(np.asarray(potential.r_grid, dtype=np.float64))
-        f_grid = cp.asarray(np.asarray(potential.f_grid, dtype=np.float64))
-        force_mag = cp.interp(rr, r_grid, f_grid, left=0.0, right=0.0)
-        coef = cp.where(mask, force_mag / (rr + NUMERICAL_ZERO), 0.0)
-    elif isinstance(potential, EAMAlloyPotential):
-        cand = np.unique(np.concatenate([cids, tids]).astype(np.int32))
-        if cand.size == 0:
-            return np.zeros((tids.size, 3), dtype=np.float64)
-        pos_in_cand = {int(gid): int(i) for i, gid in enumerate(cand.tolist())}
-        tgt_local = np.asarray([pos_in_cand[int(g)] for g in tids.tolist()], dtype=np.int32)
-
-        d_cand = cp.asarray(cand)
-        rr_c = d_r[d_cand]
-        elem_np = potential._types_to_elem_idx(cp.asnumpy(d_types_all[d_cand]))
-        elem = cp.asarray(elem_np.astype(np.int32))
-        n = int(cand.size)
-
-        drc = rr_c[:, None, :] - rr_c[None, :, :]
-        drc = drc - float(box) * cp.rint(drc / float(box))
-        r2c = cp.sum(drc * drc, axis=2)
-        rc = cp.sqrt(r2c + NUMERICAL_ZERO)
-        m = (r2c > 0.0) & (r2c < cutoff2)
-
-        grid_r = cp.asarray(np.asarray(potential.grid_r, dtype=np.float64))
-        grid_rho = cp.asarray(np.asarray(potential.grid_rho, dtype=np.float64))
-        density = cp.asarray(np.asarray(potential.density_table, dtype=np.float64))
-        embed = cp.asarray(np.asarray(potential.embed_table, dtype=np.float64))
-        phi = cp.asarray(np.asarray(potential.phi_table, dtype=np.float64))
-        nelem = int(embed.shape[0])
-
-        idx_j = cp.broadcast_to(elem[None, :], (n, n))
-        idx_i = cp.broadcast_to(elem[:, None], (n, n))
-        rho_j, drho_col = _interp_with_grad_table_cp(cp, grid_r, density, idx_j, rc)
-        rho_i, drho_row = _interp_with_grad_table_cp(cp, grid_r, density, idx_i, rc)
-        rho_j = cp.where(m, rho_j, 0.0)
-        drho_col = cp.where(m, drho_col, 0.0)
-        drho_row = cp.where(m, drho_row, 0.0)
-        rho_acc = cp.sum(rho_j, axis=1)
-
-        _F, dF = _interp_with_grad_table_cp(cp, grid_rho, embed, elem, rho_acc)
-
-        phi_flat = phi.reshape(nelem * nelem, -1)
-        phi_idx = idx_i * nelem + idx_j
-        _phi, dphi = _interp_with_grad_table_cp(cp, grid_r, phi_flat, phi_idx, rc)
-        dphi = cp.where(m, dphi, 0.0)
-
-        dEdr = dphi + dF[:, None] * drho_col + dF[None, :] * drho_row
-        coef_c = cp.where(m, -dEdr / (rc + NUMERICAL_ZERO), 0.0)
-        f_c = cp.sum(coef_c[:, :, None] * drc, axis=1)
-        return cp.asnumpy(f_c[cp.asarray(tgt_local, dtype=cp.int32)])
     else:
         return None
 
@@ -871,6 +1452,7 @@ def forces_on_targets_celllist_backend(
     atom_types: np.ndarray,
     backend: ComputeBackend | None = None,
     device: str = "cpu",
+    prefer_marked_dirty: bool = False,
 ) -> np.ndarray | None:
     """GPU force path with CPU-equivalent cell-list candidate pruning.
 
@@ -892,7 +1474,7 @@ def forces_on_targets_celllist_backend(
         return np.zeros((tids.size, 3), dtype=np.float64)
 
     max_neighbors = int(max(64, min(1024, cids.size)))
-    built = build_neighbor_list_celllist_backend(
+    built = _build_neighbor_list_celllist_backend_device(
         r=r,
         box=box,
         cutoff=cutoff,
@@ -902,6 +1484,7 @@ def forces_on_targets_celllist_backend(
         atom_types=atom_types,
         backend=backend,
         max_neighbors=max_neighbors,
+        prefer_marked_dirty=prefer_marked_dirty,
     )
     if built is None:
         # Avoid fallback to the legacy Python-loop cell-list path.
@@ -914,16 +1497,21 @@ def forces_on_targets_celllist_backend(
             candidate_ids=cids,
             atom_types=atom_types,
             backend=backend,
+            prefer_marked_dirty=prefer_marked_dirty,
         )
 
-    neighbor_ids, _counts = built
+    neighbor_ids = built.d_ids
+    neighbor_counts = built.d_counts
     cp = backend.xp
-    d_r, d_types = _get_device_state(
-        cp=cp,
-        r=r,
-        atom_types=np.asarray(atom_types, dtype=np.int32),
-        update_ids=None,
-    )
+    d_r, d_types = _peek_device_state(r=r)
+    if d_r is None or d_types is None:
+        d_r, d_types = _get_device_state(
+            cp=cp,
+            r=r,
+            atom_types=np.asarray(atom_types, dtype=np.int32),
+            update_ids=np.unique(np.concatenate((tids, cids)).astype(np.int32)),
+            prefer_marked_dirty=prefer_marked_dirty,
+        )
     return _forces_from_neighbor_matrix_cp(
         cp=cp,
         r=r,
@@ -932,6 +1520,7 @@ def forces_on_targets_celllist_backend(
         potential=potential,
         target_ids=tids,
         neighbor_ids=neighbor_ids,
+        neighbor_counts=neighbor_counts,
         atom_types=atom_types,
         d_r=d_r,
         d_types=d_types,
