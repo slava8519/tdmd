@@ -74,6 +74,7 @@ Recommended local gates (CI-grade):
 .venv/bin/python -m pytest -q
 .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
 .venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict
+.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_perf_smoke --strict
 ```
 
 Make targets:
@@ -142,9 +143,57 @@ Common strict presets:
 ```bash
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_perf_smoke --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset metal_smoke --strict
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_metal_smoke --strict
 ```
+
+`eam_decomp_perf_smoke` is the standard PR benchmark for `EAM/alloy`. It prints a four-column
+table (`space_cpu`, `space_gpu`, `time_cpu`, `time_gpu`) and derived speedup rows after the run.
+
+For a heavier manual GPU-only benchmark on `EAM/eam-alloy`, comparing TD against space
+decomposition on a `10K`-atom model, run:
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_perf_gpu_heavy --strict
+```
+
+This preset runs only `space_gpu` and `time_gpu`, requires effective CUDA execution, and is meant
+for operator-side performance evaluation rather than PR CI.
+
+To sweep several GPU zone layouts on the same `10K`-atom `EAM/eam-alloy` model and compare
+`time_gpu` against `space_gpu`, run:
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_zone_sweep_gpu --strict
+```
+
+This sweep is also operator-side only. It is intended to identify favorable zone counts/layouts
+before any future automation of TD zoning policy.
+
+To see where GPU time is currently spent for the best observed `10K`-atom `EAM/eam-alloy` TD
+layout, run:
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_td_breakdown_gpu --strict
+```
+
+This manual benchmark compares `space_gpu` and `time_gpu` at the same `2-zone` layout and emits a
+breakdown for `forces_full`, device sync, cell-list build, candidate enumeration, and zone
+bookkeeping. Use it before making claims about the TD optimization ceiling or changing zoning
+policy.
+
+For a broader CUDA-cycle profiling report, run:
+```bash
+python scripts/profile_gpu_backend.py --config examples/td_1d_morse.yaml --out-csv results/gpu_profile.csv --out-md results/gpu_profile.md --out-json results/gpu_profile.summary.json --require-effective-cuda --eam-n-atoms 512 --eam-steps 2
+```
+
+This consolidated profiler keeps the old CPU-vs-GPU preset timing table and additionally records:
+- `gpu_perf_smoke` transfer/kernel metrics,
+- current `EAM/alloy` decomposition speedups,
+- optional `Phase E` comparison when you pass `--phase-e-worktree <path>`.
+
+Historical baseline note:
+- `Phase E` reference commit for CUDA-cycle comparisons is `efb864e` (last pre-PR-C02 high-level CuPy baseline).
+- Example temporary worktree:
+  `git worktree add /tmp/tdmd_phase_e efb864e`
 
 GPU verification docs:
 - `docs/GPU_BACKEND.md`

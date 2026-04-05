@@ -1,6 +1,6 @@
 # GPU Backend
 
-Active CUDA execution cycle: `docs/CUDA_EXECUTION_PLAN.md` (PR-C01..PR-C08, CuPy RawKernel).
+CUDA execution governance reference: `docs/CUDA_EXECUTION_PLAN.md` (PR-C01..PR-C08, CuPy RawKernel).
 Historical portability reference (archived): `docs/PORTABILITY_KOKKOS_PLAN.md`.
 
 ## Scope
@@ -8,7 +8,7 @@ GPU support is implemented as a refinement path over the CPU reference semantics
 The TD automaton (F/D/P/W/S transitions), dependency predicates, and invariants remain unchanged.
 Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CONTRACTS.md`.
 
-## Current Stage (PR-G01)
+## Historical Milestone (PR-G01)
 - Added backend selection abstraction in `tdmd/backend.py`.
 - Supported device selectors:
   - `auto`
@@ -20,8 +20,8 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - otherwise runtime warns and falls back to `cpu`.
 - `TDMD_FORCE_CPU=1` forces CPU when `run.device=auto`.
 
-## Active CUDA Cycle (CuPy RawKernel)
-- Migrating from CuPy high-level API to CuPy RawKernel (real CUDA C kernels).
+## Completed CUDA Cycle (CuPy RawKernel)
+- Migrated from CuPy high-level API to CuPy RawKernel (real CUDA C kernels).
 - Key improvements: O(N) neighbor lists, single-launch force kernels, fused EAM,
   persistent GPU state, CUDA stream overlap.
 - Stack: CuPy RawKernel primary; C++/CUDA extension as Plan B.
@@ -34,41 +34,71 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
 - No global barrier is introduced by backend selection.
 
 ## Notes
-- At this stage backend selection is wired and validated; full GPU kernels and multi-GPU execution are tracked in TODO Phase E (`PR-G02+`).
-- Profiling helper: `scripts/profile_gpu_backend.py` writes CPU-vs-GPU-track timing/parity artifacts (`results/gpu_profile.csv`, `results/gpu_profile.md`).
+- Historical `PR-G0x` sections below are retained as provenance for the archived `Phase E`
+  high-level CuPy baseline.
+- Profiling helper: `scripts/profile_gpu_backend.py` writes a consolidated CUDA-cycle report:
+  - preset timing/parity artifacts (`results/gpu_profile.csv`),
+  - operator markdown summary (`results/gpu_profile.md`),
+  - machine-readable summary (`results/gpu_profile.summary.json`),
+  - nested `gpu_perf_smoke` and `EAM/alloy` benchmark artifacts.
 
-## Current Stage (PR-G02)
+## Operator Playbook
+1. Keep CPU as the formal reference and treat every GPU change as refinement-only.
+2. Run hardware-strict CUDA acceptance whenever backend/runtime behavior is touched:
+   - `gpu_smoke_hw`
+   - baseline `gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke`
+3. Use `make gpu-profile` or the explicit `scripts/profile_gpu_backend.py` command before any
+   stack-policy discussion.
+4. Treat `gpu_perf_smoke` as a micro-perf warning signal, not as the sole Plan B trigger.
+   The smoke benchmark calibrates its synthetic kernel to a minimum timing floor before applying
+   `transfer_over_kernel`, so the signal is less sensitive to sub-millisecond timer jitter.
+5. Use representative `EAM/alloy` profiling (`512 atoms`, `2 steps`) plus optional `Phase E`
+   comparison against `efb864e` for Plan B decisions.
+6. For zone-layout decisions on large GPU EAM runs, use `eam_decomp_perf_gpu_heavy` for a single
+   representative point and `eam_decomp_zone_sweep_gpu` for a manual layout sweep before changing
+   any zoning policy.
+7. If large-run TD speedup is smaller than expected, run `eam_td_breakdown_gpu` before changing
+   kernels or zoning heuristics. It separates current runtime into `forces_full`, real device sync,
+   cell-list build, candidate enumeration, and zone bookkeeping so optimization work targets the
+   actual dominant cost.
+
+## Historical Milestone (PR-G02)
 - Added CUDA pair-force kernels for `LJ/Morse` in `tdmd/forces_gpu.py`.
 - `tdmd/serial.py` and `tdmd/td_local.py` dispatch to GPU pair kernels when:
   - `device` resolves to `cuda`,
   - potential is pairwise (`LJ/Morse`).
 - If CUDA backend is unavailable or potential is unsupported, code paths fall back to CPU force kernels.
 
-## Current Stage (PR-G03)
+## Historical Milestone (PR-G03)
 - Added GPU cell-list candidate path in `tdmd/forces_gpu.py::forces_on_targets_celllist_backend`.
 - Candidate sets are built with CPU-equivalent cell buckets and neighbor-stencil logic, then pair interactions are evaluated on GPU.
 - Parity checks are covered by tests (`tests/test_gpu_pair_kernels.py`) with CUDA-enabled assertions when hardware/backend is available.
 
-## Current Stage (PR-G04)
+## Historical Milestone (PR-G04)
 - Extended GPU force runtime to `table` potential in `tdmd/forces_gpu.py`.
 - `serial` and `td_local` can execute table force evaluations through the same backend-dispatch path used for pair kernels.
+- Current CUDA-cycle refinement: direct table target-force evaluation no longer relies on dense
+  broadcast fallback; it uses the neighbor-list-driven RawKernel path.
 
-## Current Stage (PR-G05)
+## Historical Milestone (PR-G05)
 - Added EAM/alloy CUDA force-evaluation path in `tdmd/forces_gpu.py` (`EAMAlloyPotential` branch).
 - `serial` and `td_local` can dispatch EAM force evaluation to GPU backend (with CPU fallback when CUDA is unavailable).
+- Current CUDA-cycle refinement: direct EAM/alloy target-force evaluation uses a device-side
+  two-pass neighbor pipeline (`density -> dF -> force`) over the candidate-union neighbor list,
+  removing the dense `cand x cand` path and Python-level element loops from the GPU branch.
 
-## Current Stage (PR-G06)
+## Historical Milestone (PR-G06)
 - `td_local` host automaton pipeline is wired to use GPU force backend for supported potentials while keeping existing TD scheduling/state logic unchanged.
 - Sync and async td_local parity checks are covered in `tests/test_gpu_pair_kernels.py` (CUDA-enabled checks where backend is available).
 
-## Current Stage (PR-G07)
+## Historical Milestone (PR-G07)
 - Added local-rank to device mapping helpers:
   - `tdmd/backend.py::local_rank_from_env`
   - `tdmd/backend.py::cuda_device_for_local_rank`
 - `tdmd/td_full_mpi.py` uses rank-local device mapping for `1 rank = 1 GPU` assignment when CUDA backend is selected.
 - MPI smoke coverage includes 2-rank and 4-rank static_rr cases (`examples/td_1d_morse_static_rr.yaml`, `examples/td_1d_morse_static_rr_smoke4.yaml`).
 
-## Current Stage (PR-G08)
+## Historical Milestone (PR-G08)
 - Added optional MPI transport refinements in `tdmd/td_full_mpi.py`:
   - `td.comm_overlap_isend`: nonblocking `Isend` path for payload delivery with batched `Waitall`.
   - `td.cuda_aware_mpi`: enables CUDA-aware transport mode when backend resolves to `cuda` (falls back to host-staging when inactive).
@@ -117,11 +147,45 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
   - `cluster_stability_smoke`.
 - These lanes validate overlap/cuda-aware transport behavior under profile-controlled conditions and do not alter TD automaton or backend semantics.
 
-## CUDA Cycle Progress (PR-C06, incremental)
+## CUDA Cycle Progress (PR-C05)
+- Persistent device-state caching now keeps positions/types resident on GPU across repeated force evaluations for the same host state object.
+- Runtime paths in `serial` and `td_local` explicitly mark updated host atoms as dirty after position-changing steps; the next CUDA force call syncs only the marked subset instead of re-uploading the full target/candidate union.
+- Static potential tables are cached on device for:
+  - `table` (`r_grid`, `f_grid`),
+  - `eam/alloy` (`grid_r`, `grid_rho`, `density`, `embed`, `phi`).
+- Direct external GPU force API semantics are preserved:
+  - default calls still perform conservative state syncs,
+  - incremental dirty-range sync is enabled only for runtime-managed paths that explicitly opt into it.
+
+## CUDA Cycle Progress (PR-C06)
 - Added TD-MPI compute-path GPU refinement hook in `tdmd/td_full_mpi.py`:
   - work-zone force callback uses GPU force dispatch when backend is CUDA,
   - automatic fallback to wrapped CPU potential keeps reference semantics.
+- TD-MPI runtime-managed CUDA path now uses the same persistent device-state policy as `serial` and `td_local`:
+  - GPU refinement force dispatch opts into `prefer_marked_dirty=True`,
+  - work-zone compute marks pre-migration atom ids dirty after Velocity-Verlet position updates,
+  - MPI recv path marks received atom ids dirty after host-staging updates,
+  - ensemble box rescale marks the device state dirty only when positions change.
 - This integration does not change TD automaton transitions or communication ordering.
 - Added TD-MPI overlap observability counters in runtime diagnostics:
   - `sendPackMs`, `sendWaitMs`, `recvPollMs`, `overlapWinMs`.
   These counters are consumed by overlap VerifyLab lanes as observability-only metrics.
+- PR-C06 acceptance keeps overlap/cuda-aware/cluster transport strict lanes green without introducing
+  new implicit barriers.
+
+## CUDA Cycle Progress (PR-C07)
+- RawKernel handles are now cached per backend/device in `tdmd/forces_gpu.py` to reduce repeated
+  Python-side kernel construction overhead without changing dispatch semantics.
+- `scripts/profile_gpu_backend.py` now consolidates:
+  - verify-preset CPU-vs-GPU timing ratios,
+  - `gpu_perf_smoke` transfer/kernel metrics,
+  - current `EAM/alloy` decomposition speedups,
+  - optional `Phase E` comparison against commit `efb864e` via `--phase-e-worktree`.
+- Added `scripts/bench_eam_td_breakdown_gpu.py` and manual preset `eam_td_breakdown_gpu` for
+  profiling why large single-GPU `EAM/eam-alloy` TD speedups may remain modest even when CUDA is
+  effective.
+- Current PR-C07 decision point result:
+  stay on CuPy RawKernel.
+  Representative `EAM/alloy` profiling (`512 atoms`, `2 steps`) shows current CUDA path beating
+  both CPU reference and the `Phase E` baseline commit `efb864e`; `C++/CUDA` extension remains
+  optional Plan B, not the active path.

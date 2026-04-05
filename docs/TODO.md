@@ -3,7 +3,41 @@
 > Orchestrator maintains this file.
 > Strategy focus: TD-correct MD for metals and alloys, with CPU reference first and GPU as refinement.
 > Baseline plan here is completed; post-baseline hardening (`v1`) is tracked in `docs/RISK_BURNDOWN_PLAN.md`; risk burndown `v2` is completed in `docs/RISK_BURNDOWN_PLAN_V2.md`.
-> Active next cycle: CUDA execution plan (`docs/CUDA_EXECUTION_PLAN.md`, PR-C01..PR-C08).
+> Completed current cycle: CUDA execution plan (`docs/CUDA_EXECUTION_PLAN.md`, PR-C01..PR-C08).
+> Ongoing work is maintenance/refinement of the completed CUDA stack and its strict gates.
+> Planned next maintenance theme: many-body TD locality hardening for `EAM/eam-alloy`, then
+> resource-aware TD auto-zoning on top of the corrected cost model.
+> Future ML-potential work should build on the same CPU-reference-first many-body contract.
+
+## Planned Maintenance - Many-Body TD Locality
+- [ ] PR-MB01 Many-body TD force-scope contract.
+  - DoD: make the runtime/observability distinction between full-system many-body evaluation and
+    target-local many-body evaluation explicit; freeze `eam_td_breakdown_gpu` as the large-run
+    baseline artifact for this track.
+- [ ] PR-MB02 CPU reference target-local `EAM/eam-alloy` TD path.
+  - DoD: async `td_local` many-body half-steps no longer rely on repeated full-system
+    `forces_full(ctx.r)[ids0]`; strict materials gates and `longrun_envelope_ci` stay green.
+- [ ] PR-MB03 GPU refinement for target-local many-body TD path.
+  - DoD: CUDA `EAM/eam-alloy` path consumes target/candidate-local work without repeated
+    full-system many-body passes; `eam_td_breakdown_gpu` shows reduced `forces_full` share on the
+    representative `10K` benchmark.
+
+## Planned Maintenance - TD Auto-Zoning
+- [ ] PR-ZA01 Resource-aware TD auto-zoning advisor.
+  - DoD: detect available CPU/GPU/MPI resources, enumerate geometry-valid TD/space layouts,
+    and emit a recommended zoning plan from benchmark evidence without changing runtime semantics.
+  - Evidence sources should include `eam_decomp_zone_sweep_gpu` for layout search and
+    `eam_td_breakdown_gpu` for separating true TD headroom from backend/runtime overhead.
+  - Depends on: `PR-MB02` and `PR-MB03`, so zoning recommendations are not built on a false
+    many-body ceiling.
+
+## Planned Future Extension - ML Potentials
+- [ ] PR-ML01 ML-potential runtime contract + CPU reference harness.
+  - DoD: versioned cutoff/descriptor/neighbor contract, CPU reference inference path, and explicit
+    no-hidden-barrier semantics suitable for TD scheduling.
+- [ ] PR-ML02 ML-potential VerifyLab/interop groundwork.
+  - DoD: strict fixture-driven CPU acceptance for at least one ML-potential family before any
+    GPU refinement or auto-zoning policy is introduced for that track.
 
 ## Mandatory Rules (all PRs)
 - [ ] Preserve TD semantics: no bypass/merge of F/D/P/W/S, no implicit global barriers.
@@ -124,21 +158,21 @@
 - [x] PR-VZ08 Documentation/prompt consolidation for visualization workflows.
   - DoD: `README.md`, `docs/VERIFYLAB.md`, `CODEX_MASTER_PROMPT.md`, and `AGENTS.md` aligned.
 
-## Phase H - CUDA Execution Cycle (active, CuPy RawKernel)
+## Phase H - CUDA Execution Cycle (completed, CuPy RawKernel)
 - [x] PR-C01 Governance refresh (docs/prompts only).
   - DoD: `AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`, `docs/PR_PLAN_GPU.md`,
     `docs/MODE_CONTRACTS.md`, `CODEX_MASTER_PROMPT.md` are CUDA-cycle consistent.
-- [ ] PR-C02 GPU neighbor list kernel (CuPy RawKernel).
+- [x] PR-C02 GPU neighbor list kernel (CuPy RawKernel).
   - DoD: O(N) cell-list discovery on device, parity vs CPU `build_cell_list`, no TD semantic changes.
-- [ ] PR-C03 LJ/Morse pair force kernel (CuPy RawKernel).
+- [x] PR-C03 LJ/Morse pair force kernel (CuPy RawKernel).
   - DoD: single kernel launch per evaluation, O(N) memory, strict parity vs CPU.
-- [ ] PR-C04 Table + EAM/alloy fused kernels (CuPy RawKernel).
+- [x] PR-C04 Table + EAM/alloy fused kernels (CuPy RawKernel).
   - DoD: device-side interpolation and two-pass EAM without Python element loops; materials strict gates pass.
-- [ ] PR-C05 Persistent GPU state + transfer elimination.
+- [x] PR-C05 Persistent GPU state + transfer elimination.
   - DoD: positions/types stay on device across timesteps; longrun envelope and ensemble strict lanes green.
-- [ ] PR-C06 TD-MPI CUDA integration + CUDA stream overlap hardening.
+- [x] PR-C06 TD-MPI CUDA integration + CUDA stream overlap hardening.
   - DoD: overlap/cluster/transport strict lanes pass without new barriers.
-- [ ] PR-C07 Profiling + kernel optimization (Plan B decision point).
+- [x] PR-C07 Profiling + kernel optimization (Plan B decision point).
   - DoD: documented speedup vs Phase E baseline and CPU reference; evaluate C++/CUDA if needed.
-- [ ] PR-C08 Consolidation (docs/ops/playbook).
+- [x] PR-C08 Consolidation (docs/ops/playbook).
   - DoD: governance/docs fully synchronized; Phase E CuPy high-level code archived if replaced.

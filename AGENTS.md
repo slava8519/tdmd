@@ -12,11 +12,16 @@ TDMD-TD implements a strict **Time Decomposition (TD)** molecular dynamics metho
 - Risk burndown `v2` (`docs/RISK_BURNDOWN_PLAN_V2.md`) is completed:
   - cluster performance/stability validation lanes are implemented,
   - expanded materials property-level references and strict gates are implemented.
-- Next active cycle is **CUDA execution**:
+- CUDA execution cycle (`PR-C01..PR-C08`) is implemented:
   - planning/governance source: `docs/CUDA_EXECUTION_PLAN.md`,
-  - execution order: `PR-C01..PR-C08`,
-  - primary stack for near-term PRs: `numba-cuda`,
-  - plan B after strict stabilization: `CuPy RawKernel` or C++/CUDA extension.
+  - current primary stack: `CuPy RawKernel`,
+  - current operator decision: stay on `CuPy RawKernel`,
+  - re-evaluate Plan B only with fresh `scripts/profile_gpu_backend.py` evidence,
+  - `C++/CUDA` extension remains optional fallback if RawKernel performance ceiling is reached.
+- Active post-CUDA maintenance priority:
+  - first remove repeated full-system many-body `forces_full` dependence from TD `EAM/eam-alloy`,
+  - then build resource-aware TD auto-zoning on top of the corrected many-body cost model,
+  - future ML-potential work must reuse the same CPU-reference-first many-body locality contract.
 - Current governance reference for mode guarantees and strict gates: `docs/MODE_CONTRACTS.md`.
 - Universal visualization/analysis contract (`PR-VZ01..PR-VZ08`) is implemented.
   Ongoing work is maintenance/refinement under `docs/VISUALIZATION.md`.
@@ -105,7 +110,7 @@ Scope: accelerator implementation without semantic drift.
 - Must preserve CPU equivalence (within documented tolerances) and avoid new global barriers.
 - Must provide profiling artifacts and deterministic testability guidance.
 - Must expose/propagate fallback diagnostics so CI can distinguish real CUDA execution from CPU fallback.
-- Must lead CUDA implementation/hardening (numba-cuda primary stack) while preserving CPU-reference semantics and current strict-gate policy.
+- Must lead CUDA implementation/hardening (`CuPy RawKernel` primary stack) while preserving CPU-reference semantics and current strict-gate policy.
 
 ## Agent: Visualization & Analysis Engineer
 Scope: universal output contract, post-processing, rendering adapters.
@@ -179,7 +184,7 @@ Constraints:
 - MUST keep verify v2 green.
 
 Deliverables:
-- CUDA backend hardening with `numba-cuda` as primary implementation stack.
+- CUDA backend hardening with `CuPy RawKernel` as primary implementation stack.
 - Strict parity and hardware-strict CUDA evidence (`gpu_smoke_hw` no-fallback).
 - VerifyLab integration for CUDA benchmarks and regression gates.
-- Optional Plan B evaluation (`CuPy RawKernel` or C++/CUDA extension) only after strict stabilization.
+- Optional Plan B evaluation (`C++/CUDA extension`) only after strict stabilization.

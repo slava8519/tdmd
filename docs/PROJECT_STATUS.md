@@ -1,4 +1,4 @@
-# Project status (as of v4.5.4)
+# Project status (post-CUDA maintenance cycle)
 
 TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD automaton.
 
@@ -28,20 +28,32 @@ TDMD-TD implements **Time Decomposition Molecular Dynamics** with a strict TD au
   direct `config.X` access; thin closure adapters bind helpers to local state.
 - **Config objects** (`tdmd/run_configs.py`): `TDLocalRunConfig`, `TDFullMPIRunConfig` with
   `from_legacy_kwargs()` for backward compatibility; replaces 50+ loose keyword arguments.
-- **Test suite**: 169 tests (28 added for `constants` and `zones` modules).
+- **Test suite**: 206 tests passing, 3 skipped in the current post-CUDA maintenance worktree.
 
 ## GPU Backend Status
-- **Phase E (complete)**: CuPy high-level API path — functionally correct, all strict gates pass.
-  Known performance limitations: O(N²) broadcast matrices, Python for-loops in cell-list
-  and EAM paths, no persistent GPU state.
-- **Phase H (active)**: CUDA execution cycle migrating to **CuPy RawKernel** — real CUDA C
-  kernels for neighbor lists, pair forces, EAM, with O(N) memory and single-launch execution.
-  See `docs/CUDA_EXECUTION_PLAN.md` for full PR queue (PR-C02..C08).
-- **Stack decision**: CuPy RawKernel chosen over Numba-CUDA. CuPy is already a dependency;
-  RawKernel provides full CUDA C control without adding a new runtime. Plan B: C++/CUDA
-  extension if RawKernel performance ceiling is reached.
+- **Phase E (complete, historical)**: CuPy high-level API path — functionally correct but
+  performance-limited by O(N²) broadcast matrices, Python loops, and lack of persistent GPU state.
+- **Phase H / CUDA execution cycle (complete)**: `PR-C01..PR-C08` implemented on **CuPy RawKernel**
+  with O(N) neighbor lists, fused EAM kernels, persistent device state, TD-MPI CUDA integration,
+  and profiling/operator guidance.
+- **Current stack decision**: stay on **CuPy RawKernel**.
+  Representative `gpu-profile` evidence shows current CUDA path beating both CPU reference and
+  the archived `Phase E` baseline commit `efb864e`.
+- **Plan B status**: `C++/CUDA` extension remains optional and should be reconsidered only after a
+  fresh representative profiler run.
 
 ## Next
-- Execute PR-C02 (GPU neighbor list kernel via CuPy RawKernel).
-- See `docs/CUDA_EXECUTION_PLAN.md` for the active cycle.
-- See `docs/GPU_BACKEND_API.md` for the strict backend contract.
+- Maintain the completed CUDA cycle under the current `CuPy RawKernel` policy.
+- Re-run `scripts/profile_gpu_backend.py` before any future Plan B decision.
+- Current large-run `EAM/eam-alloy` evidence shows single-GPU TD remains dominated by repeated
+  many-body `forces_full`, so the next algorithmic step is target-local many-body TD evaluation
+  rather than auto-zoning first.
+- Planned follow-up order:
+  1. make many-body TD force scope explicit,
+  2. deliver CPU-reference target-local `EAM/eam-alloy` TD path,
+  3. refine the GPU path on top of that corrected locality model,
+  4. only then build resource-aware TD auto-zoning as a recommendation layer.
+- Future ML-potential work should reuse the same many-body locality contract and still start from
+  CPU reference semantics before any GPU or zoning policy extension.
+- See `docs/CUDA_EXECUTION_PLAN.md` for the consolidated runbook and `docs/GPU_BACKEND_API.md`
+  for the strict backend contract.

@@ -217,9 +217,10 @@ Minimum for PR‑3:
 
 ## 10. Implementation choices: recommended first stack
 
-For a first correctness-oriented GPU implementation:
+For a first correctness-oriented GPU implementation aligned with the active CUDA cycle:
 - Prefer minimal Python integration:
-  - `numba.cuda` **or** `cupy.RawKernel`
+  - `cupy.RawKernel`
+- Treat `numba.cuda` as historical only; it is not in scope for the active cycle.
 - Avoid full C++/CUDA extension until correctness and contracts are stable.
 
 Later, for performance:

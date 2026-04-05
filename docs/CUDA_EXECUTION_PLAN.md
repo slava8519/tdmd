@@ -1,6 +1,6 @@
 # CUDA Execution Plan (Current Cycle)
 
-Status: active.
+Status: implemented through `PR-C08`; current stack decision is `CuPy RawKernel`.
 Scope owner: Orchestrator + GPU Backend Engineer + VerifyLab Engineer.
 
 ## Goal
@@ -146,6 +146,47 @@ These are the problems the current cycle solves.
   - Archive Phase E CuPy high-level code if fully replaced.
 - DoD:
   - Documentation and strict-gate ownership are fully synchronized.
+
+## Cycle Outcome
+- `PR-C01..PR-C08` are complete.
+- Current production stack remains **CuPy RawKernel**.
+- Current Plan B status:
+  `C++/CUDA` extension is not the active path.
+  Re-open that option only if representative `gpu-profile` evidence stops showing a clear
+  advantage over both CPU reference and the `Phase E` baseline commit `efb864e`.
+
+## Post-Cycle Handoff
+- Immediate next maintenance priority is not auto-zoning first; representative large-run
+  `EAM/eam-alloy` profiling shows the current single-GPU TD ceiling is still dominated by repeated
+  full-system many-body `forces_full`.
+- Handoff order:
+  1. define the many-body TD force-scope contract explicitly,
+  2. deliver CPU-reference target-local `EAM/eam-alloy` TD evaluation,
+  3. refine the GPU path on top of that corrected locality model,
+  4. only then build resource-aware TD auto-zoning recommendations.
+- Future ML-potential work should reuse the same many-body locality contract and still follow the
+  existing rule: CPU reference first, GPU refinement second.
+
+## Operator Playbook
+1. Run strict baseline acceptance:
+   - `.venv/bin/python -m pytest -q`
+   - `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict`
+   - `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset interop_smoke --strict`
+2. Run GPU acceptance for CUDA-touching changes:
+   - `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke --strict`
+   - `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_interop_smoke --strict`
+   - `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_metal_smoke --strict`
+   - `.venv/bin/python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke_hw --strict`
+3. Run representative profiler before any stack-policy decision:
+   - `python scripts/profile_gpu_backend.py --config examples/td_1d_morse.yaml --out-csv results/gpu_profile.csv --out-md results/gpu_profile.md --out-json results/gpu_profile.summary.json --require-effective-cuda --eam-n-atoms 512 --eam-steps 2`
+4. Optional `Phase E` comparison:
+   - `git worktree add /tmp/tdmd_phase_e efb864e`
+   - rerun `scripts/profile_gpu_backend.py ... --phase-e-worktree /tmp/tdmd_phase_e`
+   - `git worktree remove /tmp/tdmd_phase_e`
+5. Interpret results:
+   - `gpu_perf_smoke` is a micro-perf guardrail and may be noisy near threshold,
+   - representative `EAM/alloy` speedup vs CPU and vs `Phase E` carries more weight for Plan B decisions,
+   - CPU fallback remains failure for hardware-strict CUDA validation.
 
 ## Start Condition
 - Implementation starts from PR-C02.

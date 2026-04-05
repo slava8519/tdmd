@@ -23,15 +23,18 @@ Primary docs:
 - docs/TODO.md
 
 GOAL:
-Implement the next open PR in the CUDA cycle (PR-C*), starting from PR-C02 unless docs alignment is pending.
+Maintain and refine the completed CUDA cycle implementation without semantic drift.
+If a new GPU task requires a stack-policy decision, re-run `scripts/profile_gpu_backend.py`
+before proposing `C++/CUDA` Plan B.
 
 Stack policy:
-- Primary: numba-cuda.
-- Plan B (after strict stabilization): CuPy RawKernel or C++/CUDA extension.
+- Primary: CuPy RawKernel.
+- Current decision: stay on CuPy RawKernel.
+- Plan B (only with profiling evidence): C++/CUDA extension.
 
 Agents:
 - Orchestrator (plan + assign)
-- Agent A: CUDA backend implementation (numba-cuda first)
+- Agent A: CUDA backend implementation (CuPy RawKernel first)
 - Agent B: tests + VerifyLab strict regression
 - Agent C: docs/config/devex and backend evidence
 ```

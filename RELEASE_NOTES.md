@@ -1,6 +1,60 @@
+## 4.5.14
+- Added `scripts/bench_eam_td_breakdown_gpu.py` and manual preset `eam_td_breakdown_gpu` for
+  GPU-only `10K`-atom `EAM/eam-alloy` runtime attribution.
+- Added operator target `make eam-td-breakdown-gpu`.
+- Documented the breakdown workflow as the first profiling step before changing TD zoning policy
+  or claiming the current TD optimization ceiling.
+
+## 4.5.12
+- Stabilized `gpu_perf_smoke` methodology with a calibrated synthetic kernel timing floor.
+- Surfaced calibration metadata in `gpu_perf_smoke` summaries and `gpu-profile` markdown.
+- Kept `gpu_perf_smoke` thresholds unchanged while reducing timer-jitter sensitivity.
+- Added manual `eam_decomp_perf_gpu_heavy` benchmark for GPU-only `10K`-atom `EAM/eam-alloy`
+  TD-vs-space performance comparison outside the PR smoke lane.
+
+## 4.5.13
+- Added `scripts/bench_eam_zone_sweep_gpu.py` and manual preset `eam_decomp_zone_sweep_gpu`
+  for GPU-only `10K`-atom `EAM/eam-alloy` TD-vs-space zone-layout sweeps.
+- Added operator entrypoint `make eam-zone-sweep-gpu`.
+- Planned future resource-aware TD auto-zoning as an observability/recommendation layer in `docs/TODO.md`.
+
+## 4.5.11
+- Added PR-C08 docs/ops consolidation:
+  - marked CUDA execution cycle `PR-C01..PR-C08` complete in roadmap/plan docs,
+  - synchronized prompts/governance around the current `stay_on_rawkernel` decision,
+  - added operator playbook guidance for `gpu-profile`, representative `EAM/alloy` workload,
+    and optional `Phase E` comparison against commit `efb864e`.
+
+## 4.5.10
+- Added PR-C07 incremental profiling/runtime hardening:
+  - cached `CuPy RawKernel` handles per backend/device in `tdmd/forces_gpu.py`,
+  - upgraded `scripts/profile_gpu_backend.py` into a consolidated CUDA-cycle profiler with
+    markdown/json output, `gpu_perf_smoke`, and `EAM/alloy` benchmark integration,
+  - documented optional `Phase E` comparison against commit `efb864e`.
+
+## 4.5.9
+- Added PR-C06 TD-MPI CUDA refinement:
+  - `td_full_mpi` GPU force dispatch now opts into runtime-managed dirty-range syncing,
+  - work-zone compute and MPI receive paths mark only changed atom ids dirty,
+  - NPT box rescale marks device state dirty only when positions change.
+- Kept overlap/cuda-aware transport semantics and observability counters unchanged while passing the
+  overlap/cluster/transport strict matrix.
+
+## 4.5.8
+- Added PR-C05 CUDA runtime refinement:
+  - persistent device-state caching for positions/types in runtime-managed GPU paths,
+  - dirty-range host->device sync after host-side position updates,
+  - device caching for `table` and `eam/alloy` potential tables.
+
+## 4.5.7
+- Added `scripts/bench_eam_decomp_perf.py` for standard `EAM/alloy` comparison across
+  `space_cpu`, `space_gpu`, `time_cpu`, and `time_gpu`.
+- Added VerifyLab preset `eam_decomp_perf_smoke`; `make verify-smoke` and PR CI now run it
+  and print the benchmark table after completion.
+
 ## 4.5.6
 - Replaced active GPU planning strategy with CUDA-only execution cycle (`PR-C01..PR-C08`).
-- Added `docs/CUDA_EXECUTION_PLAN.md` (numba-cuda primary; plan B RawKernel/C++ CUDA extension).
+- Added `docs/CUDA_EXECUTION_PLAN.md` (`CuPy RawKernel` primary; `C++/CUDA` extension as Plan B).
 - Archived `docs/PORTABILITY_KOKKOS_PLAN.md` (historical only).
 - Aligned governance/docs/prompts (`AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`,
   `docs/PR_PLAN_GPU.md`, `docs/MODE_CONTRACTS.md`, `docs/VERIFYLAB.md`,

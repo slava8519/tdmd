@@ -83,11 +83,17 @@ CUDA perf smoke (transfer/kernel latency gate):
 ```bash
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_perf_smoke --strict
 ```
+EAM/alloy CPU-vs-GPU and time-vs-space decomposition benchmark:
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_perf_smoke --strict
+```
 
 ## CI Smoke
 - CI/unit tests use the config-defined random system (`cfg_system`) for a **single-step** serial vs TD-local check.
 - Strict CI gate:
   `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict`
+- Standard PR observability benchmark:
+  `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset eam_decomp_perf_smoke --strict`
 - Regression/diagnostic smoke (legacy profile, non-strict by default):
   `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_regression`
 - Backward-compatible alias:
@@ -183,6 +189,26 @@ For each row in `metrics.csv`:
 - `gpu_metal_smoke_hw`: current hardware-strict materials GPU gate (`require_effective_cuda`), fails on CUDA fallback.
 - `gpu_perf_smoke`: hardware-strict CUDA perf smoke (`require_effective_cuda`) reporting
   `h2d_full_ms`, `h2d_delta_ms`, `kernel_ms`, `d2h_ms`, `delta_over_full`, `transfer_over_kernel`.
+  The synthetic kernel is calibrated to a minimum timing floor before thresholding so the
+  micro-perf guardrail is less sensitive to sub-0.1 ms timer noise.
+- `eam_decomp_perf_smoke`: standard PR benchmark for `EAM/alloy` that emits a four-column table
+  (`space_cpu`, `space_gpu`, `time_cpu`, `time_gpu`) plus derived speedup rows for
+  GPU-vs-CPU and time-vs-space comparisons. This is an execution/observability benchmark, not a hard performance-threshold gate.
+- `eam_decomp_perf_gpu_heavy`: manual GPU-only `EAM/eam-alloy` benchmark for operator-side perf
+  evaluation. It runs a `10K`-atom model with heavier `steps/zones`, compares `space_gpu` vs
+  `time_gpu`, requires effective CUDA, and is intended to stay roughly within a single
+  multi-minute run budget rather than PR CI timing.
+- `eam_decomp_zone_sweep_gpu`: manual GPU-only zone sweep for `10K`-atom `EAM/eam-alloy`.
+  It compares `space_gpu` vs `time_gpu` across several valid zone layouts and emits a best-observed
+  layout summary. This is observability-only and is not a PR gate.
+- `eam_td_breakdown_gpu`: manual GPU-only `10K`-atom `EAM/eam-alloy` breakdown for the current
+  best observed `2-zone` layout. It compares `space_gpu` vs `time_gpu` and attributes runtime to
+  `forces_full`, nested device sync, cell-list build, candidate enumeration, and zone bookkeeping.
+  Use it to distinguish TD algorithmic headroom from backend/runtime overhead before changing
+  zoning policy.
+- `scripts/profile_gpu_backend.py`: consolidated CUDA-cycle profiling helper for operator use.
+  It combines verify-preset timing ratios, `gpu_perf_smoke`, `EAM/alloy` decomposition benchmarking,
+  and optional `Phase E` comparison into one markdown/json report.
 - `mpi_overlap_smoke`: strict TD-MPI A/B overlap verification (`comm_overlap_isend` off/on) for ranks 2 and 4.
 - `mpi_overlap_cudaaware_smoke`: strict TD-MPI A/B overlap verification with `cuda_aware_mpi=true` for overlap-on branch, plus CUDA-aware activity guard (`cuda_aware_active_ok=1`, no CPU fallback rank lines).
 - `mpi_overlap_async_observe_smoke`: strict TD-MPI A/B overlap verification with explicit async evidence gate (`async_send_msgs_max`/`async_send_bytes_max` > 0 for `overlap=1` rows).
@@ -215,6 +241,28 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `fallback_from_cuda`,
   - `reason`,
   - `warnings`.
+- `eam_decomp_perf_smoke` additionally persists:
+  - `results/<run_id>/eam_decomp_perf.csv`,
+  - `results/<run_id>/eam_decomp_perf.md`,
+  - `results/<run_id>/eam_decomp_perf.summary.json`,
+  and prints the benchmark markdown table to stdout after the run.
+- `eam_decomp_perf_gpu_heavy` additionally persists:
+  - `results/<run_id>/eam_decomp_perf_gpu_heavy.csv`,
+  - `results/<run_id>/eam_decomp_perf_gpu_heavy.md`,
+  - `results/<run_id>/eam_decomp_perf_gpu_heavy.summary.json`.
+- `eam_decomp_zone_sweep_gpu` additionally persists:
+  - `results/<run_id>/eam_decomp_zone_sweep_gpu.csv`,
+  - `results/<run_id>/eam_decomp_zone_sweep_gpu.md`,
+  - `results/<run_id>/eam_decomp_zone_sweep_gpu.summary.json`.
+- `eam_td_breakdown_gpu` additionally persists:
+  - `results/<run_id>/eam_td_breakdown_gpu.csv`,
+  - `results/<run_id>/eam_td_breakdown_gpu.md`,
+  - `results/<run_id>/eam_td_breakdown_gpu.summary.json`.
+- `scripts/profile_gpu_backend.py` additionally persists:
+  - `results/gpu_profile.csv`,
+  - `results/gpu_profile.md`,
+  - `results/gpu_profile.summary.json`,
+  plus nested artifacts for `gpu_perf_smoke` and current/optional-Phase-E `EAM/alloy` benchmark runs.
 - MPI overlap presets additionally persist per-rank overlap artifacts:
   - `results/<run_id>/mpi_overlap_n2.csv`,
   - `results/<run_id>/mpi_overlap_n2.md`,
@@ -233,6 +281,10 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `gpu_metal_smoke_hw`.
 - Acceptance policy remains unchanged:
   - hardware-strict GPU lanes fail on any CPU fallback.
+- Current operator guidance:
+  use `scripts/profile_gpu_backend.py` with representative `EAM/alloy` workload
+  (`--eam-n-atoms 512 --eam-steps 2`) before reconsidering the current `stay_on_rawkernel`
+  stack decision.
 
 ## Incident Bundle (R7)
 - Any `--strict` failure in `scripts/run_verifylab_matrix.py` auto-creates:
