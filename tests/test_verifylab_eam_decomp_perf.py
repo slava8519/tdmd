@@ -44,7 +44,7 @@ def test_verifylab_eam_decomp_perf_smoke_strict():
 
 
 def test_verifylab_eam_decomp_perf_gpu_heavy_preset_contract():
-    from scripts.run_verifylab_matrix import PRESETS
+    from tdmd.verifylab.presets import PRESETS
 
     preset = dict(PRESETS["eam_decomp_perf_gpu_heavy"])
     assert bool(preset.get("eam_decomp_perf_mode")) is True
@@ -60,7 +60,7 @@ def test_verifylab_eam_decomp_perf_gpu_heavy_preset_contract():
 
 
 def test_verifylab_eam_decomp_zone_sweep_gpu_preset_contract():
-    from scripts.run_verifylab_matrix import PRESETS
+    from tdmd.verifylab.presets import PRESETS
 
     preset = dict(PRESETS["eam_decomp_zone_sweep_gpu"])
     assert bool(preset.get("eam_decomp_zone_sweep_mode")) is True
@@ -72,7 +72,7 @@ def test_verifylab_eam_decomp_zone_sweep_gpu_preset_contract():
 
 
 def test_verifylab_eam_td_breakdown_gpu_preset_contract():
-    from scripts.run_verifylab_matrix import PRESETS
+    from tdmd.verifylab.presets import PRESETS
 
     preset = dict(PRESETS["eam_td_breakdown_gpu"])
     assert bool(preset.get("eam_td_breakdown_mode")) is True
