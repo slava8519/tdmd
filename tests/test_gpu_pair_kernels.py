@@ -6,7 +6,9 @@ import pytest
 from tdmd.backend import resolve_backend
 from tdmd.celllist import forces_on_targets_celllist
 from tdmd.forces_gpu import (
+    _GPU_POTENTIAL_CACHE,
     _cached_rawkernel,
+    _get_device_potential_state,
     build_neighbor_list_celllist_backend,
     forces_on_targets_celllist_backend,
     forces_on_targets_pair_backend,
@@ -14,6 +16,7 @@ from tdmd.forces_gpu import (
     get_last_neighbor_list_diagnostics,
     mark_device_state_dirty,
     reset_device_state_cache,
+    reset_device_potential_cache,
     reset_rawkernel_cache,
     supports_pair_gpu,
 )
@@ -115,6 +118,24 @@ def test_cached_rawkernel_separates_entries_by_kernel_name():
 
     assert k0 is not k1
     assert created == [("src0", "kernel0"), ("src1", "kernel1")]
+
+
+def test_device_potential_cache_is_keyed_by_object_not_integer_id():
+    class _FakeCP:
+        @staticmethod
+        def asarray(arr):
+            return np.asarray(arr)
+
+    pot = make_potential("table", {"file": "examples/interop/table_zero.table", "keyword": "ZERO"})
+    reset_device_potential_cache()
+    state = _get_device_potential_state(_FakeCP(), pot)
+    cache_key = int(id(pot))
+
+    assert state is not None
+    assert cache_key in _GPU_POTENTIAL_CACHE
+    pot_ref, cached_state = _GPU_POTENTIAL_CACHE[cache_key]
+    assert pot_ref() is pot
+    assert cached_state is state
 
 
 @pytest.mark.skipif(resolve_backend("auto").device != "cuda", reason="CUDA backend not available")

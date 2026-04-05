@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import weakref
 
 import numpy as np
 
@@ -71,7 +72,7 @@ class _DeviceEAMPotentialState:
     nr: int
 
 
-_GPU_POTENTIAL_CACHE: dict[int, object] = {}
+_GPU_POTENTIAL_CACHE: dict[int, tuple[weakref.ReferenceType[object], object]] = {}
 _RAWKERNEL_CACHE: dict[tuple[int, int, str], object] = {}
 
 
@@ -92,6 +93,26 @@ def reset_device_state_cache() -> None:
 
 def reset_rawkernel_cache() -> None:
     _RAWKERNEL_CACHE.clear()
+
+
+def reset_device_potential_cache() -> None:
+    _GPU_POTENTIAL_CACHE.clear()
+
+
+def _get_cached_potential_state(potential):
+    key = int(id(potential))
+    cached = _GPU_POTENTIAL_CACHE.get(key)
+    if cached is None:
+        return None
+    pot_ref, state = cached
+    if pot_ref() is potential:
+        return state
+    _GPU_POTENTIAL_CACHE.pop(key, None)
+    return None
+
+
+def _set_cached_potential_state(potential, state) -> None:
+    _GPU_POTENTIAL_CACHE[int(id(potential))] = (weakref.ref(potential), state)
 
 
 def mark_device_state_dirty(r: np.ndarray, ids: np.ndarray | None = None) -> None:
@@ -189,8 +210,7 @@ def _peek_device_state(*, r: np.ndarray):
 
 
 def _get_device_potential_state(cp, potential):
-    key = int(id(potential))
-    cached = _GPU_POTENTIAL_CACHE.get(key)
+    cached = _get_cached_potential_state(potential)
     if isinstance(potential, TablePotential):
         if isinstance(cached, _DeviceTablePotentialState):
             return cached
@@ -198,7 +218,7 @@ def _get_device_potential_state(cp, potential):
             d_r_grid=cp.asarray(np.asarray(potential.r_grid, dtype=np.float64)),
             d_f_grid=cp.asarray(np.asarray(potential.f_grid, dtype=np.float64)),
         )
-        _GPU_POTENTIAL_CACHE[key] = state
+        _set_cached_potential_state(potential, state)
         return state
     if isinstance(potential, EAMAlloyPotential):
         if isinstance(cached, _DeviceEAMPotentialState):
@@ -217,7 +237,7 @@ def _get_device_potential_state(cp, potential):
             nrho=nrho,
             nr=nr,
         )
-        _GPU_POTENTIAL_CACHE[key] = state
+        _set_cached_potential_state(potential, state)
         return state
     return None
 
