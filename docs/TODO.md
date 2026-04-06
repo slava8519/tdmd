@@ -8,7 +8,9 @@
 > Completed post-CUDA maintenance theme: many-body TD locality hardening for `EAM/eam-alloy`
 > plus a recommendation-only resource-aware TD auto-zoning advisor on top of the corrected cost
 > model.
-> Future ML-potential work should build on the same CPU-reference-first many-body contract.
+> CPU-reference ML groundwork is completed.
+> Next active maintenance theme: large-run single-GPU TD scaling via `1D` slab-wavefront
+> execution, with explicit independence/wavefront contracts before any runtime batching.
 
 ## Planned Maintenance - Many-Body TD Locality
 - [x] PR-MB01 Many-body TD force-scope contract.
@@ -52,6 +54,37 @@
   - Delivery note: `ml_reference_smoke` now provides a strict task-based VerifyLab lane for the
     `quadratic_density` `ml/reference` family, and `scripts/ml_reference_parity_pack.py --strict`
     validates `examples/interop/ml_reference_suite_v1.json`.
+
+## Planned Maintenance - Single-GPU TD Wavefront
+- [ ] PR-SW01 Single-GPU wavefront contract for `1D` slabs.
+  - DoD: define the formal notion of a wave of mutually independent slab zones on one GPU,
+    including halo/dependency constraints, no-hidden-barrier rules, and observability fields for
+    wave size / deferred zones / fallback-to-sequential reasons.
+  - Delivery note: this is a contract/invariant step first, not a performance-only shortcut.
+- [ ] PR-SW02 Representative large-run evidence pack for slab-wavefront viability.
+  - DoD: keep `al_crack_100k_compare_gpu` and the `z=1..12` TD sweep as first-class operator
+    evidence, plus at least one `EAM/eam-alloy` control benchmark showing where single-GPU TD
+    currently loses scaling as `z` grows.
+  - Evidence must distinguish:
+    - TD vs space at equal `z`,
+    - TD absolute runtime vs `z`,
+    - orchestration overhead vs force-kernel time.
+- [ ] PR-SW03 CPU/reference wave-batch scheduling proof harness.
+  - DoD: a deterministic shadow scheduler can group formally independent `1D` slabs into waves
+    without changing TD-observable results; verification proves equivalence against the current
+    sequential slab order on representative CPU cases.
+- [ ] PR-SW04 CUDA fused multi-zone wave execution.
+  - DoD: one GPU wave may contain several independent slabs; pair/table/EAM target-local work is
+    issued as a fused batch instead of zone-by-zone launches, with no new implicit global barrier.
+  - Focus first on slab-local neighbor reuse and neighbor-only slab exchange, not on generic 3D
+    block batching.
+- [ ] PR-SW05 Wavefront profiling, strict acceptance, and zoning-policy integration.
+  - DoD: representative single-GPU large-run artifacts show whether wavefront execution actually
+    improves TD absolute runtime vs current sequential `1D` slabs; `td_autozoning_advisor_gpu`
+    may consume the corrected wavefront cost model but must remain recommendation-only.
+  - Decision rule: if representative wavefront execution does not beat the best current
+    sequential-TD wall-clock for at least one large-run workload, close the track as a no-go and
+    keep `z ~ G` style guidance instead of forcing higher zone counts.
 
 ## Mandatory Rules (all PRs)
 - [ ] Preserve TD semantics: no bypass/merge of F/D/P/W/S, no implicit global barriers.
@@ -174,7 +207,7 @@
 
 ## Phase H - CUDA Execution Cycle (completed, CuPy RawKernel)
 - [x] PR-C01 Governance refresh (docs/prompts only).
-  - DoD: `AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`, `docs/PR_PLAN_GPU.md`,
+  - DoD: `AGENTS.md`, `docs/TODO.md`, `docs/CUDA_EXECUTION_PLAN.md`,
     `docs/MODE_CONTRACTS.md`, `CODEX_MASTER_PROMPT.md` are CUDA-cycle consistent.
 - [x] PR-C02 GPU neighbor list kernel (CuPy RawKernel).
   - DoD: O(N) cell-list discovery on device, parity vs CPU `build_cell_list`, no TD semantic changes.

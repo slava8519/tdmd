@@ -6,6 +6,7 @@ from typing import Optional, Union
 import numpy as np
 
 from .io.metrics import MetricsWriter
+from .io.telemetry import TelemetryWriter
 from .io.trajectory import TrajectoryWriter
 
 
@@ -13,6 +14,7 @@ from .io.trajectory import TrajectoryWriter
 class OutputBundle:
     traj: Optional[TrajectoryWriter] = None
     metrics: Optional[MetricsWriter] = None
+    telemetry: Optional[TelemetryWriter] = None
 
     def on_step(
         self,
@@ -31,12 +33,16 @@ class OutputBundle:
             self.traj.write(step, r, v, box_value=b)
         if self.metrics is not None:
             self.metrics.write(step, r, v, buffer_value=buffer_value, box_value=box_value)
+        if self.telemetry is not None:
+            self.telemetry.write(step, r, v, buffer_value=buffer_value, box_value=box_value)
 
     def close(self):
         if self.traj is not None:
             self.traj.close()
         if self.metrics is not None:
             self.metrics.close()
+        if self.telemetry is not None:
+            self.telemetry.close()
 
 
 @dataclass(frozen=True)
@@ -55,6 +61,13 @@ class OutputSpec:
     traj_channels: tuple[str, ...] = ()
     traj_compression: str = "none"
     write_output_manifest: bool = True
+    telemetry_path: Optional[str] = None
+    telemetry_every: int = 0
+    telemetry_stdout: bool = False
+    telemetry_heartbeat_sec: float = 0.0
+    total_steps: int = 0
+    device: str = "cpu"
+    mode: str = "serial"
 
 
 def make_output_bundle(spec: OutputSpec | None) -> OutputBundle:
@@ -64,10 +77,11 @@ def make_output_bundle(spec: OutputSpec | None) -> OutputBundle:
     Writers are only created if the corresponding path is set and `*_every > 0`.
     """
     if spec is None:
-        return OutputBundle(traj=None, metrics=None)
+        return OutputBundle(traj=None, metrics=None, telemetry=None)
 
     traj_writer = None
     metrics_writer = None
+    telemetry_writer = None
 
     if spec.traj_path and int(spec.traj_every) > 0:
         traj_writer = TrajectoryWriter(
@@ -93,5 +107,21 @@ def make_output_bundle(spec: OutputSpec | None) -> OutputBundle:
             atom_types=spec.atom_types,
             write_output_manifest=bool(spec.write_output_manifest),
         )
+    if (spec.telemetry_path or spec.telemetry_stdout) and int(spec.telemetry_every) > 0:
+        telemetry_writer = TelemetryWriter(
+            spec.telemetry_path,
+            total_steps=int(spec.total_steps),
+            mass=spec.mass,
+            atom_count=int(spec.atom_types.shape[0]),
+            device=str(spec.device),
+            mode=str(spec.mode),
+            write_output_manifest=bool(spec.write_output_manifest),
+            emit_stdout=bool(spec.telemetry_stdout),
+            heartbeat_every_sec=float(spec.telemetry_heartbeat_sec),
+            metadata={
+                "traj_path": spec.traj_path,
+                "metrics_path": spec.metrics_path,
+            },
+        )
 
-    return OutputBundle(traj=traj_writer, metrics=metrics_writer)
+    return OutputBundle(traj=traj_writer, metrics=metrics_writer, telemetry=telemetry_writer)

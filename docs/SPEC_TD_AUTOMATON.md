@@ -59,7 +59,7 @@ Code: `_deps_table_ok`, `_deps_owner_ok`, `_lag_ok` in `td_automaton.py`.
 - Time-blocking (`td.time_block_k` / `td.batch_size`) affects only send-queue dequeue granularity (`pop_send_batch`) and message batching cadence; it does not add transitions, does not change F/D/P/W/S semantics, and does not introduce global barriers.
 - Compute backend selection (`run.device`) is outside automaton semantics; it selects execution backend only and does not modify transitions/events.
   - current implementation: `auto|cpu|cuda`,
-  - planned portability extension: `auto|cpu|cuda|hip|kokkos` (see `docs/PORTABILITY_KOKKOS_PLAN.md`).
+  - backend-path extensions are refinements only and must not alter the TD automaton semantics.
 - GPU pair-force kernels for `LJ/Morse` (`serial`/`td_local`) are compute refinements only; automaton state transitions/messages remain unchanged.
 - MPI overlap transport flags (`td.comm_overlap_isend`, `td.cuda_aware_mpi`) change message transport strategy only (blocking vs nonblocking/cuda-aware path) and do not introduce new automaton states or transitions.
 - Hardware-strict VerifyLab backend gate (`require_effective_cuda` currently; planned `require_effective_gpu`) affects acceptance policy only and does not alter automaton states/events/transitions.

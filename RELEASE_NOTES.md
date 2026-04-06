@@ -1,3 +1,21 @@
+## 4.5.22
+- Added first-class Al microcrack operator benchmark scripts:
+  `scripts/generate_al_crack_task.py` and `scripts/bench_al_crack_compare.py`.
+- Added VerifyLab preset `al_crack_100k_compare_gpu` plus `make al-crack-100k-gpu` for a
+  `100K`-atom pure-Al `eam/alloy` GPU comparison with requested `1000` zones, exact-request TD
+  preflight reporting, strict-valid fallback comparison, and per-case telemetry artifacts.
+- VerifyLab markdown/stdout now prints the benchmark report for this mode, including observed step
+  counts and telemetry sidecar locations after timeout or completion.
+
+## 4.5.21
+- Added optional runtime telemetry JSONL output for `tdmd.main run` across `serial`, `td_local`,
+  and `td_full_mpi`.
+- Telemetry records step progress, ETA, model-state summaries, process resource usage, and CUDA
+  device/pool memory fields when the effective device is `cuda`.
+- Added `--telemetry`, `--telemetry-every`, `--telemetry-heartbeat-sec`, and
+  `--telemetry-stdout` CLI controls plus manifest/summary sidecars for long-running operator
+  benchmarks.
+
 ## 4.5.20
 - Completed `PR-ML02`: added strict VerifyLab and fixture-driven acceptance for the
   `quadratic_density` `ml/reference` family.
@@ -107,15 +125,13 @@
 ## 4.5.6
 - Replaced active GPU planning strategy with CUDA-only execution cycle (`PR-C01..PR-C08`).
 - Added `docs/CUDA_EXECUTION_PLAN.md` (`CuPy RawKernel` primary; `C++/CUDA` extension as Plan B).
-- Archived `docs/PORTABILITY_KOKKOS_PLAN.md` (historical only).
-- Aligned governance/docs/prompts (`AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`,
-  `docs/PR_PLAN_GPU.md`, `docs/MODE_CONTRACTS.md`, `docs/VERIFYLAB.md`,
+- Aligned governance/docs/prompts (`AGENTS.md`, `docs/TODO.md`,
+  `docs/MODE_CONTRACTS.md`, `docs/VERIFYLAB.md`,
   `CODEX_MASTER_PROMPT.md`, `CODEX_GPU_MASTER_PROMPT.md`, `README.md`).
 
 ## 4.5.5
 - Added `scripts/bootstrap_codex_env.sh` for one-command Codex workstation bootstrap
   (system tools + `.venv` + editable install with dev extras + shell aliases).
-- Added `CODEX_ENV_BOOTSTRAP_PROMPT.md` for fresh-machine Codex startup.
 - Added `pyproject.toml` packaging metadata for editable installs (`pip install -e .`)
   with explicit package discovery (`tdmd*`) and project dependencies.
 
@@ -290,3 +306,14 @@ These notes were historically tracked in `README.md` and are preserved here for 
 - `InteractionTableState` stores 3D AABB support (`lo/hi`) for `static_3d`.
 - Added 3D invariants: `hG3` (halo geo), `hV3` (halo in support), `tG3` (table candidate geo).
 - Introduced `geom_pbc.py` for AABB checks under periodic boundaries.
+# Unreleased
+
+## Docs / Governance
+- Refreshed post-CUDA roadmap to make the next active GPU direction explicit:
+  single-GPU `1D` slab-wavefront TD scaling for large metals/alloys workloads.
+- Recorded the current interpretation of the large-run Al microcrack evidence:
+  TD still beats space decomposition at equal zone count on one GPU, but current TD runtime
+  slows down as `z` increases because per-zone orchestration overhead grows faster than the
+  current single-GPU implementation can amortize.
+- Added a concrete PR queue for wavefront batching/fused execution and synchronized the
+  GPU/operator prompt with that priority.

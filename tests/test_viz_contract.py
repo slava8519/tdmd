@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 
 import numpy as np
 
 from tdmd.io.metrics import MetricsWriter
+from tdmd.io.telemetry import TelemetryWriter
 from tdmd.io.trajectory import TrajectoryWriter
 from tdmd.viz import MobilityPlugin, RegionOccupancyPlugin, SpeciesMixingPlugin, run_plugins
 
@@ -84,6 +86,67 @@ def test_metrics_manifest(tmp_path):
     assert m["schema"]["name"] == "tdmd.metrics.csv"
     assert m["atom_count"] == 2
     assert m["columns"][0] == "step"
+
+
+def test_telemetry_manifest_and_summary(tmp_path):
+    p = tmp_path / "telemetry.jsonl"
+    r = np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], dtype=float)
+    v = np.array([[0.1, 0.0, 0.0], [0.0, 0.2, 0.0]], dtype=float)
+    w = TelemetryWriter(
+        str(p),
+        total_steps=4,
+        mass=np.array([1.0, 2.0], dtype=float),
+        atom_count=2,
+        device="cpu",
+        mode="td_local",
+        write_output_manifest=True,
+        emit_stdout=False,
+        metadata={"case": "unit"},
+    )
+    w.write(0, r, v, box_value=10.0)
+    w.write(2, r + 0.1, v, box_value=10.0)
+    w.close(completed=False)
+    manifest_path = tmp_path / "telemetry.jsonl.manifest.json"
+    summary_path = tmp_path / "telemetry.jsonl.summary.json"
+    assert manifest_path.exists()
+    assert summary_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert manifest["schema"]["name"] == "tdmd.telemetry.jsonl"
+    assert manifest["atom_count"] == 2
+    assert "wall_sec" in manifest["fields"]
+    assert summary["records"] == 2
+    assert summary["completed"] is False
+    assert summary["last_record"]["step"] == 2
+    lines = p.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    row = json.loads(lines[-1])
+    assert row["device"] == "cpu"
+    assert row["mode"] == "td_local"
+    assert row["atom_count"] == 2
+
+
+def test_telemetry_heartbeat_records_between_steps(tmp_path):
+    p = tmp_path / "telemetry_heartbeat.jsonl"
+    r = np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], dtype=float)
+    v = np.array([[0.1, 0.0, 0.0], [0.0, 0.2, 0.0]], dtype=float)
+    w = TelemetryWriter(
+        str(p),
+        total_steps=10,
+        mass=1.0,
+        atom_count=2,
+        device="cpu",
+        mode="serial",
+        write_output_manifest=False,
+        emit_stdout=False,
+        heartbeat_every_sec=0.01,
+    )
+    w.write(0, r, v, box_value=10.0)
+    time.sleep(0.05)
+    w.close(completed=False)
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").strip().splitlines()]
+    assert rows[0]["record_kind"] == "observer"
+    assert any(row["record_kind"] == "heartbeat" for row in rows[1:])
 
 
 def test_viz_plugins_run(tmp_path):
@@ -222,3 +285,35 @@ def test_main_run_td_local_outputs_manifest(tmp_path):
     assert (tmp_path / "td_local_traj.lammpstrj.manifest.json").exists()
     assert metrics.exists()
     assert (tmp_path / "td_local_metrics.csv.manifest.json").exists()
+
+
+def test_main_run_td_local_telemetry_outputs_manifest_and_stdout(tmp_path):
+    telemetry = tmp_path / "td_local_telemetry.jsonl"
+    cmd = [
+        sys.executable,
+        "-m",
+        "tdmd.main",
+        "run",
+        "examples/td_1d_morse.yaml",
+        "--task",
+        "examples/interop/task.yaml",
+        "--mode",
+        "td_local",
+        "--device",
+        "cpu",
+        "--telemetry",
+        str(telemetry),
+        "--telemetry-every",
+        "1",
+        "--telemetry-stdout",
+    ]
+    out = subprocess.check_output(cmd, text=True)
+    assert "[telemetry]" in out
+    assert telemetry.exists()
+    assert (tmp_path / "td_local_telemetry.jsonl.manifest.json").exists()
+    assert (tmp_path / "td_local_telemetry.jsonl.summary.json").exists()
+    lines = telemetry.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) >= 2
+    last = json.loads(lines[-1])
+    assert "rss_mb" in last
+    assert "eta_sec" in last

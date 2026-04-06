@@ -2,7 +2,8 @@
 
 This plan starts after completion of `docs/TODO.md` (PR-01..PR-11, PR-G01..PR-G10).
 Status: completed and archived. Follow-up cycle `docs/RISK_BURNDOWN_PLAN_V2.md` is also completed.
-Current active follow-up cycle for GPU portability is tracked in `docs/PORTABILITY_KOKKOS_PLAN.md`.
+This plan is historical/completed provenance. Active GPU follow-up work is tracked in
+`docs/CUDA_EXECUTION_PLAN.md`.
 
 ## Goal
 Reduce technical and scientific risks while preserving TD formal semantics for metals/alloys workflows.

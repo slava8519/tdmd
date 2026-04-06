@@ -6,6 +6,12 @@ How to run:
 ```bash
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset smoke_ci --strict
 ```
+Long-run/operator telemetry during direct runtime runs:
+```bash
+python -m tdmd.main run --task examples/interop/task_eam_al.yaml --mode td_local --device cuda \
+  --telemetry results/eam_run/telemetry.jsonl --telemetry-every 5 \
+  --telemetry-heartbeat-sec 5 --telemetry-stdout
+```
 Long-run strict envelope gate:
 ```bash
 python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset longrun_envelope_ci --strict
@@ -222,6 +228,11 @@ For each row in `metrics.csv`:
   breakdown is enabled, it also attaches `pr_za01_v1` force-scope evidence for the recommended
   layout using `baseline_reference_version=pr_mb03_v1`. This is observability/operator guidance,
   not a runtime policy switch.
+- `al_crack_100k_compare_gpu`: manual operator benchmark for a pure-Al `100K` microcrack task with
+  `eam/alloy`, requested `1000` zones, and GPU-only execution. It emits an exact-request
+  `space_gpu_z1000` row, explicit TD preflight evidence for the requested `1000`-zone time
+  decomposition, and, when needed, a strict-valid common-zone fallback comparison with per-case
+  telemetry sidecars. Use it for realistic long-run GPU/operator comparison rather than PR CI.
 - `scripts/profile_gpu_backend.py`: consolidated CUDA-cycle profiling helper for operator use.
   It combines verify-preset timing ratios, `gpu_perf_smoke`, `EAM/alloy` decomposition benchmarking,
   and optional `Phase E` comparison into one markdown/json report.
@@ -285,6 +296,10 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `results/gpu_profile.md`,
   - `results/gpu_profile.summary.json`,
   plus nested artifacts for `gpu_perf_smoke` and current/optional-Phase-E `EAM/alloy` benchmark runs.
+- Direct `tdmd.main run` executions may additionally persist:
+  - `<telemetry>.manifest.json`,
+  - `<telemetry>.summary.json`,
+  when `--telemetry` is enabled.
 - MPI overlap presets additionally persist per-rank overlap artifacts:
   - `results/<run_id>/mpi_overlap_n2.csv`,
   - `results/<run_id>/mpi_overlap_n2.md`,

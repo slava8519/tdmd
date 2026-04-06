@@ -9,7 +9,9 @@ Project goals:
 - target **metals and alloys** workflows (`eam/alloy`, multi-type, multi-mass).
 
 Active cycle:
-- CUDA execution cycle: `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-C08`).
+- CUDA execution cycle (`PR-C01..PR-C08`) is complete.
+- Current maintenance focus: post-CUDA single-GPU TD scaling for large runs via
+  `1D` slab-wavefront execution planning (`docs/CUDA_EXECUTION_PLAN.md`).
 
 Versioning:
 - GitHub releases/tags + `RELEASE_NOTES.md` (README is intentionally not a changelog).
@@ -133,15 +135,31 @@ python -m tdmd.main run --task examples/interop/task_ml_reference.yaml --mode td
 `quadratic_density` `ml/reference` family. LAMMPS export is intentionally unsupported for this
 contract at this stage.
 
-### Outputs (Trajectory + Metrics + Manifests)
+### Outputs (Trajectory + Metrics + Telemetry + Manifests)
 
-Trajectory and metrics with schema sidecars:
+Trajectory, metrics, and progress/resource telemetry with schema sidecars:
 ```bash
 python -m tdmd.main run --task examples/interop/task.yaml --mode td_local --device cpu \
   --traj results/viz_demo/traj.lammpstrj.gz --traj-every 10 \
   --traj-channels unwrapped,image --traj-compression gz \
-  --metrics results/viz_demo/metrics.csv --metrics-every 10
+  --metrics results/viz_demo/metrics.csv --metrics-every 10 \
+  --telemetry results/viz_demo/telemetry.jsonl --telemetry-every 10 \
+  --telemetry-heartbeat-sec 5 \
+  --telemetry-stdout
 ```
+
+`--telemetry` writes newline-delimited JSON snapshots with:
+- step progress and ETA,
+- model state summaries (`box`, bounds, `vmax`, estimated temperature),
+- process resource usage (`rss_mb`, CPU user/system time),
+- CUDA device/pool memory fields when the effective device is `cuda`.
+
+`--telemetry-heartbeat-sec` adds wall-clock heartbeats between observer steps, so long GPU steps
+still emit fresh resource/progress lines instead of going silent.
+
+`--telemetry-stdout` prints compact progress lines during the run. This is especially useful for
+multi-minute GPU/operator benchmarks where trajectory/metrics are too sparse to answer
+"what step is it on?" or "is CUDA memory usage growing?" in real time.
 
 ## Verification
 
@@ -206,6 +224,25 @@ This manual advisor detects visible CPU/GPU/MPI resources, benchmarks strict-val
 layouts, and emits markdown/json/csv artifacts with a recommended TD layout. It does not change
 runtime zoning policy automatically.
 
+To run the first-class operator benchmark for a `100K`-atom Al microcrack on GPU with requested
+`1000` zones, exact-request TD preflight reporting, strict-valid fallback comparison, and per-case
+telemetry artifacts, run:
+```bash
+python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset al_crack_100k_compare_gpu --strict
+```
+
+This benchmark emits:
+- an exact-request `space_gpu_z1000` row,
+- explicit TD preflight evidence for the requested `1000`-zone time decomposition,
+- a strict-valid common-zone `space/time` comparison when the exact TD request is geometrically invalid,
+- per-case `telemetry.jsonl` + `summary.json` sidecars with observed step count, RSS, and CUDA memory.
+
+For live operator progress during the run, call the script directly so `--telemetry-stdout` is
+visible in real time:
+```bash
+python scripts/bench_al_crack_compare.py --strict --device cuda --require-effective-cuda --telemetry-stdout
+```
+
 For a broader CUDA-cycle profiling report, run:
 ```bash
 python scripts/profile_gpu_backend.py --config examples/td_1d_morse.yaml --out-csv results/gpu_profile.csv --out-md results/gpu_profile.md --out-json results/gpu_profile.summary.json --require-effective-cuda --eam-n-atoms 512 --eam-steps 2
@@ -251,9 +288,10 @@ Top-level structure:
 
 Start here:
 - `AGENTS.md` (roles, strict acceptance, ownership)
-- `CODEX_ENV_BOOTSTRAP_PROMPT.md` (fresh-machine Codex bootstrap prompt)
+- `docs/CODEX_RUNBOOK.md` (how to run/restart Codex locally)
+- `docs/PROJECT_STATUS.md` (current state and active next track)
 - `docs/TODO.md` (PR-sized tasks, critical order)
-- `docs/CUDA_EXECUTION_PLAN.md` (active CUDA execution cycle)
+- `docs/CUDA_EXECUTION_PLAN.md` (active GPU/post-CUDA execution plan)
 - `docs/MODE_CONTRACTS.md` (mode guarantees and required gates)
 
 Formal semantics:
@@ -281,9 +319,8 @@ See `CONTRIBUTING.md`.
 ## Documentation
 - Project status: `docs/PROJECT_STATUS.md`
 - Versioning: `docs/VERSIONING.md`
-- GPU roadmap: `docs/ROADMAP_GPU.md`
-- GPU PR plan: `docs/PR_PLAN_GPU.md`
 - Codex runbook: `docs/CODEX_RUNBOOK.md`
 - Codex env bootstrap script: `scripts/bootstrap_codex_env.sh`
+- Canonical Codex launcher: `scripts/run_codex_tdmd.sh`
 
 - Contracts (do-not-break rules): `docs/CONTRACTS.md`

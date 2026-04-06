@@ -2,7 +2,8 @@
 
 This cycle starts after completion of `docs/RISK_BURNDOWN_PLAN.md` (`PR-H01..PR-H08`).
 Status: completed (`PR-V2-01..PR-V2-08`).
-Next active cycle is tracked separately in `docs/PORTABILITY_KOKKOS_PLAN.md` (`PR-K01..PR-K10`).
+This plan is historical/completed provenance. Active GPU follow-up work is tracked in
+`docs/CUDA_EXECUTION_PLAN.md`.
 
 ## Goal
 Reduce the next high-impact risks for production-grade metals/alloys TDMD runs:

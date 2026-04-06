@@ -49,7 +49,7 @@ These are the problems the current cycle solves.
   - Replace old portability/Kokkos planning with CUDA-only governance.
   - Align prompts/contracts/TODO to current execution strategy.
 - DoD:
-  - `AGENTS.md`, `docs/TODO.md`, `docs/ROADMAP_GPU.md`, `docs/PR_PLAN_GPU.md`,
+  - `AGENTS.md`, `docs/TODO.md`, `docs/PROJECT_STATUS.md`,
     `docs/MODE_CONTRACTS.md`, `CODEX_MASTER_PROMPT.md` are consistent.
 - Gates:
   - docs-only sanity: `.venv/bin/python -m pytest -q`.
@@ -156,21 +156,81 @@ These are the problems the current cycle solves.
   advantage over both CPU reference and the `Phase E` baseline commit `efb864e`.
 
 ## Post-Cycle Handoff
-- Immediate next maintenance priority is not auto-zoning first; representative large-run
-  `EAM/eam-alloy` profiling shows the current single-GPU TD ceiling is still dominated by repeated
-  full-system many-body `forces_full`.
+- The many-body locality / advisor / ML-groundwork handoff is complete:
+  - many-body TD force-scope contract, **complete**
+  - CPU-reference target-local `EAM/eam-alloy` TD evaluation, **complete**
+  - GPU target-local many-body refinement, **complete**
+  - recommendation-only TD auto-zoning advisor, **complete**
+  - CPU-reference ML runtime + strict fixture groundwork, **complete**
+- New immediate maintenance priority: **single-GPU `1D` slab wavefront TD scaling**.
+- Representative large-run evidence now shows:
+  - TD still beats space decomposition at the same zone count on one GPU,
+  - but absolute TD runtime on one GPU currently degrades as `z` increases because the
+    implementation pays more zone orchestration / launch / halo duplication cost than it hides.
+- Interpretation rule:
+  this is not evidence against TD as a method; it is evidence that the current single-GPU runtime
+  needs a cheaper way to evaluate several formally independent slab zones than strict
+  one-zone-at-a-time execution.
 - Handoff order:
-  1. define the many-body TD force-scope contract explicitly, **complete**
-     (`pr_mb01_v1` large-run baseline via `eam_td_breakdown_gpu`),
-  2. deliver CPU-reference target-local `EAM/eam-alloy` TD evaluation, **complete**
-     (`td_local` CPU async many-body now uses `potential.forces_on_targets(...)`),
-  3. refine the GPU path on top of that corrected locality model, **complete**
-     (`td_local` CUDA async many-body now tries target/candidate-local GPU dispatch first),
-  4. only then build resource-aware TD auto-zoning recommendations, **complete**
-     (`td_autozoning_advisor_gpu` now emits recommendation-only markdown/json/csv artifacts from
-     detected resources, strict-valid layout search, and `eam_td_breakdown_gpu` evidence).
-- Future ML-potential work should reuse the same many-body locality contract and still follow the
-  existing rule: CPU reference first, GPU refinement second.
+  1. define the single-GPU slab-wavefront contract explicitly (`PR-SW01`),
+  2. keep large-run evidence first-class and representative (`PR-SW02`),
+  3. prove wave-batch equivalence against current sequential `1D` slab semantics (`PR-SW03`),
+  4. implement fused CUDA wave execution for independent slabs (`PR-SW04`),
+  5. then fold the corrected wavefront cost model into operator guidance and zoning advice
+     (`PR-SW05`).
+- Future ML-potential acceleration should reuse the same locality/wavefront contract and still
+  follow the existing rule: CPU reference first, GPU refinement second.
+
+## Post-Cycle Wavefront Track
+
+### PR-SW01: Single-GPU Wavefront Contract for `1D` Slabs
+- Scope:
+  - Define a wave of mutually independent slab zones on one GPU.
+  - Make explicit which slab combinations are allowed in one wave and which require deferred
+    execution because of halo/dependency overlap.
+  - Add observability vocabulary for wave size, deferred zones, and fallback-to-sequential causes.
+- DoD:
+  - No TD semantic shortcut.
+  - No new implicit global barrier.
+  - Contract is explicit in docs and runtime diagnostics before any batching optimization lands.
+
+### PR-SW02: Representative Large-Run Evidence Pack
+- Scope:
+  - Keep `al_crack_100k_compare_gpu` and the `z=1..12` TD sweep as operator evidence.
+  - Preserve at least one `EAM/eam-alloy` control benchmark so crack-specific geometry does not
+    become the only optimization target.
+- DoD:
+  - Artifacts distinguish TD-vs-space-at-equal-`z` from TD-absolute-runtime-vs-`z`.
+  - Breakdown separates force time from orchestration / neighbor / launch overhead.
+
+### PR-SW03: CPU/Reference Wave-Batch Equivalence Harness
+- Scope:
+  - Add a deterministic shadow scheduler that groups only formally independent `1D` slabs into
+    waves while preserving the sequential reference result.
+  - Prove equivalence on representative CPU cases before GPU batching becomes a runtime path.
+- DoD:
+  - Explicit verification evidence that wave grouping does not alter TD-observable results.
+
+### PR-SW04: CUDA Fused Multi-Zone Wave Execution
+- Scope:
+  - Execute several independent slabs in one GPU wave.
+  - Prefer fused launches / shared metadata / slab-local neighbor reuse over many tiny streams.
+  - Prioritize `1D` slabs and neighbor-only slab exchange before generic `3D` block batching.
+- DoD:
+  - Large-run single-GPU TD absolute runtime improves against the current sequential `1D` slab
+    baseline on representative workloads.
+  - No new implicit barrier and no CPU-reference semantic drift.
+
+### PR-SW05: Profiling, Strict Acceptance, and Advisor Integration
+- Scope:
+  - Profile wavefront occupancy, launch reduction, neighbor reuse, and memory pressure.
+  - Feed the corrected wavefront cost model into `td_autozoning_advisor_gpu` without making it
+    auto-apply zoning policy.
+- DoD:
+  - Representative artifacts show whether wavefront execution is a real scaling win.
+  - Recommendation-only advisor remains passive.
+  - If the wavefront path does not beat the best current sequential-TD wall-clock on at least one
+    representative large-run workload, stop the track and keep simpler `z ~ G` guidance.
 
 ## Operator Playbook
 1. Run strict baseline acceptance:

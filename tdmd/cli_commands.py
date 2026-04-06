@@ -54,6 +54,7 @@ def _make_output_observer(
     output,
     traj_every: int,
     metrics_every: int,
+    telemetry_every: int,
     box0: float,
 ) -> tuple[Callable, int]:
     def obs(step, r, v, box_cur=None):
@@ -62,8 +63,14 @@ def _make_output_observer(
             output.traj.write(step, r, v, box_value=(box_now, box_now, box_now))
         if output.metrics is not None and metrics_every > 0 and (step % metrics_every == 0):
             output.metrics.write(step, r, v, buffer_value=0.0, box_value=box_now)
+        if output.telemetry is not None and telemetry_every > 0 and (step % telemetry_every == 0):
+            output.telemetry.write(step, r, v, buffer_value=0.0, box_value=box_now)
 
-    obs_every = 1 if (output.traj is not None or output.metrics is not None) else 0
+    obs_every = (
+        1
+        if (output.traj is not None or output.metrics is not None or output.telemetry is not None)
+        else 0
+    )
     return obs, obs_every
 
 
@@ -310,9 +317,14 @@ def _cmd_run_legacy(
     metrics_every = (
         _resolve_every(int(args.metrics_every), int(thermo_every)) if args.metrics else 0
     )
+    telemetry_every = (
+        _resolve_every(int(args.telemetry_every), int(thermo_every))
+        if (args.telemetry or args.telemetry_stdout)
+        else 0
+    )
 
     output_spec = None
-    if args.traj or args.metrics:
+    if args.traj or args.metrics or args.telemetry or args.telemetry_stdout:
         output_spec = OutputSpec(
             traj_path=(args.traj if args.traj else None),
             traj_every=traj_every,
@@ -328,32 +340,45 @@ def _cmd_run_legacy(
             traj_channels=traj_channels,
             traj_compression=str(args.traj_compression),
             write_output_manifest=output_manifest,
+            telemetry_path=(args.telemetry if args.telemetry else None),
+            telemetry_every=telemetry_every,
+            telemetry_stdout=bool(args.telemetry_stdout),
+            telemetry_heartbeat_sec=float(args.telemetry_heartbeat_sec),
+            total_steps=int(n_steps),
+            device=str(backend.device),
+            mode=str(args.mode),
         )
 
     if args.mode == "serial":
         output = make_output_bundle(output_spec)
         obs, obs_every = _make_output_observer(
-            output=output, traj_every=traj_every, metrics_every=metrics_every, box0=float(box)
+            output=output,
+            traj_every=traj_every,
+            metrics_every=metrics_every,
+            telemetry_every=telemetry_every,
+            box0=float(box),
         )
-        run_serial(
-            r0,
-            v0,
-            mass,
-            box,
-            pot,
-            dt,
-            cutoff,
-            n_steps,
-            thermo_every=thermo_every,
-            observer=obs if obs_every else None,
-            observer_every=obs_every,
-            atom_types=atom_types,
-            ensemble_kind=ensemble_kind,
-            thermostat=thermostat,
-            barostat=barostat,
-            device=backend.device,
-        )
-        output.close()
+        try:
+            run_serial(
+                r0,
+                v0,
+                mass,
+                box,
+                pot,
+                dt,
+                cutoff,
+                n_steps,
+                thermo_every=thermo_every,
+                observer=obs if obs_every else None,
+                observer_every=obs_every,
+                atom_types=atom_types,
+                ensemble_kind=ensemble_kind,
+                thermostat=thermostat,
+                barostat=barostat,
+                device=backend.device,
+            )
+        finally:
+            output.close()
         return
 
     if args.mode == "td_local":
@@ -361,7 +386,11 @@ def _cmd_run_legacy(
             raise SystemExit("td_local mode requires config for TD settings")
         output = make_output_bundle(output_spec)
         obs, obs_every = _make_output_observer(
-            output=output, traj_every=traj_every, metrics_every=metrics_every, box0=float(box)
+            output=output,
+            traj_every=traj_every,
+            metrics_every=metrics_every,
+            telemetry_every=telemetry_every,
+            box0=float(box),
         )
         local_cfg = TDLocalRunConfig(
             atom_types=atom_types,
@@ -385,20 +414,22 @@ def _cmd_run_legacy(
             barostat=barostat,
             device=backend.device,
         )
-        run_td_local(
-            r0,
-            v0,
-            mass,
-            box,
-            pot,
-            dt=dt,
-            cutoff=cutoff,
-            n_steps=n_steps,
-            observer=obs if obs_every else None,
-            observer_every=obs_every,
-            config=local_cfg,
-        )
-        output.close()
+        try:
+            run_td_local(
+                r0,
+                v0,
+                mass,
+                box,
+                pot,
+                dt=dt,
+                cutoff=cutoff,
+                n_steps=n_steps,
+                observer=obs if obs_every else None,
+                observer_every=obs_every,
+                config=local_cfg,
+            )
+        finally:
+            output.close()
         return
 
     if cfg is None:

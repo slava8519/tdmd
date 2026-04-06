@@ -18,10 +18,17 @@ TDMD-TD implements a strict **Time Decomposition (TD)** molecular dynamics metho
   - current operator decision: stay on `CuPy RawKernel`,
   - re-evaluate Plan B only with fresh `scripts/profile_gpu_backend.py` evidence,
   - `C++/CUDA` extension remains optional fallback if RawKernel performance ceiling is reached.
-- Active post-CUDA maintenance priority:
-  - first remove repeated full-system many-body `forces_full` dependence from TD `EAM/eam-alloy`,
-  - then build resource-aware TD auto-zoning on top of the corrected many-body cost model,
-  - future ML-potential work must reuse the same CPU-reference-first many-body locality contract.
+- Completed post-CUDA maintenance foundation:
+  - many-body TD locality hardening (`PR-MB01..PR-MB03`) is implemented,
+  - resource-aware TD auto-zoning advisor (`PR-ZA01`) is implemented as recommendation-only,
+  - CPU-reference ML groundwork (`PR-ML01..PR-ML02`) is implemented.
+- Active next maintenance priority:
+  - single-GPU **1D slab wavefront** TD scaling for large metals/alloys runs,
+  - goal: allow multiple formally independent slab zones to be evaluated in one GPU wave
+    without introducing implicit barriers or semantic drift,
+  - prioritize 1D slab scheduling and neighbor-only slab exchange before any new 3D
+    optimization push,
+  - future ML-potential acceleration should build on the same explicit locality contract.
 - Current governance reference for mode guarantees and strict gates: `docs/MODE_CONTRACTS.md`.
 - Universal visualization/analysis contract (`PR-VZ01..PR-VZ08`) is implemented.
   Ongoing work is maintenance/refinement under `docs/VISUALIZATION.md`.
@@ -47,7 +54,7 @@ TDMD-TD implements a strict **Time Decomposition (TD)** molecular dynamics metho
    - if task goal explicitly validates GPU backend/hardware path, CPU fallback is not considered success.
 
 ## Agent: Orchestrator
-- Maintains `docs/ROADMAP.md`, `docs/TODO.md`, `docs/RISK_BURNDOWN_PLAN.md`, `docs/RISK_BURNDOWN_PLAN_V2.md`, `docs/CUDA_EXECUTION_PLAN.md`, and `docs/VISUALIZATION.md`.
+- Maintains `docs/PROJECT_STATUS.md`, `docs/TODO.md`, `docs/RISK_BURNDOWN_PLAN.md`, `docs/RISK_BURNDOWN_PLAN_V2.md`, `docs/CUDA_EXECUTION_PLAN.md`, and `docs/VISUALIZATION.md`.
 - Splits work into PR-sized tasks in critical order (verification -> CPU materials -> TD integration -> GPU).
 - Enforces CI discipline, reproducibility, and strict gates.
 - Assigns tasks to other agents.

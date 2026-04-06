@@ -277,13 +277,15 @@ def _init_td_output(output_spec: OutputSpec | None, *, rank: int):
     output_enabled = False
     out_traj_every = 0
     out_metrics_every = 0
+    out_telemetry_every = 0
     if output_spec is not None:
         out_traj_every = int(output_spec.traj_every) if output_spec.traj_every else 0
         out_metrics_every = int(output_spec.metrics_every) if output_spec.metrics_every else 0
-        output_enabled = (out_traj_every > 0) or (out_metrics_every > 0)
+        out_telemetry_every = int(output_spec.telemetry_every) if output_spec.telemetry_every else 0
+        output_enabled = (out_traj_every > 0) or (out_metrics_every > 0) or (out_telemetry_every > 0)
     if output_spec is not None and rank == 0:
         output = make_output_bundle(output_spec)
-    return output, output_enabled, out_traj_every, out_metrics_every
+    return output, output_enabled, out_traj_every, out_metrics_every, out_telemetry_every
 
 
 def _build_zones_and_automaton(
@@ -576,7 +578,7 @@ def _write_td_output_step(
 ) -> None:
     if not output_enabled:
         return
-    due, due_traj, due_metrics = output_due_fn(step)
+    due, due_traj, due_metrics, due_telemetry = output_due_fn(step)
     if not due:
         return
     r_all, v_all, bmean = gather_fn()
@@ -585,6 +587,8 @@ def _write_td_output_step(
             output.traj.write(step, r_all, v_all, box_value=(float(box), float(box), float(box)))
         if due_metrics and output.metrics is not None:
             output.metrics.write(step, r_all, v_all, buffer_value=bmean, box_value=float(box))
+        if due_telemetry and output.telemetry is not None:
+            output.telemetry.write(step, r_all, v_all, buffer_value=bmean, box_value=float(box))
 
 
 def _run_td_warmup_phase(
@@ -1679,13 +1683,15 @@ def _output_due_impl(
     output_enabled: bool,
     out_traj_every: int,
     out_metrics_every: int,
+    out_telemetry_every: int,
     step: int,
 ):
     if not output_enabled:
-        return False, False, False
+        return False, False, False, False
     due_traj = (out_traj_every > 0) and (step % out_traj_every == 0)
     due_metrics = (out_metrics_every > 0) and (step % out_metrics_every == 0)
-    return (due_traj or due_metrics), due_traj, due_metrics
+    due_telemetry = (out_telemetry_every > 0) and (step % out_telemetry_every == 0)
+    return (due_traj or due_metrics or due_telemetry), due_traj, due_metrics, due_telemetry
 
 
 def _gather_for_output_impl(
@@ -1841,7 +1847,7 @@ def _run_td_full_mpi_1d_legacy(
         rank=rank,
         size=size,
     )
-    output, output_enabled, out_traj_every, out_metrics_every = _init_td_output(
+    output, output_enabled, out_traj_every, out_metrics_every, out_telemetry_every = _init_td_output(
         output_spec,
         rank=rank,
     )
@@ -2007,7 +2013,13 @@ def _run_td_full_mpi_1d_legacy(
         )
 
     def _output_due(step: int):
-        return _output_due_impl(output_enabled, out_traj_every, out_metrics_every, step)
+        return _output_due_impl(
+            output_enabled,
+            out_traj_every,
+            out_metrics_every,
+            out_telemetry_every,
+            step,
+        )
 
     def _gather_for_output():
         return _gather_for_output_impl(zones, comm, r, v, rank)

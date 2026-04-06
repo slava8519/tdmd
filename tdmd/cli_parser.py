@@ -37,10 +37,23 @@ def build_parser(
     )
     pr.add_argument("--metrics", default="", help="Metrics CSV output path")
     pr.add_argument("--metrics-every", type=int, default=0, help="Metrics output period (steps)")
+    pr.add_argument("--telemetry", default="", help="Telemetry JSONL output path")
+    pr.add_argument("--telemetry-every", type=int, default=0, help="Telemetry output period (steps)")
+    pr.add_argument(
+        "--telemetry-heartbeat-sec",
+        type=float,
+        default=0.0,
+        help="Wall-clock heartbeat period for telemetry/resource updates between observer steps",
+    )
+    pr.add_argument(
+        "--telemetry-stdout",
+        action="store_true",
+        help="Emit compact telemetry progress lines to stdout",
+    )
     pr.add_argument(
         "--no-output-manifest",
         action="store_true",
-        help="Disable trajectory/metrics schema sidecar manifests",
+        help="Disable trajectory/metrics/telemetry schema sidecar manifests",
     )
     pr.add_argument("--trace-td", action="store_true", help="Enable TD trace logging")
     pr.add_argument("--trace-td-out", default="td_trace.csv", help="TD trace output path")

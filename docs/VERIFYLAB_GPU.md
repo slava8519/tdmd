@@ -146,6 +146,11 @@ The consolidated profiler keeps the legacy preset timing CSV and adds:
   zoning report. It detects visible CPU/GPU/MPI resources, benchmarks strict-valid candidate
   layouts, and emits markdown/json/csv artifacts with a recommended TD layout and optional
   `pr_za01_v1` breakdown evidence. It does not auto-apply runtime zoning policy.
+- `al_crack_100k_compare_gpu` is the first-class operator benchmark for a pure-Al `100K`
+  microcrack on GPU. It preserves an exact-request `space_gpu_z1000` row, records whether the
+  requested `time_gpu_z1000` TD layout is geometrically valid, falls back to a strict-valid common
+  zone count when needed, and persists per-case telemetry sidecars so timeout runs still report the
+  last observed step, RSS, and CUDA memory.
 - Current decision policy:
   stay on `CuPy RawKernel` unless representative profiling stops beating both CPU reference and
   the archived `Phase E` baseline.

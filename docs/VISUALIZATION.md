@@ -1,12 +1,16 @@
 # Universal Visualization Contract
 
 Status: v4.9 visualization track is implemented (`PR-VZ01..PR-VZ08`).
+Current maintenance refinement adds optional runtime telemetry JSONL for long-running/operator
+workloads without changing solver semantics.
 
 Visualization is a passive observability layer. It must not change TD scheduling, force semantics, or automaton states (`F/D/P/W/S`).
 
 ## Contract
 - Baseline trajectory format: LAMMPS dump (`.lammpstrj`), optional gzip (`.lammpstrj.gz`).
 - Baseline metrics format: CSV (`metrics.csv`).
+- Optional telemetry format: JSONL (`telemetry.jsonl`) plus summary sidecar
+  (`telemetry.jsonl.summary.json`).
 - Both outputs can emit sidecar manifests (`*.manifest.json`) with explicit schema/version metadata.
 - Column order is deterministic and capability-driven.
 
@@ -21,6 +25,15 @@ Optional trajectory channels:
 Metrics columns:
 - `step T E_kin E_pot P vmax buffer`
 
+Telemetry fields (JSONL snapshots):
+- `step`, `steps_total`, `step_fraction`, `wall_sec`, `delta_wall_sec`
+- `steps_per_sec_avg`, `steps_per_sec_inst`, `eta_sec`
+- `atom_count`, `box`, `coord_min`, `coord_max`
+- `speed_mean`, `vmax`, `temperature_est`
+- `rss_mb`, `peak_rss_mb`, `cpu_user_sec`, `cpu_system_sec`
+- `device`, `mode`
+- CUDA-only when available: `gpu_device_*`, `gpu_pool_*`
+
 ## Runtime Interface
 CLI (`tdmd.main run`) supports the same output controls for `serial`, `td_local`, and `td_full_mpi`:
 - `--traj`
@@ -29,6 +42,10 @@ CLI (`tdmd.main run`) supports the same output controls for `serial`, `td_local`
 - `--traj-compression none|gz`
 - `--metrics`
 - `--metrics-every`
+- `--telemetry`
+- `--telemetry-every`
+- `--telemetry-heartbeat-sec`
+- `--telemetry-stdout`
 - `--no-output-manifest`
 
 Example:
@@ -39,8 +56,21 @@ python -m tdmd.main run examples/td_1d_morse.yaml \
   --traj results/run/traj.lammpstrj.gz --traj-every 10 \
   --traj-channels unwrapped,image \
   --traj-compression gz \
-  --metrics results/run/metrics.csv --metrics-every 10
+  --metrics results/run/metrics.csv --metrics-every 10 \
+  --telemetry results/run/telemetry.jsonl --telemetry-every 10 \
+  --telemetry-heartbeat-sec 5 \
+  --telemetry-stdout
 ```
+
+Telemetry is a passive observability layer:
+- it does not feed back into force evaluation, scheduling, or automaton decisions;
+- it may be enabled independently of trajectory/metrics;
+- it is intended for operator progress/resource visibility on long runs and benchmarks;
+- optional heartbeats keep resource/progress visibility alive even when a single TD timestep is
+  itself long-running.
+- operator benchmark scripts may emit one telemetry stream per compared case; these sidecars use
+  the same schema and are intended to answer "which step completed?" and "what resources were
+  consumed?" after timeout or early termination, not just after successful completion.
 
 ## Post-Processing API
 `tdmd/viz.py` provides a mode-agnostic analysis API:
@@ -82,6 +112,8 @@ Adapters always emit JSON status artifacts. Missing external binaries are report
 - Streaming writes: trajectory and metrics are frame-streamed (bounded memory).
 - Compression: use `--traj-compression gz` for large runs when storage pressure dominates.
 - Keep manifests enabled in strict and reproducibility-focused runs.
+- Prefer `--telemetry-every` values that are coarse enough to avoid I/O noise on very large runs
+  while still giving actionable progress visibility.
 
 ## Verification Gate
 Strict visualization contract preset:

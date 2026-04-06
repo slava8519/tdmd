@@ -99,3 +99,22 @@ def test_verifylab_td_autozoning_advisor_gpu_preset_contract():
     assert int(preset.get("zone_cells_s", 0)) == 2
     assert bool(preset.get("require_effective_cuda")) is True
     assert str(preset.get("artifact_stem", "")) == "td_autozoning_advisor_gpu"
+
+
+def test_verifylab_al_crack_100k_compare_gpu_preset_contract():
+    from scripts.run_verifylab_matrix import PRESETS
+
+    preset = dict(PRESETS["al_crack_100k_compare_gpu"])
+    assert bool(preset.get("al_crack_compare_mode")) is True
+    assert str(preset.get("device", "")) == "cuda"
+    assert int(preset.get("timeout", 0)) == 600
+    assert int(preset.get("target_atoms", 0)) == 100000
+    assert float(preset.get("box", 0.0)) == 122.0
+    assert int(preset.get("steps", 0)) == 100
+    assert int(preset.get("requested_zones", 0)) == 1000
+    assert float(preset.get("cell_size", 0.0)) == 0.5
+    assert int(preset.get("telemetry_every", 0)) == 1
+    assert float(preset.get("telemetry_heartbeat_sec", 0.0)) == 5.0
+    assert bool(preset.get("telemetry_stdout")) is True
+    assert bool(preset.get("require_effective_cuda")) is True
+    assert str(preset.get("artifact_stem", "")) == "al_crack_100k_compare_gpu"

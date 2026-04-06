@@ -1,7 +1,6 @@
 # GPU Backend
 
 CUDA execution governance reference: `docs/CUDA_EXECUTION_PLAN.md` (PR-C01..PR-C08, CuPy RawKernel).
-Historical portability reference (archived): `docs/PORTABILITY_KOKKOS_PLAN.md`.
 
 ## Scope
 GPU support is implemented as a refinement path over the CPU reference semantics.
@@ -69,6 +68,29 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
    `td_autozoning_advisor_gpu` to turn current resource availability plus benchmark evidence into
    a recommendation-only TD zoning plan. This advisor must not mutate runtime policy implicitly;
    it is an operator decision aid, not an auto-applied scheduler.
+9. For large single-GPU crack-like workloads, do not interpret "smaller `z` is faster" as proof
+   that TD is the wrong method. Current representative evidence says:
+   - TD still beats space decomposition at equal `z`,
+   - the current one-zone-at-a-time `1D` slab implementation simply pays too much orchestration
+     cost as `z` grows.
+10. The next backend optimization track is therefore **single-GPU `1D` slab wavefront**
+    execution:
+   - batch several formally independent slabs in one GPU wave,
+   - prefer fused launches and slab-local neighbor reuse over many tiny streams,
+   - keep 3D decomposition as a correctness/general-purpose path rather than the first scaling
+     target for this work.
+
+## Next Active GPU Track
+- `PR-SW01..PR-SW05` define and validate single-GPU slab-wavefront execution.
+- Goal:
+  allow several formally independent `1D` slab zones to share one GPU wave without hidden
+  barriers and without changing TD-observable behavior.
+- Non-goal:
+  generic "concurrent arbitrary zones" execution. Independence must be explicit, proven, and
+  instrumented before any batching lands.
+- Go/no-go:
+  keep this track only if representative wavefront execution produces a real wall-clock win on at
+  least one large workload over the current sequential `1D` slab baseline.
 
 ## Historical Milestone (PR-G02)
 - Added CUDA pair-force kernels for `LJ/Morse` in `tdmd/forces_gpu.py`.

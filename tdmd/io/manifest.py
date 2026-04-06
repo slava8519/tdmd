@@ -67,3 +67,32 @@ def metrics_manifest_payload(
         "cutoff": float(cutoff),
         "atom_count": int(atom_count),
     }
+
+
+def telemetry_manifest_payload(
+    *,
+    path: str,
+    format_name: str,
+    schema_version: int,
+    fields: list[str],
+    atom_count: int,
+    total_steps: int,
+    device: str,
+    mode: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": "telemetry",
+        "schema": {
+            "name": str(format_name),
+            "version": int(schema_version),
+        },
+        "created_at_utc": _utc_now_iso(),
+        "path": str(path),
+        "fields": list(fields),
+        "atom_count": int(atom_count),
+        "total_steps": int(total_steps),
+        "device": str(device),
+        "mode": str(mode),
+        "metadata": dict(metadata or {}),
+    }

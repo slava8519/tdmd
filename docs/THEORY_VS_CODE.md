@@ -118,7 +118,7 @@ Mode-level guarantees and strict gate mapping are documented in `docs/MODE_CONTR
   - `tdmd/backend.py::resolve_backend` implements `run.device` selection (current: `auto|cpu|cuda`) with safe CPU fallback.
   - `tdmd.main run --device ...` overrides config device selection at runtime.
   - backend selection does not alter TD automaton behavior; CPU remains reference semantics.
-  - planned portability extension (NVIDIA + AMD via Kokkos) is tracked in `docs/PORTABILITY_KOKKOS_PLAN.md`; this is a backend-path extension only and does not alter TD semantics.
+  - backend-path extensions are refinement-only and must not alter TD semantics.
 - **GPU pair-kernel path (GPU track stage G02)**:
   - `tdmd/forces_gpu.py::forces_on_targets_pair_backend` implements CUDA force kernels for `LJ/Morse/table/eam-alloy`.
   - `serial` and `td_local` call the GPU pair kernel only for pair potentials and only with identical target/candidate semantics as CPU path.

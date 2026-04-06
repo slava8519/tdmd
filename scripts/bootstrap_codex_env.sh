@@ -40,6 +40,7 @@ if [ -f "$BASHRC" ]; then
       echo "$BLOCK_START"
       echo "alias fd='fdfind'"
       echo "alias bat='batcat'"
+      echo "alias codex-tdmd='bash ${ROOT_DIR}/scripts/run_codex_tdmd.sh'"
       echo "$BLOCK_END"
     } >> "$BASHRC"
   fi
@@ -48,3 +49,4 @@ fi
 echo "Bootstrap complete."
 echo "Reload shell: source ~/.bashrc"
 echo "Python env: .venv/bin/python"
+echo "Recommended Codex launch: bash scripts/run_codex_tdmd.sh"

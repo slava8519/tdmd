@@ -12,4 +12,5 @@ from .task import (
     task_to_arrays,
     validate_task_for_run,
 )
+from .telemetry import TelemetryWriter
 from .trajectory import TrajectoryWriter

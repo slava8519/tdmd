@@ -389,6 +389,29 @@ PRESETS = {
         require_effective_cuda=True,
         artifact_stem="td_autozoning_advisor_gpu",
     ),
+    "al_crack_100k_compare_gpu": dict(
+        al_crack_compare_mode=True,
+        device="cuda",
+        timeout=600,
+        target_atoms=100000,
+        box=122.0,
+        lattice_a=4.05,
+        steps=100,
+        cutoff=6.5,
+        dt=0.001,
+        requested_zones=1000,
+        cell_size=0.5,
+        seed=42,
+        velocity_std=0.020,
+        requested_space_timeout_sec=180,
+        compare_space_timeout_sec=180,
+        compare_time_timeout_sec=180,
+        telemetry_every=1,
+        telemetry_heartbeat_sec=5.0,
+        telemetry_stdout=True,
+        require_effective_cuda=True,
+        artifact_stem="al_crack_100k_compare_gpu",
+    ),
     "mpi_overlap_smoke": dict(
         mpi_overlap_mode=True,
         mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
@@ -1565,6 +1588,121 @@ def _run_td_autozoning_advisor_gpu(*, preset: dict, out_dir: str) -> dict[str, o
     return summary
 
 
+def _run_al_crack_compare_gpu(*, preset: dict, out_dir: str) -> dict[str, object]:
+    timeout = int(preset.get("timeout", 600))
+    artifact_stem = str(preset.get("artifact_stem", "al_crack_100k_compare_gpu"))
+    out_csv = os.path.join(out_dir, f"{artifact_stem}.csv")
+    out_md = os.path.join(out_dir, f"{artifact_stem}.md")
+    out_json = os.path.join(out_dir, f"{artifact_stem}.summary.json")
+    task_out = os.path.join(out_dir, f"{artifact_stem}.task.yaml")
+    telemetry_dir = os.path.join(out_dir, f"{artifact_stem}_telemetry")
+    cmd = [
+        sys.executable,
+        "scripts/bench_al_crack_compare.py",
+        "--task-out",
+        task_out,
+        "--out",
+        out_csv,
+        "--md",
+        out_md,
+        "--json",
+        out_json,
+        "--target-atoms",
+        str(int(preset.get("target_atoms", 100000))),
+        "--box",
+        str(float(preset.get("box", 122.0))),
+        "--lattice-a",
+        str(float(preset.get("lattice_a", 4.05))),
+        "--dt",
+        str(float(preset.get("dt", 0.001))),
+        "--steps",
+        str(int(preset.get("steps", 100))),
+        "--cutoff",
+        str(float(preset.get("cutoff", 6.5))),
+        "--device",
+        str(preset.get("device", "cuda")),
+        "--requested-zones",
+        str(int(preset.get("requested_zones", 1000))),
+        "--cell-size",
+        str(float(preset.get("cell_size", 0.5))),
+        "--eam-file",
+        str(preset.get("eam_file", "examples/potentials/eam_alloy/Al_zhou.eam.alloy")),
+        "--seed",
+        str(int(preset.get("seed", 42))),
+        "--velocity-std",
+        str(float(preset.get("velocity_std", 0.020))),
+        "--timeout-sec",
+        str(int(preset.get("timeout", 600))),
+        "--requested-space-timeout-sec",
+        str(int(preset.get("requested_space_timeout_sec", 180))),
+        "--compare-space-timeout-sec",
+        str(int(preset.get("compare_space_timeout_sec", 180))),
+        "--compare-time-timeout-sec",
+        str(int(preset.get("compare_time_timeout_sec", 180))),
+        "--telemetry-dir",
+        telemetry_dir,
+        "--telemetry-every",
+        str(int(preset.get("telemetry_every", 1))),
+        "--telemetry-heartbeat-sec",
+        str(float(preset.get("telemetry_heartbeat_sec", 5.0))),
+        "--strict",
+    ]
+    if bool(preset.get("require_effective_cuda", False)):
+        cmd.append("--require-effective-cuda")
+    if bool(preset.get("telemetry_stdout", False)):
+        cmd.append("--telemetry-stdout")
+
+    timed_out = False
+    proc_rc = 1
+    proc_out = ""
+    proc_err = ""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout + 30)
+        )
+        proc_rc = int(proc.returncode)
+        proc_out = str(proc.stdout or "")
+        proc_err = str(proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc_rc = 124
+        proc_out = str(getattr(exc, "stdout", "") or "")
+        proc_err = str(getattr(exc, "stderr", "") or "")
+
+    summary: dict[str, object] = {
+        "n": 0,
+        "total": 0,
+        "ok": 0,
+        "fail": 0,
+        "ok_all": False,
+        "worst": {},
+        "rows": [],
+        "by_case": {},
+        "external_script": "scripts/bench_al_crack_compare.py",
+        "external_returncode": int(proc_rc),
+        "external_timed_out": bool(timed_out),
+        "external_stdout": proc_out,
+        "external_stderr": proc_err,
+        "external_artifacts": {
+            "task": task_out,
+            "csv": out_csv,
+            "md": out_md,
+            "json": out_json,
+            "telemetry_dir": telemetry_dir,
+        },
+    }
+    if os.path.exists(out_json):
+        try:
+            with open(out_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                summary.update(loaded)
+        except Exception as exc:
+            summary["parse_error"] = str(exc)
+    summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("yaml", help="Path to YAML config (examples/*.yaml)")
@@ -1651,6 +1789,9 @@ def main():
     elif bool(p.get("td_autozoning_advisor_mode", False)):
         mode_summary = _run_td_autozoning_advisor_gpu(preset=p, out_dir=out_dir)
         mode_kind = "td_autozoning_advisor"
+    elif bool(p.get("al_crack_compare_mode", False)):
+        mode_summary = _run_al_crack_compare_gpu(preset=p, out_dir=out_dir)
+        mode_kind = "al_crack_compare"
     elif bool(p.get("task_mode", False)):
         task_path = args.task or str(p.get("task_path", "examples/interop/task.yaml"))
         rows = sweep_verify_task(
@@ -1850,6 +1991,10 @@ def main():
             f.write(
                 "- benchmark: mixed CPU/CUDA benchmark; per-case effective device is reported in the table below.\n"
             )
+        if mode_kind == "al_crack_compare":
+            f.write(
+                "- benchmark: operator-side Al microcrack benchmark with per-case telemetry artifacts and step/resource progress snapshots.\n"
+            )
         f.write(f"- strict_guardrails: `{strict_guardrails}`\n")
         f.write(f"- require_effective_cuda: `{require_effective_cuda}`\n")
         if envelope_summary is not None:
@@ -1910,7 +2055,7 @@ def main():
                         "- Next steps: inspect overlap/timing knobs and consult `docs/WFG_DIAGNOSTICS.md` for how to localize donors and hot spots.\n"
                     )
                     f.write("\n")
-            elif mode_kind == "eam_decomp_perf":
+            elif mode_kind in ("eam_decomp_perf", "al_crack_compare"):
                 report_markdown = str(summ.get("report_markdown", "") or "").strip()
                 if report_markdown:
                     f.write(report_markdown)
@@ -1978,7 +2123,7 @@ def main():
         f.write('\n```\n')
         f.write("\n")
 
-    if mode_kind == "eam_decomp_perf":
+    if mode_kind in ("eam_decomp_perf", "al_crack_compare"):
         report_markdown = str(summ.get("report_markdown", "") or "").strip()
         if report_markdown:
             print(report_markdown)
