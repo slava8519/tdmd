@@ -4,7 +4,6 @@ import argparse
 import csv
 import glob
 import os
-from collections import defaultdict
 
 import matplotlib
 
@@ -16,7 +15,7 @@ import numpy as np
 def _load_rows(paths: list[str]):
     rows = []
     for p in paths:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             r = csv.DictReader(f)
             for row in r:
                 row["__path"] = p

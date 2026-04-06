@@ -5,7 +5,7 @@ import os
 def test_golden_testcases_paper_exists_and_schema():
     path = os.path.join("golden", "testcases_paper.json")
     assert os.path.exists(path), f"golden file missing: {path}"
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     assert data.get("preset") == "paper"
     assert data.get("cases_mode") == "testcases"

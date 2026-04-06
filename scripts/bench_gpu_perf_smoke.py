@@ -9,7 +9,6 @@ import numpy as np
 
 from tdmd.backend import resolve_backend
 
-
 _RAWKERNEL_NAME = "tdmd_perf_axpy_loop"
 
 
@@ -70,9 +69,9 @@ def _calibrate_kernel(
         kernel = _make_kernel(cp, loop_iters)
         blocks = (int(n_vals) + int(threads) - 1) // int(threads)
 
-        def _kernel():
-            kernel(
-                (blocks,),
+        def _kernel(_kernel=kernel, _blocks=blocks):
+            _kernel(
+                (_blocks,),
                 (threads,),
                 (d_a, d_b, d_out, np.int32(n_vals)),
             )

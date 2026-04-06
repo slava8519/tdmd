@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 
@@ -104,7 +104,7 @@ def _collect_verify_task_artifacts(
     r0: np.ndarray,
     v0: np.ndarray,
     box: float,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     dt: float,
     cutoff: float,
     atom_types: np.ndarray | None,
@@ -390,21 +390,24 @@ def run_verify_v2(
         dr_time: list[float] = []
         dv_time: list[float] = []
 
-        def obsA_cb(step, r, v, box_cur=None):
-            box_use = float(box if box_cur is None else box_cur)
-            obsA.append((int(step), compute_observables(r, v, mass, box_use, potential, cutoff)))
-            posA[int(step)] = (r.copy(), v.copy())
+        def obsA_cb(step, r, v, box_cur=None, *, _box=box, _obsA=obsA, _posA=posA):
+            box_use = float(_box if box_cur is None else box_cur)
+            _obsA.append((int(step), compute_observables(r, v, mass, box_use, potential, cutoff)))
+            _posA[int(step)] = (r.copy(), v.copy())
 
-        def obsB_cb(step, r, v, box_cur=None):
-            box_use = float(box if box_cur is None else box_cur)
-            obsB.append((int(step), compute_observables(r, v, mass, box_use, potential, cutoff)))
+        def obsB_cb(
+            step, r, v, box_cur=None,
+            *, _box=box, _obsB=obsB, _posA=posA, _dr_time=dr_time, _dv_time=dv_time,
+        ):
+            box_use = float(_box if box_cur is None else box_cur)
+            _obsB.append((int(step), compute_observables(r, v, mass, box_use, potential, cutoff)))
             key = int(step)
-            if key in posA:
-                rA_step, vA_step = posA[key]
+            if key in _posA:
+                rA_step, vA_step = _posA[key]
                 dr_step = np.sqrt(((rA_step - r) ** 2).sum(axis=1))
                 dv_step = np.sqrt(((vA_step - v) ** 2).sum(axis=1))
-                dr_time.append(float(dr_step.max()) if dr_step.size else 0.0)
-                dv_time.append(float(dv_step.max()) if dv_step.size else 0.0)
+                _dr_time.append(float(dr_step.max()) if dr_step.size else 0.0)
+                _dv_time.append(float(dv_step.max()) if dv_step.size else 0.0)
 
         rA = r0.copy()
         vA = v0.copy()
@@ -778,7 +781,7 @@ def _run_verify_task_legacy(
     r0: np.ndarray,
     v0: np.ndarray,
     box: float,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     dt: float,
     cutoff: float,
     config: VerifyTaskRunConfig,
@@ -837,7 +840,7 @@ def run_verify_task(
     r0: np.ndarray,
     v0: np.ndarray,
     box: float,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     dt: float,
     cutoff: float,
     config: VerifyTaskRunConfig | None = None,

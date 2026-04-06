@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Union
+from typing import Any
 
 import numpy as np
 
@@ -26,7 +27,6 @@ from .force_dispatch import try_gpu_forces_on_targets
 from .forces_gpu import mark_device_state_dirty
 from .geom_pbc import mask_in_aabb_pbc
 from .output import OutputSpec, make_output_bundle
-from .overlap_cells import overlap_atoms_src_in_next_zonecells
 from .run_configs import TDFullMPIRunConfig
 from .state import kinetic_energy, temperature_from_ke
 from .td_automaton import TDAutomaton1W, ZoneRuntime
@@ -616,7 +616,7 @@ def _run_td_warmup_phase(
     verlet_k_steps: int,
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     dt: float,
     potential,
 ) -> None:
@@ -684,7 +684,7 @@ def _run_td_main_phase(
     box_ref_fn,
     thermo_every: int,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     r: np.ndarray,
     zones: list[ZoneRuntime],
     autom: TDAutomaton1W,
@@ -794,7 +794,7 @@ def _update_static_3d_halo_geometry_diag(
 def _cleanup_pending_deltas(ctx: _TDMPICommContext) -> None:
     """Bound pending delta buffer: drop too-old and overflow."""
     to_drop = []
-    for (zid, sid, st), parts in ctx.pending_deltas.items():
+    for (zid, sid, st), _parts in ctx.pending_deltas.items():
         z = ctx.zones[zid]
         if z.ztype != ZoneType.F and (int(z.step_id) - int(sid)) > ctx.max_step_lag:
             to_drop.append((zid, sid, st))
@@ -1429,7 +1429,7 @@ def _finish_compute_with_trace_impl(
     *,
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     dt: float,
     potential,
     cutoff: float,
@@ -1652,7 +1652,7 @@ def _apply_ensemble_impl(
     *,
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     potential,
     cutoff: float,
     atom_types,
@@ -1715,7 +1715,7 @@ def _gather_for_output_impl(
     r_all = np.zeros_like(r)
     v_all = np.zeros_like(v)
     if ids_list is not None:
-        for ids, rr, vv in zip(ids_list, r_list, v_list):
+        for ids, rr, vv in zip(ids_list, r_list, v_list, strict=True):
             if ids is None or len(ids) == 0:
                 continue
             r_all[ids] = rr
@@ -1807,7 +1807,7 @@ def _overlap_set_for_send_impl(
 def _run_td_full_mpi_1d_legacy(
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential,
     dt: float,
@@ -2187,7 +2187,7 @@ def _run_td_full_mpi_1d_legacy(
 def run_td_full_mpi_1d(
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential,
     dt: float,

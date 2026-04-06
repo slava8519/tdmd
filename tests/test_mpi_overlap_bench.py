@@ -56,7 +56,7 @@ def test_bench_mpi_overlap_simulated_outputs_async_columns(tmp_path):
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert out_csv.is_file()
-    with open(out_csv, "r", encoding="utf-8") as f:
+    with open(out_csv, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         assert reader.fieldnames is not None
         assert "async_send_msgs_max" in reader.fieldnames
@@ -113,7 +113,7 @@ def test_bench_mpi_overlap_simulated_cuda_active_guard(tmp_path):
     ]
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr or proc.stdout
-    with open(out_csv, "r", encoding="utf-8") as f:
+    with open(out_csv, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     overlap1 = [r for r in rows if r.get("overlap") == "1"]

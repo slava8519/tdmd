@@ -49,6 +49,7 @@ def resolve_backend(device: str = "auto") -> ComputeBackend:
         warnings.warn(
             f"CUDA backend requested but unavailable ({cp_reason}); falling back to CPU",
             RuntimeWarning,
+            stacklevel=2,
         )
         return ComputeBackend(device="cpu", xp=np, cuda_available=False, reason=cp_reason)
 

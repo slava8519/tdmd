@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -12,7 +11,7 @@ from .state import minimum_image
 class CellList:
     rc: float
     ncell: int
-    cell_atoms: Dict[Tuple[int, int, int], np.ndarray]
+    cell_atoms: dict[tuple[int, int, int], np.ndarray]
     idx: np.ndarray  # per atom cell index (N,3), for referenced atom subset mapping not needed
 
 
@@ -21,7 +20,7 @@ def build_cell_list(r: np.ndarray, ids: np.ndarray, box: float, rc: float) -> Ce
     ncell = max(1, int(box / rc))
     # compute indices for all atoms (for simplicity), but we only populate cell_atoms for ids
     idx_all = np.floor((r % box) / rc).astype(int) % ncell
-    buckets: Dict[Tuple[int, int, int], List[int]] = {}
+    buckets: dict[tuple[int, int, int], list[int]] = {}
     for i in ids.tolist():
         key = (int(idx_all[i, 0]), int(idx_all[i, 1]), int(idx_all[i, 2]))
         buckets.setdefault(key, []).append(int(i))

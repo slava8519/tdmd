@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -20,11 +20,11 @@ class EnsembleControl:
 @dataclass(frozen=True)
 class EnsembleSpec:
     kind: str
-    thermostat: Optional[EnsembleControl] = None
-    barostat: Optional[EnsembleControl] = None
+    thermostat: EnsembleControl | None = None
+    barostat: EnsembleControl | None = None
 
 
-def _as_control(obj: Any, key: str) -> Optional[EnsembleControl]:
+def _as_control(obj: Any, key: str) -> EnsembleControl | None:
     if obj is None:
         return None
     if isinstance(obj, EnsembleControl):
@@ -72,7 +72,7 @@ def build_ensemble_spec(
 
 
 def _param_float(
-    params: dict[str, Any], key: str, default: Optional[float] = None, *, positive: bool = False
+    params: dict[str, Any], key: str, default: float | None = None, *, positive: bool = False
 ) -> float:
     if key not in params:
         if default is None:
@@ -95,7 +95,7 @@ def _param_int(params: dict[str, Any], key: str, default: int) -> int:
 def _apply_berendsen_thermostat(
     *,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     dt: float,
     params: dict[str, Any],
 ) -> float:
@@ -123,10 +123,10 @@ def _apply_berendsen_barostat(
     r: np.ndarray,
     v: np.ndarray,
     box: float,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     potential: Any,
     cutoff: float,
-    atom_types: Optional[np.ndarray],
+    atom_types: np.ndarray | None,
     dt: float,
     params: dict[str, Any],
 ) -> tuple[float, float]:
@@ -165,11 +165,11 @@ def apply_ensemble_step(
     ensemble: EnsembleSpec,
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential: Any,
     cutoff: float,
-    atom_types: Optional[np.ndarray],
+    atom_types: np.ndarray | None,
     dt: float,
 ) -> tuple[float, float, float]:
     """Apply ensemble controls once at step boundary.

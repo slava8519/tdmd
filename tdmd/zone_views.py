@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import numpy as np
 
@@ -36,10 +35,10 @@ class HaloView:
 @dataclass(frozen=True)
 class ForceParams:
     cutoff: float
-    box: Tuple[float, float, float]
-    pbc: Tuple[bool, bool, bool] = (True, True, True)
+    box: tuple[float, float, float]
+    pbc: tuple[bool, bool, bool] = (True, True, True)
     precision: str = "f64"
-    potential: Optional[dict] = None
+    potential: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -54,9 +53,9 @@ class ComputeResult:
     fx: FloatArr
     fy: FloatArr
     fz: FloatArr
-    energy: Optional[float] = None
-    virial6: Optional[FloatArr] = None  # (xx,yy,zz,xy,xz,yz)
-    backend_diag: Optional[dict] = None
+    energy: float | None = None
+    virial6: FloatArr | None = None  # (xx,yy,zz,xy,xz,yz)
+    backend_diag: dict | None = None
 
 
 def _as_f64_contig(a: np.ndarray) -> np.ndarray:

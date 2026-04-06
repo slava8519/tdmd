@@ -4,7 +4,6 @@ import csv
 import os
 import time
 import warnings
-from typing import Optional
 
 from .zones import ZoneType
 
@@ -64,8 +63,8 @@ class TDTraceLogger:
         step_id: int,
         zone_id: int,
         event: str,
-        state_before: Optional[str] = None,
-        state_after: Optional[str] = None,
+        state_before: str | None = None,
+        state_after: str | None = None,
         halo_ids_count: int = 0,
         migration_count: int = 0,
         lag: int = 0,
@@ -99,4 +98,5 @@ class TDTraceLogger:
             warnings.warn(
                 f"TDTraceLogger.close() failed for {self.path!r}: {exc!r}",
                 RuntimeWarning,
+                stacklevel=2,
             )

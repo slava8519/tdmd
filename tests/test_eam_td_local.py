@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
+import tdmd.td_local as td_local_mod
 from tdmd.io import load_task, task_to_arrays, validate_task_for_run
 from tdmd.potentials import make_potential
 from tdmd.serial import run_serial
-import tdmd.td_local as td_local_mod
 from tdmd.td_local import run_td_local
 
 

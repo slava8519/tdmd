@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import Union
-
 import numpy as np
 
 
 def normalize_mass(
-    mass: Union[float, np.ndarray], *, n_atoms: int
+    mass: float | np.ndarray, *, n_atoms: int
 ) -> tuple[float | None, np.ndarray | None, float | None]:
     """Normalize a mass input into either a scalar or a per-atom array.
 

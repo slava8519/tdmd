@@ -5,7 +5,6 @@ import argparse
 import csv
 import json
 import math
-import os
 import signal
 import subprocess
 import sys
@@ -19,6 +18,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from generate_al_crack_task import build_al_crack_state, write_al_crack_task_yaml
+
 from tdmd.backend import resolve_backend
 from tdmd.forces_gpu import reset_device_state_cache
 from tdmd.io import TelemetryWriter, load_task, task_to_arrays, validate_task_for_run

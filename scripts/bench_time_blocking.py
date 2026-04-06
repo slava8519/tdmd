@@ -8,8 +8,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import yaml
 
@@ -163,7 +163,7 @@ def main() -> int:
         print(f"[bench-time-blocking] invalid --k-list: {exc}", file=sys.stderr)
         return 2
 
-    with open(cfg_path, "r", encoding="utf-8") as f:
+    with open(cfg_path, encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f)
 
     steps = int(args.steps)

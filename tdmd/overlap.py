@@ -39,7 +39,7 @@ def overlap_atoms_src_in_next_verlet(
         dr = minimum_image(dr, box)
         r2 = (dr * dr).sum(axis=1)
         mask = (r2 > 0.0) & (r2 <= rc2)
-        for j, ok in zip(js.tolist(), mask.tolist()):
+        for j, ok in zip(js.tolist(), mask.tolist(), strict=True):
             if ok and int(j) in src_set:
                 halo.add(int(j))
     return halo

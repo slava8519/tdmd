@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
-
 from .golden import GoldenSeries
 from .golden import load as load_golden
 from .golden import save as save_golden
@@ -32,9 +30,9 @@ def generate_golden(*, cfg, potential, out_path: str, steps: int, every: int, ca
         r0, v0, box = make_case_state(case, cfg.system.mass)
         obs = []
 
-        def cb(step, r, v):
-            o = compute_observables(r, v, cfg.system.mass, box, potential, cfg.run.cutoff)
-            obs.append((int(step), o))
+        def cb(step, r, v, *, _box=box, _obs=obs):
+            o = compute_observables(r, v, cfg.system.mass, _box, potential, cfg.run.cutoff)
+            _obs.append((int(step), o))
 
         r = r0.copy()
         v = v0.copy()
@@ -92,9 +90,9 @@ def check_against_golden(
         r0, v0, box = make_case_state(case, cfg.system.mass)
         obs = []
 
-        def cb(step, r, v):
-            o = compute_observables(r, v, cfg.system.mass, box, potential, cfg.run.cutoff)
-            obs.append((int(step), o))
+        def cb(step, r, v, *, _box=box, _obs=obs):
+            o = compute_observables(r, v, cfg.system.mass, _box, potential, cfg.run.cutoff)
+            _obs.append((int(step), o))
 
         r = r0.copy()
         v = v0.copy()

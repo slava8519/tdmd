@@ -14,7 +14,7 @@ The public ``run_td_local()`` signature is preserved for backward compatibility.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -64,7 +64,7 @@ class _TDLocalCtx:
     cutoff: float
     n_steps: int
     atom_types: np.ndarray
-    mass: Union[float, np.ndarray]
+    mass: float | np.ndarray
 
     # resolved from mass
     mass_scalar: float | None
@@ -112,7 +112,7 @@ class _TDLocalCtx:
 
     # ---- helpers --------------------------------------------------------
 
-    def accel(self, f: np.ndarray, ids: Optional[np.ndarray] = None) -> np.ndarray:
+    def accel(self, f: np.ndarray, ids: np.ndarray | None = None) -> np.ndarray:
         """Convert force → acceleration respecting per-atom mass."""
         if self.mass_arr is None:
             return f * self.inv_mass
@@ -805,7 +805,7 @@ def _forces_3d_post(
 def _run_td_local_legacy(
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential,
     dt: float,
@@ -939,7 +939,7 @@ def describe_many_body_force_scope(
 def run_td_local(
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential,
     dt: float,

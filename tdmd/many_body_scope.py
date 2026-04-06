@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-
 ManyBodyEvaluationScope = Literal["full_system", "target_local"]
 ManyBodyConsumptionScope = Literal["all_atoms", "target_ids"]
 

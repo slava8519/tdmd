@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
@@ -222,7 +221,7 @@ def _strip_comment(line: str) -> str:
 
 
 def import_lammps_data(path: str) -> LammpsData:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         raw = [ln.rstrip("\n") for ln in f]
 
     # header scan

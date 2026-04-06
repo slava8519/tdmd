@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import os
 import sys
 import tempfile
 from datetime import datetime
@@ -66,7 +65,7 @@ def main() -> int:
 
     by_property = dict(summary.get("by_property", {}) or {})
     prop_ok = True
-    for grp, st in by_property.items():
+    for _grp, st in by_property.items():
         if int(st.get("fail", 0)) != 0:
             prop_ok = False
             break

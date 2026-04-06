@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import List, Optional, Tuple
+from enum import StrEnum
 
 import numpy as np
 
 from .constants import GEOM_EPSILON
 
 
-class ZoneType(str, Enum):
+class ZoneType(StrEnum):
     F = "f"
     D = "d"
     P = "p"
@@ -39,13 +38,13 @@ class ZoneLayout1DCells:
     box: float
     cell_size: float
     zones_total: int
-    pattern_cells: Optional[List[int]] = None
+    pattern_cells: list[int] | None = None
     zone_cells_w: int = 1
     zone_cells_s: int = 1
     min_zone_width: float = 0.0
     strict_min_width: bool = False
 
-    def build(self) -> List[Zone]:
+    def build(self) -> list[Zone]:
         n_cells_total = max(1, int(round(self.box / self.cell_size)))
         dz_cell = self.box / n_cells_total
 
@@ -64,7 +63,7 @@ class ZoneLayout1DCells:
                 )
                 if self.strict_min_width:
                     raise ValueError(msg)
-                warnings.warn(msg, RuntimeWarning)
+                warnings.warn(msg, RuntimeWarning, stacklevel=2)
             pat = [max(p, min_cells) for p in pat]
 
         zones = []
@@ -97,12 +96,12 @@ class ZoneLayout1DCells:
                 msg = f"Zone width < min_zone_width ({min_width:.6g}): {zlist}"
                 if self.strict_min_width:
                     raise ValueError(msg)
-                warnings.warn(msg, RuntimeWarning)
+                warnings.warn(msg, RuntimeWarning, stacklevel=2)
 
         return zones
 
 
-def assign_atoms_to_zones(r: np.ndarray, zones: List[Zone], box: float):
+def assign_atoms_to_zones(r: np.ndarray, zones: list[Zone], box: float):
     z = r[:, 2]
     for zn in zones:
         if zn.n_cells <= 0 or zn.z0 >= zn.z1:
@@ -132,7 +131,7 @@ def compute_zone_buffer_skin(
     Kb: float,
     skin_from_buffer: bool = True,
     lag_steps: int = 0,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     if ids.size == 0:
         return 0.0, 0.0
     speeds = np.linalg.norm(v[ids], axis=1)
@@ -142,7 +141,7 @@ def compute_zone_buffer_skin(
     return b, skin
 
 
-def zones_overlapping_interval(z0: float, z1: float, zones: List[Zone]) -> List[int]:
+def zones_overlapping_interval(z0: float, z1: float, zones: list[Zone]) -> list[int]:
     ids = []
     for z in zones:
         if z.n_cells <= 0 or z.z0 >= z.z1:
@@ -152,7 +151,7 @@ def zones_overlapping_interval(z0: float, z1: float, zones: List[Zone]) -> List[
     return ids
 
 
-def zones_overlapping_range_pbc(z0: float, z1: float, box: float, zones: List[Zone]) -> List[int]:
+def zones_overlapping_range_pbc(z0: float, z1: float, box: float, zones: list[Zone]) -> list[int]:
     if box <= 0:
         return []
     width = z1 - z0
@@ -182,7 +181,7 @@ class Zone3D:
     zid: int
     lo: np.ndarray  # (3,)
     hi: np.ndarray  # (3,)
-    idx: Tuple[int, int, int]  # (ix,iy,iz)
+    idx: tuple[int, int, int]  # (ix,iy,iz)
     n_cells: int
     ztype: ZoneType = ZoneType.F
     atom_ids: np.ndarray = field(default_factory=lambda: np.empty((0,), dtype=np.int32))
@@ -207,13 +206,13 @@ class ZoneLayout3DBlocks:
     nx: int
     ny: int
     nz: int
-    zones: List[Zone3D]
+    zones: list[Zone3D]
 
     @staticmethod
-    def build(box: float, nx: int, ny: int, nz: int) -> "ZoneLayout3DBlocks":
+    def build(box: float, nx: int, ny: int, nz: int) -> ZoneLayout3DBlocks:
         assert nx > 0 and ny > 0 and nz > 0
         dx, dy, dz = box / nx, box / ny, box / nz
-        zones: List[Zone3D] = []
+        zones: list[Zone3D] = []
         zid = 0
         for iz in range(nz):
             for iy in range(ny):
@@ -230,7 +229,7 @@ class ZoneLayout3DBlocks:
         iz %= self.nz
         return iz * (self.nx * self.ny) + iy * self.nx + ix
 
-    def indices_from_zid(self, zid: int) -> Tuple[int, int, int]:
+    def indices_from_zid(self, zid: int) -> tuple[int, int, int]:
         nxy = self.nx * self.ny
         iz = zid // nxy
         rem = zid - iz * nxy
@@ -272,7 +271,7 @@ def assign_atoms_to_zones_3d(r: np.ndarray, layout: ZoneLayout3DBlocks) -> None:
 
 def zones_overlapping_aabb_pbc(
     lo: np.ndarray, hi: np.ndarray, box: float, layout: ZoneLayout3DBlocks
-) -> List[int]:
+) -> list[int]:
     """Return zone ids whose blocks intersect the periodic AABB [lo,hi] (lo/hi in unwrapped coords).
 
     We treat `lo` and `hi` as possibly outside [0,box) due to expansion by cutoff.

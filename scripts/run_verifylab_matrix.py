@@ -557,7 +557,7 @@ def apply_envelope_gate(rows, envelope_file: str) -> dict[str, object]:
     }
     if not rows:
         return out
-    with open(envelope_file, "r", encoding="utf-8") as f:
+    with open(envelope_file, encoding="utf-8") as f:
         spec = json.load(f)
     out["version"] = int(spec.get("envelope_version", 0))
     base_rows = list(spec.get("rows", []))
@@ -634,7 +634,7 @@ def _detect_mpirun() -> str:
 def _read_overlap_csv(path: str) -> list[dict[str, str]]:
     if not os.path.exists(path):
         return []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
@@ -973,7 +973,7 @@ def _run_external_cluster_script(
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1049,7 +1049,7 @@ def _run_materials_property_gate(*, preset: dict, out_dir: str) -> dict[str, obj
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 total = int(loaded.get("total", 0))
@@ -1147,7 +1147,7 @@ def _run_ml_reference_parity_gate(*, preset: dict, out_dir: str) -> dict[str, ob
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1218,7 +1218,7 @@ def _run_gpu_perf_smoke(*, preset: dict, out_dir: str) -> dict[str, object]:
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1321,7 +1321,7 @@ def _run_eam_decomp_perf_smoke(*, preset: dict, out_dir: str) -> dict[str, objec
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1402,7 +1402,7 @@ def _run_eam_decomp_zone_sweep_gpu(*, preset: dict, out_dir: str) -> dict[str, o
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1489,7 +1489,7 @@ def _run_eam_td_breakdown_gpu(*, preset: dict, out_dir: str) -> dict[str, object
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1578,7 +1578,7 @@ def _run_td_autozoning_advisor_gpu(*, preset: dict, out_dir: str) -> dict[str, o
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1693,7 +1693,7 @@ def _run_al_crack_compare_gpu(*, preset: dict, out_dir: str) -> dict[str, object
     }
     if os.path.exists(out_json):
         try:
-            with open(out_json, "r", encoding="utf-8") as f:
+            with open(out_json, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 summary.update(loaded)
@@ -1913,7 +1913,7 @@ def main():
             else:
                 if not os.path.exists(golden_path):
                     raise SystemExit(f'Golden file not found: {golden_path}')
-                with open(golden_path, 'r', encoding='utf-8') as f:
+                with open(golden_path, encoding='utf-8') as f:
                     g0 = json.load(f)
 
                 # strict compare of ok flags and metric upper bounds

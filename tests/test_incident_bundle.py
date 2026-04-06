@@ -18,7 +18,7 @@ def test_write_incident_bundle_manifest(tmp_path):
 
     bundle_dir = write_incident_bundle(str(run_dir), reason="unit_test", extra={"k": "v"})
     manifest_path = os.path.join(bundle_dir, "manifest.json")
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
     assert manifest["reason"] == "unit_test"
     assert manifest["extra"]["k"] == "v"

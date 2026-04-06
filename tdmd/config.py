@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 import yaml
 
@@ -16,7 +16,7 @@ _ENSEMBLE_KINDS = {"nve", "nvt", "npt"}
 @dataclass
 class PotentialConfig:
     kind: PotentialType
-    params: Dict[str, Any]
+    params: dict[str, Any]
 
 
 @dataclass
@@ -39,7 +39,7 @@ class TDConfig:
     zones_nz: int = 1
     zone_cells_w: int = 1
     zone_cells_s: int = 1
-    zone_cells_pattern: Optional[List[int]] = None
+    zone_cells_pattern: list[int] | None = None
     traversal: TraversalType = "snake"
     fast_sync: bool = False
     strict_fast_sync: bool = False
@@ -99,14 +99,14 @@ class RunConfig:
 @dataclass
 class EnsembleControlConfig:
     kind: str
-    params: Dict[str, Any]
+    params: dict[str, Any]
 
 
 @dataclass
 class EnsembleConfig:
     kind: str = "nve"
-    thermostat: Optional[EnsembleControlConfig] = None
-    barostat: Optional[EnsembleControlConfig] = None
+    thermostat: EnsembleControlConfig | None = None
+    barostat: EnsembleControlConfig | None = None
 
 
 @dataclass
@@ -174,7 +174,7 @@ def _parse_ensemble_config(root: dict[str, Any]) -> EnsembleConfig:
 
 
 def load_config(path: str) -> Config:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         d = yaml.safe_load(f)
 
     td = d["td"]

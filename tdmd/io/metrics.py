@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import os
 import warnings
-from typing import Union
 
 import numpy as np
 
@@ -19,7 +18,7 @@ class MetricsWriter:
         self,
         path: str,
         *,
-        mass: Union[float, np.ndarray],
+        mass: float | np.ndarray,
         box: float,
         cutoff: float,
         potential,
@@ -85,4 +84,5 @@ class MetricsWriter:
             warnings.warn(
                 f"MetricsWriter.close() failed for {self.path!r}: {exc!r}",
                 RuntimeWarning,
+                stacklevel=2,
             )

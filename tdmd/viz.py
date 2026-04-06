@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import gzip
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -20,7 +21,7 @@ class TrajectoryFrame:
 def _open_text(path: str):
     if str(path).lower().endswith(".gz"):
         return gzip.open(path, "rt", encoding="utf-8")
-    return open(path, "r", encoding="utf-8")
+    return open(path, encoding="utf-8")
 
 
 def _col_dtype(name: str):

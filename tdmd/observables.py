@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Union
-
 import numpy as np
 
 from .state import minimum_image
@@ -10,7 +8,7 @@ from .state import minimum_image
 def compute_observables(
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential,
     cutoff: float,

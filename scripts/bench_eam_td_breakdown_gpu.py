@@ -11,14 +11,13 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
+from bench_eam_decomp_perf import _build_alloy_state
 
+import tdmd.forces_gpu as forces_gpu
+import tdmd.td_local as td_local
 from tdmd.backend import resolve_backend
 from tdmd.forces_gpu import get_last_device_state_sync_diagnostics, reset_device_state_cache
 from tdmd.potentials import make_potential
-import tdmd.forces_gpu as forces_gpu
-import tdmd.td_local as td_local
-
-from bench_eam_decomp_perf import _build_alloy_state
 
 
 @dataclass

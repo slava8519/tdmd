@@ -15,8 +15,8 @@ from tdmd.forces_gpu import (
     get_last_device_state_sync_diagnostics,
     get_last_neighbor_list_diagnostics,
     mark_device_state_dirty,
-    reset_device_state_cache,
     reset_device_potential_cache,
+    reset_device_state_cache,
     reset_rawkernel_cache,
     supports_pair_gpu,
 )

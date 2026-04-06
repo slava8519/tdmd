@@ -82,7 +82,7 @@ def test_run_serial_uses_eam_backend_and_preserves_total_momentum():
 
 
 def test_eam_matches_lammps_reference_fixture():
-    with open("examples/interop/eam_lammps_ref_demo.json", "r", encoding="utf-8") as f:
+    with open("examples/interop/eam_lammps_ref_demo.json", encoding="utf-8") as f:
         ref = json.load(f)
     thr = ref["thresholds"]
     for case in ref["cases"]:

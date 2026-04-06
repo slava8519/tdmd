@@ -41,6 +41,6 @@ def save(path: str, series: list[GoldenSeries]):
 
 
 def load(path: str) -> list[GoldenSeries]:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         d = json.load(f)
     return from_dict(d)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -12,7 +11,7 @@ from .state import minimum_image
 class ZoneCells:
     rc: float
     ncell: int
-    cell_atoms: Dict[Tuple[int, int, int], np.ndarray]
+    cell_atoms: dict[tuple[int, int, int], np.ndarray]
     idx_all: np.ndarray  # (N,3) cell indices for all atoms
     candidate_ids: np.ndarray
     r_ref: np.ndarray  # (Nc,3) snapshot for candidates
@@ -23,7 +22,7 @@ def _build_zone_cells(r: np.ndarray, box: float, candidate_ids: np.ndarray, rc: 
     rc = float(rc)
     ncell = max(1, int(box / rc))
     idx_all = np.floor((r % box) / rc).astype(int) % ncell
-    buckets: Dict[Tuple[int, int, int], List[int]] = {}
+    buckets: dict[tuple[int, int, int], list[int]] = {}
     for i in candidate_ids.tolist():
         key = (int(idx_all[i, 0]), int(idx_all[i, 1]), int(idx_all[i, 2]))
         buckets.setdefault(key, []).append(int(i))
@@ -50,7 +49,7 @@ def _max_disp(r: np.ndarray, box: float, candidate_ids: np.ndarray, r_ref: np.nd
 
 class ZoneCellCache:
     def __init__(self):
-        self._cache: Dict[int, ZoneCells] = {}
+        self._cache: dict[int, ZoneCells] = {}
 
     def get(
         self,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Union
 
 import numpy as np
 
@@ -12,9 +11,9 @@ from .io.trajectory import TrajectoryWriter
 
 @dataclass
 class OutputBundle:
-    traj: Optional[TrajectoryWriter] = None
-    metrics: Optional[MetricsWriter] = None
-    telemetry: Optional[TelemetryWriter] = None
+    traj: TrajectoryWriter | None = None
+    metrics: MetricsWriter | None = None
+    telemetry: TelemetryWriter | None = None
 
     def on_step(
         self,
@@ -47,21 +46,21 @@ class OutputBundle:
 
 @dataclass(frozen=True)
 class OutputSpec:
-    traj_path: Optional[str]
+    traj_path: str | None
     traj_every: int
-    metrics_path: Optional[str]
+    metrics_path: str | None
     metrics_every: int
     atom_ids: np.ndarray
     atom_types: np.ndarray
     box: tuple[float, float, float]
     pbc: tuple[bool, bool, bool]
-    mass: Union[float, np.ndarray]
+    mass: float | np.ndarray
     cutoff: float
     potential: object
     traj_channels: tuple[str, ...] = ()
     traj_compression: str = "none"
     write_output_manifest: bool = True
-    telemetry_path: Optional[str] = None
+    telemetry_path: str | None = None
     telemetry_every: int = 0
     telemetry_stdout: bool = False
     telemetry_heartbeat_sec: float = 0.0

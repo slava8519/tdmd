@@ -20,6 +20,6 @@ def test_verifylab_testcases_light_smoke():
     subprocess.check_call(cmd)
     summary_path = os.path.join("results", run_id, "summary.json")
     assert os.path.exists(summary_path), f"missing summary: {summary_path}"
-    with open(summary_path, "r", encoding="utf-8") as f:
+    with open(summary_path, encoding="utf-8") as f:
         data = json.load(f)
     assert data.get("total", 0) > 0

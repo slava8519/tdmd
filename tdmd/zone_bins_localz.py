@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -17,7 +16,7 @@ class ZoneUnwrappedZBins:
     origin_z: float
     width_z: float
     wraps: bool
-    cell_atoms: Dict[Tuple[int, int, int], np.ndarray]  # (ix,iy,iz) -> atom ids
+    cell_atoms: dict[tuple[int, int, int], np.ndarray]  # (ix,iy,iz) -> atom ids
     candidate_ids: np.ndarray
     r_ref: np.ndarray
     last_build_step: int
@@ -82,7 +81,7 @@ def _build_bins(
     ncell_z = max(1, int(np.ceil(width_z / rc)))
 
     candidate_ids = np.asarray(candidate_ids, dtype=np.int32)
-    buckets: Dict[Tuple[int, int, int], List[int]] = {}
+    buckets: dict[tuple[int, int, int], list[int]] = {}
     for i in candidate_ids.tolist():
         pos = r[int(i)]
         ix, iy = _cell_index_xy(pos, box, rc, ncell_xy)
@@ -106,7 +105,7 @@ def _build_bins(
 
 class PersistentZoneLocalZBinsCache:
     def __init__(self):
-        self._cache: Dict[int, ZoneUnwrappedZBins] = {}
+        self._cache: dict[int, ZoneUnwrappedZBins] = {}
 
     def get(
         self,
@@ -150,7 +149,7 @@ class PersistentZoneLocalZBinsCache:
             zc = _build_bins(r, box, candidate_ids, rc=rc, z0=z0, z1=z1, step=step)
             self._cache[zid] = zc
         else:
-            buckets: Dict[Tuple[int, int, int], List[int]] = {}
+            buckets: dict[tuple[int, int, int], list[int]] = {}
             for i in candidate_ids.tolist():
                 pos = r[int(i)]
                 ix, iy = _cell_index_xy(pos, box, float(rc), zc.ncell_xy)

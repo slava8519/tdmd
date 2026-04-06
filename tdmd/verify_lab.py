@@ -3,13 +3,12 @@ from __future__ import annotations
 import csv
 import os
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from .io import load_task, task_to_arrays, validate_task_for_run
 from .potentials import make_potential
 from .testcases import default_cases
-from .verify_v2 import VerifyResult, run_verify_config, run_verify_task, run_verify_v2
+from .verify_v2 import run_verify_config, run_verify_task, run_verify_v2
 
 DEFAULT_THRESHOLDS = dict(dr=1e-6, dv=1e-6, dE=1e-5, dT=1e-5, dP=1e-4)
 

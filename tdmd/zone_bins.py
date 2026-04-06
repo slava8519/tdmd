@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -12,7 +11,7 @@ from .state import minimum_image
 class ZoneCellBins:
     rc: float
     ncell: int
-    cell_atoms: Dict[Tuple[int, int, int], np.ndarray]
+    cell_atoms: dict[tuple[int, int, int], np.ndarray]
     idx_all: np.ndarray  # (N,3) indices for all atoms (recomputed on rebuild)
     candidate_ids: (
         np.ndarray
@@ -28,7 +27,7 @@ class ZoneCellBins:
         candidate_ids = np.asarray(candidate_ids, dtype=np.int32)
         self.candidate_ids = candidate_ids
         # NOTE: idx_all is defined for all atoms; it can be updated cheaply too, but we keep it consistent on rebuild.
-        buckets: Dict[Tuple[int, int, int], List[int]] = {}
+        buckets: dict[tuple[int, int, int], list[int]] = {}
         for i in candidate_ids.tolist():
             key = (int(self.idx_all[i, 0]), int(self.idx_all[i, 1]), int(self.idx_all[i, 2]))
             buckets.setdefault(key, []).append(int(i))
@@ -75,7 +74,7 @@ class PersistentZoneBinsCache:
     """
 
     def __init__(self):
-        self._cache: Dict[int, ZoneCellBins] = {}
+        self._cache: dict[int, ZoneCellBins] = {}
 
     def get(
         self,

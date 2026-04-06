@@ -1,2 +1,2 @@
-from .cpu import CPUBackend
-from .gpu import GPUBackend
+from .cpu import CPUBackend as CPUBackend
+from .gpu import GPUBackend as GPUBackend

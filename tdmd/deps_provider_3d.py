@@ -21,7 +21,6 @@ Note: This provider assumes periodic boundary conditions in all three axes.
 """
 
 import math
-from typing import List, Tuple
 
 
 class DepsProvider3DBlock:
@@ -52,7 +51,7 @@ class DepsProvider3DBlock:
         nx: int,
         ny: int,
         nz: int,
-        box: Tuple[float, float, float],
+        box: tuple[float, float, float],
         cutoff: float,
         mpi_size: int,
     ):
@@ -67,7 +66,7 @@ class DepsProvider3DBlock:
         self.zsize_y = box[1] / ny
         self.zsize_z = box[2] / nz
 
-    def _index(self, zid: int) -> Tuple[int, int, int]:
+    def _index(self, zid: int) -> tuple[int, int, int]:
         """Convert zone id to (ix, iy, iz) indices."""
         ix = zid % self.nx
         iy = (zid // self.nx) % self.ny
@@ -76,7 +75,7 @@ class DepsProvider3DBlock:
 
     def _bounds(
         self, ix: int, iy: int, iz: int
-    ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         """Return bounding box of zone indices."""
         x0 = ix * self.zsize_x
         y0 = iy * self.zsize_y
@@ -90,7 +89,7 @@ class DepsProvider3DBlock:
         """Return static owner rank for zone id."""
         return zid % self.mpi_size
 
-    def deps_table(self, zid: int) -> List[int]:
+    def deps_table(self, zid: int) -> list[int]:
         """Return table dependencies for zone zid.
 
         Dependencies include all zones whose bounding boxes intersect the
@@ -102,7 +101,7 @@ class DepsProvider3DBlock:
         rx = int(math.ceil(self.cutoff / self.zsize_x))
         ry = int(math.ceil(self.cutoff / self.zsize_y))
         rz = int(math.ceil(self.cutoff / self.zsize_z))
-        deps: List[int] = []
+        deps: list[int] = []
         seen = set()
         for dx in range(-rx, rx + 1):
             for dy in range(-ry, ry + 1):
@@ -119,7 +118,7 @@ class DepsProvider3DBlock:
                     deps.append(dep_id)
         return deps
 
-    def deps_owner(self, zid: int) -> List[int]:
+    def deps_owner(self, zid: int) -> list[int]:
         """Return owner dependencies for zone zid.
 
         In this provider, owner dependencies are the same as table dependencies
@@ -127,7 +126,7 @@ class DepsProvider3DBlock:
         """
         return self.deps_table(zid)
 
-    def geom(self, zid: int) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    def geom(self, zid: int) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         """Return bounding box for zone zid."""
         ix, iy, iz = self._index(zid)
         return self._bounds(ix, iy, iz)

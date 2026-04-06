@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional, Tuple, TypeVar
+from collections.abc import Iterable
+from typing import TypeVar
 
 T = TypeVar("T")
 
 
-def find_cycle(adj: Dict[T, Iterable[T]]) -> Optional[List[T]]:
+def find_cycle(adj: dict[T, Iterable[T]]) -> list[T] | None:
     """Return one directed cycle as a list of nodes [v0, v1, ..., v0], or None if acyclic."""
     WHITE, GRAY, BLACK = 0, 1, 2
-    color: Dict[T, int] = {}
-    parent: Dict[T, T] = {}
+    color: dict[T, int] = {}
+    parent: dict[T, T] = {}
 
-    def dfs(u: T) -> Optional[List[T]]:
+    def dfs(u: T) -> list[T] | None:
         color[u] = GRAY
         for v in adj.get(u, []):
             c = color.get(v, WHITE)
@@ -37,7 +38,7 @@ def find_cycle(adj: Dict[T, Iterable[T]]) -> Optional[List[T]]:
 
     # ensure all nodes included
     nodes = set(adj.keys())
-    for u, vs in adj.items():
+    for _u, vs in adj.items():
         for v in vs:
             nodes.add(v)
 
@@ -49,5 +50,5 @@ def find_cycle(adj: Dict[T, Iterable[T]]) -> Optional[List[T]]:
     return None
 
 
-def is_acyclic(adj: Dict[T, Iterable[T]]) -> bool:
+def is_acyclic(adj: dict[T, Iterable[T]]) -> bool:
     return find_cycle(adj) is None

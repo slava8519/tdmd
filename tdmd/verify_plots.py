@@ -11,7 +11,7 @@ import numpy as np
 
 
 def _read_csv(path: str):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         r = csv.DictReader(f)
         rows = [row for row in r]
     return rows

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import weakref
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -770,7 +770,7 @@ def _flatten_cell_atoms(cl) -> tuple[np.ndarray, np.ndarray]:
 def _rawkernel_cache_key(cp, name: str) -> tuple[int, int, str]:
     device_id = -1
     try:
-        device_id = int(getattr(cp.cuda.Device(), "id"))
+        device_id = int(cp.cuda.Device().id)
     except Exception:
         device_id = -1
     return (id(cp), device_id, str(name))
@@ -1195,9 +1195,6 @@ def _forces_from_neighbor_matrix_cp(
     rr_j = d_r[js_safe]
     dr = rr_t[:, None, :] - rr_j
     dr = dr - float(box) * cp.rint(dr / float(box))
-    r2 = cp.sum(dr * dr, axis=2)
-    mask = valid & (r2 > 0.0) & (r2 < cutoff2)
-
     return np.zeros((tids.size, 3), dtype=np.float64)
 
 

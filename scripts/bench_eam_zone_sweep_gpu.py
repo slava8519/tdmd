@@ -14,6 +14,7 @@ from bench_eam_decomp_perf import (
     _run_case,
     _speedup,
 )
+
 from tdmd.potentials import make_potential
 
 

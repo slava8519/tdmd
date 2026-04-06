@@ -5,7 +5,7 @@ import os
 def test_golden_cfg_system_smoke_file():
     path = os.path.join("golden", "cfg_system_smoke.json")
     assert os.path.exists(path), f"golden file missing: {path}"
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     assert data.get("preset") == "smoke"
     rows = data.get("rows", [])

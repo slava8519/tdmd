@@ -34,7 +34,7 @@ class CaseCheck:
 
 
 def _load_json(path: str) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
+import tdmd.td_local as td_local_mod
 from tdmd.potentials import ML_REFERENCE_CONTRACT_VERSION, make_potential
 from tdmd.serial import run_serial
-import tdmd.td_local as td_local_mod
 from tdmd.td_local import run_td_local
 
 

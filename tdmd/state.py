@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
 
 import numpy as np
 
@@ -34,7 +33,7 @@ def minimum_image(dr: np.ndarray, box: float) -> np.ndarray:
     return dr - box * np.round(dr / box)
 
 
-def kinetic_energy(v: np.ndarray, mass: Union[float, np.ndarray]) -> float:
+def kinetic_energy(v: np.ndarray, mass: float | np.ndarray) -> float:
     if np.isscalar(mass):
         m = float(mass)
         if m <= 0.0:

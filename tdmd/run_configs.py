@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 
@@ -70,7 +71,7 @@ class TDLocalRunConfig:
         self.device = device
 
     @classmethod
-    def from_legacy_kwargs(cls, kwargs: Mapping[str, Any]) -> "TDLocalRunConfig":
+    def from_legacy_kwargs(cls, kwargs: Mapping[str, Any]) -> TDLocalRunConfig:
         allowed = {
             "atom_types",
             "chaos_mode",
@@ -200,7 +201,7 @@ class TDFullMPIRunConfig:
         self.trace_path = trace_path
 
     @classmethod
-    def from_legacy_kwargs(cls, kwargs: Mapping[str, Any]) -> "TDFullMPIRunConfig":
+    def from_legacy_kwargs(cls, kwargs: Mapping[str, Any]) -> TDFullMPIRunConfig:
         allowed = {
             "thermo_every",
             "cell_size",
@@ -346,7 +347,7 @@ class VerifyTaskRunConfig:
         self.case_name = case_name
 
     @classmethod
-    def from_legacy_kwargs(cls, kwargs: Mapping[str, Any]) -> "VerifyTaskRunConfig":
+    def from_legacy_kwargs(cls, kwargs: Mapping[str, Any]) -> VerifyTaskRunConfig:
         allowed = {
             "atom_types",
             "cell_size",

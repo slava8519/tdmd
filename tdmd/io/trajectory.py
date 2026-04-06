@@ -236,4 +236,5 @@ class TrajectoryWriter:
             warnings.warn(
                 f"TrajectoryWriter.close() failed for {self.path!r}: {exc!r}",
                 RuntimeWarning,
+                stacklevel=2,
             )

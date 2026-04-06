@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -12,26 +11,26 @@ from .state import minimum_image
 class ZoneVerlet:
     rc: float
     candidate_ids: np.ndarray  # int32
-    neighbors: Dict[int, np.ndarray]  # atom id -> neighbor ids (within rc) among candidate_ids
+    neighbors: dict[int, np.ndarray]  # atom id -> neighbor ids (within rc) among candidate_ids
     r_ref: np.ndarray  # positions snapshot for candidate_ids (same order)
     last_build_step: int
 
 
 def _build_neighbors(
     r: np.ndarray, box: float, candidate_ids: np.ndarray, rc: float
-) -> Dict[int, np.ndarray]:
+) -> dict[int, np.ndarray]:
     # cell list on candidate set
     rc = float(rc)
     ncell = max(1, int(box / rc))
     idx_all = np.floor((r % box) / rc).astype(int) % ncell
 
-    buckets: Dict[Tuple[int, int, int], List[int]] = {}
+    buckets: dict[tuple[int, int, int], list[int]] = {}
     for i in candidate_ids.tolist():
         key = (int(idx_all[i, 0]), int(idx_all[i, 1]), int(idx_all[i, 2]))
         buckets.setdefault(key, []).append(int(i))
 
     rc2 = rc * rc
-    neigh: Dict[int, List[int]] = {int(i): [] for i in candidate_ids.tolist()}
+    neigh: dict[int, list[int]] = {int(i): [] for i in candidate_ids.tolist()}
 
     for i in candidate_ids.tolist():
         ci = tuple(idx_all[i])
@@ -45,7 +44,7 @@ def _build_neighbors(
                     dr = r[i][None, :] - r[js]
                     dr = minimum_image(dr, box)
                     r2 = (dr * dr).sum(axis=1)
-                    for j, ok in zip(js, (r2 > 0.0) & (r2 <= rc2)):
+                    for j, ok in zip(js, (r2 > 0.0) & (r2 <= rc2), strict=True):
                         if ok:
                             neigh[int(i)].append(int(j))
 
@@ -64,7 +63,7 @@ class ZoneVerletCache:
     """Кэш зонных Verlet-таблиц на одном MPI ранге."""
 
     def __init__(self):
-        self._cache: Dict[int, ZoneVerlet] = {}
+        self._cache: dict[int, ZoneVerlet] = {}
 
     def get(
         self,

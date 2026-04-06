@@ -1,4 +1,3 @@
-import numpy as np
 
 from tdmd.config import load_config
 from tdmd.potentials import make_potential

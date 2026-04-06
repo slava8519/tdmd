@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 
@@ -42,11 +42,11 @@ class TDAutomaton1W:
 
     def __init__(
         self,
-        zones_runtime: List[ZoneRuntime],
+        zones_runtime: list[ZoneRuntime],
         box: float,
         cutoff: float,
         bins_cache: PersistentZoneLocalZBinsCache,
-        traversal_order: List[int],
+        traversal_order: list[int],
         formal_core: bool = True,
         debug_invariants: bool = False,
         max_step_lag: int = 1,
@@ -67,19 +67,19 @@ class TDAutomaton1W:
 
         self.zwidth = self.box / max(1, len(self.zones))
 
-        self.work_zid: Optional[int] = None
+        self.work_zid: int | None = None
         self.priority_key = None  # A4b: keyfunc(zid)->tuple
         self.deps_local_pred = None  # legacy: callable(did)->bool (mapped to table deps)
         self.deps_table_pred = None  # callable(did)->bool
         self.deps_owner_pred = None  # callable(did)->bool
         self.deps_table_func = None  # callable(zid)->List[int]
         self.deps_owner_func = None  # callable(zid)->List[int]
-        self._locked_donors: Dict[int, List[int]] = {}
+        self._locked_donors: dict[int, list[int]] = {}
 
-        self.send_queue: List[int] = []
-        self.outbox: Dict[int, Dict[int, List[int]]] = {}  # dest_zid -> step_id -> atom ids
+        self.send_queue: list[int] = []
+        self.outbox: dict[int, dict[int, list[int]]] = {}  # dest_zid -> step_id -> atom ids
 
-        self.diag: Dict[str, Any] = {
+        self.diag: dict[str, Any] = {
             "viol_w_gt1": 0,
             "viol_send_overlap": 0,
             "viol_lag": 0,
@@ -123,7 +123,7 @@ class TDAutomaton1W:
         if src.atom_ids.size == 0:
             return
 
-        keep_src: List[int] = []
+        keep_src: list[int] = []
         for aid in src.atom_ids.tolist():
             dest = self.zone_id_for_z(float(r[int(aid), 2]))
             if dest == source_zid:
@@ -158,7 +158,7 @@ class TDAutomaton1W:
         z.ztype = ZoneType.D if z.atom_ids.size else ZoneType.F
         self._assert_invariants()
 
-    def _deps(self, zid: int) -> Tuple[List[int], float, float]:
+    def _deps(self, zid: int) -> tuple[list[int], float, float]:
         z = self.zones[zid]
         z0p = z.z0 - self.cutoff
         z1p = z.z1 + self.cutoff
@@ -251,7 +251,7 @@ class TDAutomaton1W:
             self.diag["wfg_cycles"] = self.diag.get("wfg_cycles", 0) + 1
             self.diag["wfg_last_cycle"] = list(map(int, cyc))
 
-    def _deps_table_ok(self, deps: List[int]) -> bool:
+    def _deps_table_ok(self, deps: list[int]) -> bool:
         pred = self.deps_table_pred
         if pred is None:
             return True
@@ -263,7 +263,7 @@ class TDAutomaton1W:
                 return False
         return True
 
-    def _deps_owner_ok(self, deps: List[int]) -> bool:
+    def _deps_owner_ok(self, deps: list[int]) -> bool:
         pred = self.deps_owner_pred
         if pred is None:
             return True
@@ -275,7 +275,7 @@ class TDAutomaton1W:
                 return False
         return True
 
-    def _lag_ok(self, zid: int, deps: List[int]) -> bool:
+    def _lag_ok(self, zid: int, deps: list[int]) -> bool:
         """Проверка time-lag между zone zid и её зависимостями.
 
         Для прототипа: требуем, чтобы зависимости не отставали больше max_step_lag.
@@ -390,7 +390,7 @@ class TDAutomaton1W:
             if z.ztype == ZoneType.D and z.atom_ids.size:
                 deps, _, _ = self._deps(zid)
                 deps_table = deps
-                deps_owner: List[int] = []
+                deps_owner: list[int] = []
                 if self.deps_owner_func is not None:
                     deps_owner = list(self.deps_owner_func(int(zid)))
                 if self.deps_table_func is not None:
@@ -415,7 +415,7 @@ class TDAutomaton1W:
             if z.ztype == ZoneType.D and z.atom_ids.size:
                 deps, _, _ = self._deps(zid)
                 deps_table = deps
-                deps_owner: List[int] = []
+                deps_owner: list[int] = []
                 if self.deps_owner_func is not None:
                     deps_owner = list(self.deps_owner_func(int(zid)))
                 if self.deps_table_func is not None:
@@ -479,7 +479,7 @@ class TDAutomaton1W:
         self,
         r: np.ndarray,
         v: np.ndarray,
-        mass: Union[float, np.ndarray],
+        mass: float | np.ndarray,
         dt: float,
         potential,
         cutoff: float,
@@ -619,7 +619,7 @@ class TDAutomaton1W:
         self._assert_invariants()
         return zid
 
-    def pop_send_batch(self, batch_size: int) -> List[int]:
+    def pop_send_batch(self, batch_size: int) -> list[int]:
         if batch_size <= 0:
             batch_size = 1
         batch = self.send_queue[:batch_size]

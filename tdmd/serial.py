@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Union
-
 import numpy as np
 
 from .atoms import normalize_atom_types, normalize_mass
@@ -16,7 +14,7 @@ from .observer import emit_observer, observer_accepts_box
 def run_serial(
     r: np.ndarray,
     v: np.ndarray,
-    mass: Union[float, np.ndarray],
+    mass: float | np.ndarray,
     box: float,
     potential,
     dt: float,

@@ -7,14 +7,14 @@ import sys
 import threading
 import time
 import warnings
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 
 from .manifest import telemetry_manifest_payload, write_manifest
 
 
-def _mass_array_or_scalar(mass: Union[float, np.ndarray]) -> float | np.ndarray:
+def _mass_array_or_scalar(mass: float | np.ndarray) -> float | np.ndarray:
     if np.isscalar(mass):
         return float(mass)
     return np.asarray(mass, dtype=float)
@@ -40,7 +40,7 @@ def _read_proc_status_value_mb(key: str) -> float | None:
     if not os.path.exists(status_path):
         return None
     try:
-        with open(status_path, "r", encoding="utf-8") as f:
+        with open(status_path, encoding="utf-8") as f:
             for line in f:
                 if not line.startswith(f"{key}:"):
                     continue
@@ -102,7 +102,7 @@ class TelemetryWriter:
         path: str | None,
         *,
         total_steps: int,
-        mass: Union[float, np.ndarray],
+        mass: float | np.ndarray,
         atom_count: int,
         device: str,
         mode: str,
@@ -409,6 +409,7 @@ class TelemetryWriter:
                     warnings.warn(
                         f"TelemetryWriter.close() failed for {self.path!r}: {exc!r}",
                         RuntimeWarning,
+                        stacklevel=2,
                     )
                 try:
                     with open(self.summary_path, "w", encoding="utf-8") as f:
@@ -417,5 +418,6 @@ class TelemetryWriter:
                     warnings.warn(
                         f"TelemetryWriter summary write failed for {self.summary_path!r}: {exc!r}",
                         RuntimeWarning,
+                        stacklevel=2,
                     )
             return self.last_record

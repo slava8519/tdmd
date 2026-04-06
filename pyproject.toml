@@ -62,17 +62,11 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Phase 2: import sorting + pyflakes (real bugs).
-# Next expansion (phase 3): add "UP", "B", "E", "W" after cleanup.
-select = ["I", "F"]
-# F401 (unused import) produces many hits in test helpers and __init__ re-exports;
-# enforce gradually via per-file overrides rather than repo-wide noise.
-ignore = ["F401"]
+select = ["I", "F", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests and scripts use wildcard imports and top-level conditional logic.
 "tests/*" = ["F811"]
-"scripts/*" = ["F811"]
+"scripts/*" = ["F811", "E402"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -115,7 +115,7 @@ def _read_setfl(
     """Parse DYNAMO setfl/eam.alloy into (elements, drho, dr, cutoff, F, rho, phi)."""
     if not os.path.isfile(path):
         raise ValueError(f"EAM file not found: {path}")
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         lines = f.readlines()
     if len(lines) < 6:
         raise ValueError(f"invalid setfl file (too short): {path}")
@@ -211,7 +211,7 @@ def _read_table_section(path: str, keyword: str) -> tuple[np.ndarray, np.ndarray
     key = str(keyword).strip()
     if not key:
         raise ValueError("table potential keyword must be non-empty")
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         lines = f.readlines()
 
     start = -1
@@ -264,7 +264,7 @@ def _read_table_section(path: str, keyword: str) -> tuple[np.ndarray, np.ndarray
         except (ValueError, TypeError, IndexError):
             if rows:
                 break
-            raise ValueError(f"invalid table row in {path}: {txt}")
+            raise ValueError(f"invalid table row in {path}: {txt}") from None
         rows.append((rr, uu, ff))
         if n_expected is not None and len(rows) >= n_expected:
             break

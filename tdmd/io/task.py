@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any
 
 import numpy as np
 import yaml
@@ -52,7 +53,7 @@ class TaskAtom:
     id: int
     type: int
     mass: float
-    charge: Optional[float]
+    charge: float | None
     r: tuple[float, float, float]
     v: tuple[float, float, float]
 
@@ -78,8 +79,8 @@ class TaskBarostat:
 @dataclass(frozen=True)
 class TaskEnsemble:
     kind: str
-    thermostat: Optional[TaskThermostat] = None
-    barostat: Optional[TaskBarostat] = None
+    thermostat: TaskThermostat | None = None
+    barostat: TaskBarostat | None = None
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,7 @@ class Task:
     steps: int
     ensemble: TaskEnsemble
     # Legacy alias kept for backward compatibility with existing task files.
-    thermostat: Optional[TaskThermostat] = None
+    thermostat: TaskThermostat | None = None
 
 
 @dataclass(frozen=True)
@@ -267,14 +268,14 @@ def _parse_barostat_block(data: Any, key: str) -> TaskBarostat:
     return TaskBarostat(kind=kind, params=dict(params))
 
 
-def _parse_thermostat(d: dict) -> Optional[TaskThermostat]:
+def _parse_thermostat(d: dict) -> TaskThermostat | None:
     th = d.get("thermostat", None)
     if th is None:
         return None
     return _parse_thermostat_block(th, "thermostat")
 
 
-def _parse_ensemble(d: dict, legacy_thermostat: Optional[TaskThermostat]) -> TaskEnsemble:
+def _parse_ensemble(d: dict, legacy_thermostat: TaskThermostat | None) -> TaskEnsemble:
     ens = d.get("ensemble", None)
     if ens is None:
         if legacy_thermostat is not None:
@@ -355,7 +356,7 @@ def parse_task_dict(d: dict) -> Task:
 
 
 def load_task(path: str) -> Task:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return parse_task_dict(data)
 
@@ -424,6 +425,7 @@ def validate_task_for_run(
         warnings.warn(
             f"TDMD run performs no unit conversion (units='{task.units}'): values are used as-is",
             RuntimeWarning,
+            stacklevel=2,
         )
     arr = task_to_arrays(task)
     masses = np.asarray(arr.masses, dtype=float)

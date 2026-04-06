@@ -8,16 +8,16 @@ import os
 import shutil
 from pathlib import Path
 
-import numpy as np
-
 from bench_eam_decomp_perf import (
     _build_alloy_state,
     _fmt_speedup,
-    _fmt_steps_per_sec,
     _fmt_time,
+)
+from bench_eam_decomp_perf import (
     _run_case as _run_perf_case,
 )
 from bench_eam_td_breakdown_gpu import _run_case as _run_breakdown_case
+
 from tdmd.backend import resolve_backend
 from tdmd.constants import GEOM_EPSILON
 from tdmd.potentials import make_potential

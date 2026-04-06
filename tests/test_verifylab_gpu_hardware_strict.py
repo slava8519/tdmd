@@ -23,7 +23,7 @@ def test_verifylab_gpu_smoke_hw_backend_gate():
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     summary_path = os.path.join("results", run_id, "summary.json")
     assert os.path.exists(summary_path), proc.stderr or proc.stdout
-    with open(summary_path, "r", encoding="utf-8") as f:
+    with open(summary_path, encoding="utf-8") as f:
         summary = json.load(f)
 
     backend = dict(summary.get("backend", {}))
