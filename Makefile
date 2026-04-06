@@ -1,4 +1,4 @@
-.PHONY: test verify-smoke gpu-profile eam-decomp-gpu-heavy eam-zone-sweep-gpu eam-td-breakdown-gpu td-autozoning-advisor-gpu al-crack-100k-gpu ml-reference-smoke ml-reference-parity fmt lint typecheck precommit
+.PHONY: test verify-smoke gpu-profile eam-decomp-gpu-heavy eam-zone-sweep-gpu eam-td-breakdown-gpu td-autozoning-advisor-gpu al-crack-100k-gpu ml-reference-smoke ml-reference-parity fmt lint typecheck precommit clean-results
 
 PY ?= .venv/bin/python
 ifeq ($(wildcard $(PY)),)
@@ -54,3 +54,6 @@ typecheck:
 
 precommit:
 	$(PY) -m pre_commit run --all-files
+
+clean-results:
+	rm -rf results/*/
