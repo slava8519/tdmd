@@ -118,3 +118,43 @@ def test_verifylab_al_crack_100k_compare_gpu_preset_contract():
     assert bool(preset.get("telemetry_stdout")) is True
     assert bool(preset.get("require_effective_cuda")) is True
     assert str(preset.get("artifact_stem", "")) == "al_crack_100k_compare_gpu"
+
+
+def test_verifylab_slab_wavefront_evidence_gpu_preset_contract():
+    from scripts.run_verifylab_matrix import PRESETS
+
+    preset = dict(PRESETS["slab_wavefront_evidence_gpu"])
+    assert bool(preset.get("slab_wavefront_evidence_mode")) is True
+    assert str(preset.get("device", "")) == "cuda"
+    assert int(preset.get("timeout", 0)) == 7200
+    assert int(preset.get("target_atoms", 0)) == 100000
+    assert int(preset.get("exact_requested_zones", 0)) == 1000
+    assert str(preset.get("crack_zones", "")) == "1,2,3,4,5,6,7,8,9,10,11,12"
+    assert str(preset.get("control_zone_totals", "")) == "1,2,3,4,5,6,7,8"
+    assert int(preset.get("control_breakdown_zones_total", 0)) == 8
+    assert int(preset.get("exact_timeout_sec", 0)) == 900
+    assert int(preset.get("crack_sweep_timeout_sec", 0)) == 600
+    assert int(preset.get("requested_space_timeout_sec", 0)) == 420
+    assert int(preset.get("compare_space_timeout_sec", 0)) == 420
+    assert int(preset.get("control_n_atoms", 0)) == 10000
+    assert int(preset.get("control_steps", 0)) == 256
+    assert bool(preset.get("require_effective_cuda")) is True
+    assert str(preset.get("artifact_stem", "")) == "slab_wavefront_evidence_gpu"
+
+
+def test_verifylab_wavefront_reference_smoke_preset_contract():
+    from scripts.run_verifylab_matrix import PRESETS
+
+    preset = dict(PRESETS["wavefront_reference_smoke"])
+    assert bool(preset.get("wavefront_reference_mode")) is True
+    assert int(preset.get("timeout", 0)) == 900
+    assert str(preset.get("morse_config", "")) == "examples/td_1d_morse.yaml"
+    assert int(preset.get("morse_steps", 0)) == 4
+    assert int(preset.get("morse_zones_total", 0)) == 8
+    assert int(preset.get("eam_alloy_n_atoms", 0)) == 1000
+    assert int(preset.get("eam_alloy_steps", 0)) == 2
+    assert int(preset.get("eam_alloy_zones_total", 0)) == 4
+    assert float(preset.get("eam_alloy_cell_size", 0.0)) == 3.5
+    assert str(preset.get("eam_alloy_file", "")) == "examples/potentials/eam_alloy/AlCu.eam.alloy"
+    assert bool(preset.get("allow_no_multi_zone_wave", True)) is False
+    assert str(preset.get("artifact_stem", "")) == "wavefront_reference_equivalence"

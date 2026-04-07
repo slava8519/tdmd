@@ -412,6 +412,67 @@ PRESETS = {
         require_effective_cuda=True,
         artifact_stem="al_crack_100k_compare_gpu",
     ),
+    "slab_wavefront_evidence_gpu": dict(
+        slab_wavefront_evidence_mode=True,
+        device="cuda",
+        timeout=7200,
+        target_atoms=100000,
+        box=122.0,
+        lattice_a=4.05,
+        steps=100,
+        cutoff=6.5,
+        dt=0.001,
+        exact_requested_zones=1000,
+        crack_zones="1,2,3,4,5,6,7,8,9,10,11,12",
+        control_zone_totals="1,2,3,4,5,6,7,8",
+        control_breakdown_zones_total=8,
+        cell_size=0.5,
+        control_n_atoms=10000,
+        control_steps=256,
+        control_repeats=1,
+        control_warmup=1,
+        eam_file="examples/potentials/eam_alloy/Al_zhou.eam.alloy",
+        control_eam_file="examples/potentials/eam_alloy/AlCu.eam.alloy",
+        zone_cells_w=1,
+        zone_cells_s=2,
+        seed=42,
+        velocity_std=0.020,
+        exact_timeout_sec=900,
+        crack_sweep_timeout_sec=600,
+        requested_space_timeout_sec=420,
+        compare_space_timeout_sec=420,
+        compare_time_timeout_sec=180,
+        telemetry_every=1,
+        telemetry_heartbeat_sec=5.0,
+        require_effective_cuda=True,
+        artifact_stem="slab_wavefront_evidence_gpu",
+    ),
+    "wavefront_reference_smoke": dict(
+        wavefront_reference_mode=True,
+        timeout=900,
+        morse_config="examples/td_1d_morse.yaml",
+        morse_steps=4,
+        morse_zones_total=8,
+        morse_cell_size=4.0,
+        morse_zone_cells_w=1,
+        morse_zone_cells_s=2,
+        eam_alloy_n_atoms=1000,
+        eam_alloy_lattice_a=4.05,
+        eam_alloy_jitter=0.02,
+        eam_alloy_seed=42,
+        eam_alloy_velocity_std=0.01,
+        eam_alloy_dt=0.001,
+        eam_alloy_cutoff=6.5,
+        eam_alloy_steps=2,
+        eam_alloy_zones_total=4,
+        eam_alloy_cell_size=3.5,
+        eam_alloy_zone_cells_w=1,
+        eam_alloy_zone_cells_s=1,
+        eam_alloy_file="examples/potentials/eam_alloy/AlCu.eam.alloy",
+        atol=1e-10,
+        allow_no_multi_zone_wave=False,
+        artifact_stem="wavefront_reference_equivalence",
+    ),
     "mpi_overlap_smoke": dict(
         mpi_overlap_mode=True,
         mpi_config="examples/td_1d_morse_static_rr_smoke4.yaml",
@@ -1703,6 +1764,230 @@ def _run_al_crack_compare_gpu(*, preset: dict, out_dir: str) -> dict[str, object
     return summary
 
 
+def _run_slab_wavefront_evidence_gpu(*, preset: dict, out_dir: str) -> dict[str, object]:
+    timeout = int(preset.get("timeout", 1800))
+    artifact_stem = str(preset.get("artifact_stem", "slab_wavefront_evidence_gpu"))
+    out_csv = os.path.join(out_dir, f"{artifact_stem}.csv")
+    out_md = os.path.join(out_dir, f"{artifact_stem}.md")
+    out_json = os.path.join(out_dir, f"{artifact_stem}.summary.json")
+    cmd = [
+        sys.executable,
+        "scripts/bench_slab_wavefront_evidence_gpu.py",
+        "--out",
+        out_csv,
+        "--md",
+        out_md,
+        "--json",
+        out_json,
+        "--target-atoms",
+        str(int(preset.get("target_atoms", 100000))),
+        "--box",
+        str(float(preset.get("box", 122.0))),
+        "--lattice-a",
+        str(float(preset.get("lattice_a", 4.05))),
+        "--dt",
+        str(float(preset.get("dt", 0.001))),
+        "--steps",
+        str(int(preset.get("steps", 100))),
+        "--cutoff",
+        str(float(preset.get("cutoff", 6.5))),
+        "--device",
+        str(preset.get("device", "cuda")),
+        "--exact-requested-zones",
+        str(int(preset.get("exact_requested_zones", 1000))),
+        "--crack-zones",
+        str(preset.get("crack_zones", "1,2,3,4,5,6,7,8,9,10,11,12")),
+        "--control-zone-totals",
+        str(preset.get("control_zone_totals", "1,2,3,4,5,6,7,8,9,10,11,12")),
+        "--control-breakdown-zones-total",
+        str(int(preset.get("control_breakdown_zones_total", 12))),
+        "--cell-size",
+        str(float(preset.get("cell_size", 0.5))),
+        "--control-n-atoms",
+        str(int(preset.get("control_n_atoms", 10000))),
+        "--control-steps",
+        str(int(preset.get("control_steps", 256))),
+        "--control-repeats",
+        str(int(preset.get("control_repeats", 1))),
+        "--control-warmup",
+        str(int(preset.get("control_warmup", 1))),
+        "--eam-file",
+        str(preset.get("eam_file", "examples/potentials/eam_alloy/Al_zhou.eam.alloy")),
+        "--control-eam-file",
+        str(preset.get("control_eam_file", "examples/potentials/eam_alloy/AlCu.eam.alloy")),
+        "--zone-cells-w",
+        str(int(preset.get("zone_cells_w", 1))),
+        "--zone-cells-s",
+        str(int(preset.get("zone_cells_s", 2))),
+        "--seed",
+        str(int(preset.get("seed", 42))),
+        "--velocity-std",
+        str(float(preset.get("velocity_std", 0.020))),
+        "--exact-timeout-sec",
+        str(int(preset.get("exact_timeout_sec", 600))),
+        "--crack-sweep-timeout-sec",
+        str(int(preset.get("crack_sweep_timeout_sec", 180))),
+        "--requested-space-timeout-sec",
+        str(int(preset.get("requested_space_timeout_sec", 180))),
+        "--compare-space-timeout-sec",
+        str(int(preset.get("compare_space_timeout_sec", 180))),
+        "--compare-time-timeout-sec",
+        str(int(preset.get("compare_time_timeout_sec", 180))),
+        "--telemetry-every",
+        str(int(preset.get("telemetry_every", 1))),
+        "--telemetry-heartbeat-sec",
+        str(float(preset.get("telemetry_heartbeat_sec", 5.0))),
+        "--strict",
+    ]
+    if bool(preset.get("telemetry_stdout", False)):
+        cmd.append("--telemetry-stdout")
+    if bool(preset.get("require_effective_cuda", False)):
+        cmd.append("--require-effective-cuda")
+
+    timed_out = False
+    proc_rc = 1
+    proc_out = ""
+    proc_err = ""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
+        proc_rc = int(proc.returncode)
+        proc_out = str(proc.stdout or "")
+        proc_err = str(proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc_rc = 124
+        proc_out = str(getattr(exc, "stdout", "") or "")
+        proc_err = str(getattr(exc, "stderr", "") or "")
+
+    summary: dict[str, object] = {
+        "n": 0,
+        "total": 0,
+        "ok": 0,
+        "fail": 0,
+        "ok_all": False,
+        "external_script": "scripts/bench_slab_wavefront_evidence_gpu.py",
+        "external_returncode": int(proc_rc),
+        "external_timed_out": bool(timed_out),
+        "external_stdout": proc_out,
+        "external_stderr": proc_err,
+        "external_artifacts": {"csv": out_csv, "md": out_md, "json": out_json},
+    }
+    if os.path.exists(out_json):
+        try:
+            with open(out_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                summary.update(loaded)
+        except Exception as exc:
+            summary["parse_error"] = str(exc)
+    summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
+    return summary
+
+
+def _run_wavefront_reference_equivalence(*, preset: dict, out_dir: str) -> dict[str, object]:
+    timeout = int(preset.get("timeout", 900))
+    artifact_stem = str(preset.get("artifact_stem", "wavefront_reference_equivalence"))
+    out_csv = os.path.join(out_dir, f"{artifact_stem}.csv")
+    out_md = os.path.join(out_dir, f"{artifact_stem}.md")
+    out_json = os.path.join(out_dir, f"{artifact_stem}.summary.json")
+    cmd = [
+        sys.executable,
+        "scripts/bench_wavefront_reference_equivalence.py",
+        "--out",
+        out_csv,
+        "--md",
+        out_md,
+        "--json",
+        out_json,
+        "--morse-config",
+        str(preset.get("morse_config", "examples/td_1d_morse.yaml")),
+        "--morse-steps",
+        str(int(preset.get("morse_steps", 4))),
+        "--morse-zones-total",
+        str(int(preset.get("morse_zones_total", 8))),
+        "--morse-cell-size",
+        str(float(preset.get("morse_cell_size", 4.0))),
+        "--morse-zone-cells-w",
+        str(int(preset.get("morse_zone_cells_w", 1))),
+        "--morse-zone-cells-s",
+        str(int(preset.get("morse_zone_cells_s", 2))),
+        "--eam-alloy-n-atoms",
+        str(int(preset.get("eam_alloy_n_atoms", 1000))),
+        "--eam-alloy-lattice-a",
+        str(float(preset.get("eam_alloy_lattice_a", 4.05))),
+        "--eam-alloy-jitter",
+        str(float(preset.get("eam_alloy_jitter", 0.02))),
+        "--eam-alloy-seed",
+        str(int(preset.get("eam_alloy_seed", 42))),
+        "--eam-alloy-velocity-std",
+        str(float(preset.get("eam_alloy_velocity_std", 0.01))),
+        "--eam-alloy-dt",
+        str(float(preset.get("eam_alloy_dt", 0.001))),
+        "--eam-alloy-cutoff",
+        str(float(preset.get("eam_alloy_cutoff", 6.5))),
+        "--eam-alloy-steps",
+        str(int(preset.get("eam_alloy_steps", 2))),
+        "--eam-alloy-zones-total",
+        str(int(preset.get("eam_alloy_zones_total", 4))),
+        "--eam-alloy-cell-size",
+        str(float(preset.get("eam_alloy_cell_size", 4.05))),
+        "--eam-alloy-zone-cells-w",
+        str(int(preset.get("eam_alloy_zone_cells_w", 1))),
+        "--eam-alloy-zone-cells-s",
+        str(int(preset.get("eam_alloy_zone_cells_s", 1))),
+        "--eam-alloy-file",
+        str(preset.get("eam_alloy_file", "examples/potentials/eam_alloy/AlCu.eam.alloy")),
+        "--atol",
+        str(float(preset.get("atol", 1e-10))),
+        "--strict",
+    ]
+    if bool(preset.get("allow_no_multi_zone_wave", False)):
+        cmd.append("--allow-no-multi-zone-wave")
+
+    timed_out = False
+    proc_rc = 1
+    proc_out = ""
+    proc_err = ""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=ROOT_DIR, capture_output=True, text=True, timeout=max(1, timeout)
+        )
+        proc_rc = int(proc.returncode)
+        proc_out = str(proc.stdout or "")
+        proc_err = str(proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc_rc = 124
+        proc_out = str(getattr(exc, "stdout", "") or "")
+        proc_err = str(getattr(exc, "stderr", "") or "")
+
+    summary: dict[str, object] = {
+        "n": 0,
+        "total": 0,
+        "ok": 0,
+        "fail": 0,
+        "ok_all": False,
+        "external_script": "scripts/bench_wavefront_reference_equivalence.py",
+        "external_returncode": int(proc_rc),
+        "external_timed_out": bool(timed_out),
+        "external_stdout": proc_out,
+        "external_stderr": proc_err,
+        "external_artifacts": {"csv": out_csv, "md": out_md, "json": out_json},
+    }
+    if os.path.exists(out_json):
+        try:
+            with open(out_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                summary.update(loaded)
+        except Exception as exc:
+            summary["parse_error"] = str(exc)
+    summary["ok_all"] = bool(summary.get("ok_all", False) and int(proc_rc) == 0 and not timed_out)
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("yaml", help="Path to YAML config (examples/*.yaml)")
@@ -1792,6 +2077,12 @@ def main():
     elif bool(p.get("al_crack_compare_mode", False)):
         mode_summary = _run_al_crack_compare_gpu(preset=p, out_dir=out_dir)
         mode_kind = "al_crack_compare"
+    elif bool(p.get("slab_wavefront_evidence_mode", False)):
+        mode_summary = _run_slab_wavefront_evidence_gpu(preset=p, out_dir=out_dir)
+        mode_kind = "slab_wavefront_evidence"
+    elif bool(p.get("wavefront_reference_mode", False)):
+        mode_summary = _run_wavefront_reference_equivalence(preset=p, out_dir=out_dir)
+        mode_kind = "wavefront_reference"
     elif bool(p.get("task_mode", False)):
         task_path = args.task or str(p.get("task_path", "examples/interop/task.yaml"))
         rows = sweep_verify_task(
@@ -1995,6 +2286,14 @@ def main():
             f.write(
                 "- benchmark: operator-side Al microcrack benchmark with per-case telemetry artifacts and step/resource progress snapshots.\n"
             )
+        if mode_kind == "slab_wavefront_evidence":
+            f.write(
+                "- benchmark: operator-side slab-wavefront evidence pack combining crack compare, crack z-sweep, EAM control sweep, and control breakdown artifacts.\n"
+            )
+        if mode_kind == "wavefront_reference":
+            f.write(
+                "- benchmark: CPU/reference wave-batch proof harness; runtime remains sequential and the output is verification-only.\n"
+            )
         f.write(f"- strict_guardrails: `{strict_guardrails}`\n")
         f.write(f"- require_effective_cuda: `{require_effective_cuda}`\n")
         if envelope_summary is not None:
@@ -2055,7 +2354,12 @@ def main():
                         "- Next steps: inspect overlap/timing knobs and consult `docs/WFG_DIAGNOSTICS.md` for how to localize donors and hot spots.\n"
                     )
                     f.write("\n")
-            elif mode_kind in ("eam_decomp_perf", "al_crack_compare"):
+            elif mode_kind in (
+                "eam_decomp_perf",
+                "al_crack_compare",
+                "slab_wavefront_evidence",
+                "wavefront_reference",
+            ):
                 report_markdown = str(summ.get("report_markdown", "") or "").strip()
                 if report_markdown:
                     f.write(report_markdown)
@@ -2123,7 +2427,12 @@ def main():
         f.write('\n```\n')
         f.write("\n")
 
-    if mode_kind in ("eam_decomp_perf", "al_crack_compare"):
+    if mode_kind in (
+        "eam_decomp_perf",
+        "al_crack_compare",
+        "slab_wavefront_evidence",
+        "wavefront_reference",
+    ):
         report_markdown = str(summ.get("report_markdown", "") or "").strip()
         if report_markdown:
             print(report_markdown)

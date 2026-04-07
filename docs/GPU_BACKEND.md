@@ -74,17 +74,41 @@ Mode-level guarantees and strict-gate ownership are documented in `docs/MODE_CON
    - the current one-zone-at-a-time `1D` slab implementation simply pays too much orchestration
      cost as `z` grows.
 10. The next backend optimization track is therefore **single-GPU `1D` slab wavefront**
-    execution:
+   execution:
    - batch several formally independent slabs in one GPU wave,
    - prefer fused launches and slab-local neighbor reuse over many tiny streams,
    - keep 3D decomposition as a correctness/general-purpose path rather than the first scaling
      target for this work.
+11. Read current operator artifacts through the `PR-SW01` contract lens:
+   `eam_decomp_zone_sweep_gpu`, `td_autozoning_advisor_gpu`, and `al_crack_100k_compare_gpu`
+   now expose passive wavefront candidate fields before any fused execution path exists.
 
 ## Next Active GPU Track
 - `PR-SW01..PR-SW05` define and validate single-GPU slab-wavefront execution.
+- `PR-SW01` is complete:
+  passive contract helper `tdmd/wavefront_1d.py` (`pr_sw01_v1`) now emits first-wave size,
+  deferred-zone counts, and fallback-to-sequential reasons in the current operator benchmarks.
+- `PR-SW02` is complete:
+  `scripts/bench_slab_wavefront_evidence_gpu.py` and preset `slab_wavefront_evidence_gpu`
+  now keep crack compare, crack `z=1..12` sweep, control sweep, and control breakdown as the
+  first-class operator evidence surface for this track.
+- `PR-SW03` is complete:
+  `tdmd/wavefront_reference.py`, `scripts/bench_wavefront_reference_equivalence.py`, and preset
+  `wavefront_reference_smoke` now prove grouped `1D` slab waves against the current sequential
+  CPU slab semantics before any CUDA batching path exists.
+- `PR-SW04` is complete:
+  `tdmd/td_local.py` now exposes runtime contract `pr_sw04_v1`; admissible CUDA `1D` slab waves
+  fuse the pre-force half-step across the wave while zone state progression remains
+  sequential-per-zone and `W<=1` stays intact.
 - Goal:
   allow several formally independent `1D` slab zones to share one GPU wave without hidden
   barriers and without changing TD-observable behavior.
+- Next active step:
+  `PR-SW05` profiling, strict acceptance, and advisor-cost integration on top of the proven
+  `PR-SW03` reference semantics and current `PR-SW04` runtime contract.
+  Current implementation already adds passive runtime diagnostics contract `pr_sw05_v1` to
+  `tdmd/td_local.py` and propagates those realized cost-model fields into the operator
+  `EAM/eam-alloy` artifacts and recommendation-only advisor.
 - Non-goal:
   generic "concurrent arbitrary zones" execution. Independence must be explicit, proven, and
   instrumented before any batching lands.

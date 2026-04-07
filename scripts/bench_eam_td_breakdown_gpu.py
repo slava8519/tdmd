@@ -287,6 +287,7 @@ def _profiled_run(
         ),
     )
     fallback_from_cuda = bool(str(requested_device) == "cuda" and effective_device != "cuda")
+    wave_batch_diagnostics = td_local.get_last_td_local_wave_batch_diagnostics().as_dict()
 
     breakdown = {
         "requested_device": str(requested_device),
@@ -344,6 +345,7 @@ def _profiled_run(
         "candidate_enum_share": float(candidate_enum_sec) / float(elapsed) if float(elapsed) > 0.0 else 0.0,
         "zone_assign_share": float(zone_assign_sec) / float(elapsed) if float(elapsed) > 0.0 else 0.0,
         "other_share": float(other_sec) / float(elapsed) if float(elapsed) > 0.0 else 0.0,
+        "wave_batch_diagnostics": wave_batch_diagnostics,
     }
     return elapsed, breakdown
 
@@ -477,6 +479,9 @@ def _run_case(
         aggregated["many_body_evaluation_scope"] = str(last.get("many_body_evaluation_scope", ""))
         aggregated["many_body_consumption_scope"] = str(last.get("many_body_consumption_scope", ""))
         aggregated["many_body_scope_rationale"] = str(last.get("many_body_scope_rationale", ""))
+        aggregated["wave_batch_diagnostics"] = td_local.aggregate_td_local_wave_batch_diagnostics(
+            [dict(run.get("wave_batch_diagnostics", {}) or {}) for run in breakdown_runs]
+        )
     else:
         effective = str(getattr(resolve_backend(str(requested_device)), "device", "cpu"))
         aggregated["requested_device"] = str(requested_device)
@@ -486,6 +491,7 @@ def _run_case(
         aggregated["many_body_evaluation_scope"] = ""
         aggregated["many_body_consumption_scope"] = ""
         aggregated["many_body_scope_rationale"] = ""
+        aggregated["wave_batch_diagnostics"] = td_local.aggregate_td_local_wave_batch_diagnostics([])
 
     return {
         "case": str(label),
@@ -541,6 +547,7 @@ def _build_report(
         f"- space_layout: `{int(zones_nx)}x{int(zones_ny)}x{int(zones_nz)}`",
         "- interpretation: `space_gpu` uses `decomposition=3d`; `time_gpu` uses `decomposition=1d` with the same total zone count.",
         "- `force_scope_contract.version` reports the current many-body td_local contract, while `baseline_reference_version` points to the frozen pre-locality baseline (`pr_mb01_v1`). `evaluation_scope` tells where forces are evaluated, and `consumption_scope` tells whether td_local uses the full result or slices it to target ids.",
+        "- `wave_batch_diagnostics.version` reports the current runtime observability contract for fused pre-force slab waves (`pr_sw05_v1`).",
         "- timing rows below are exclusive where noted: `forces_full_compute_self_sec` excludes nested device-sync time.",
         "",
         "| metric | space_gpu | time_gpu |",
@@ -567,6 +574,41 @@ def _build_report(
         _row("device_sync_share", lambda case: _fmt_share(_b(case, "device_sync_share"))),
         _row("candidate_enum_share", lambda case: _fmt_share(_b(case, "candidate_enum_share"))),
         _row("zone_assign_share", lambda case: _fmt_share(_b(case, "zone_assign_share"))),
+        _row(
+            "wave_batch_enabled",
+            lambda case: str(
+                int(
+                    bool(
+                        dict(rows_by_case[case].get("breakdown", {}) or {})
+                        .get("wave_batch_diagnostics", {})
+                        .get("enabled", False)
+                    )
+                )
+            ),
+        ),
+        _row(
+            "wave_batch_launches_saved_per_step",
+            lambda case: f"{float(dict(dict(rows_by_case[case].get('breakdown', {}) or {}).get('wave_batch_diagnostics', {})).get('launches_saved_per_step', 0.0) or 0.0):.3f}",
+        ),
+        _row(
+            "wave_batch_avg_successful_wave_size",
+            lambda case: f"{float(dict(dict(rows_by_case[case].get('breakdown', {}) or {}).get('wave_batch_diagnostics', {})).get('avg_successful_wave_size', 0.0) or 0.0):.3f}",
+        ),
+        _row(
+            "wave_batch_neighbor_reuse_ratio",
+            lambda case: _fmt_share(
+                float(
+                    dict(dict(rows_by_case[case].get("breakdown", {}) or {}).get("wave_batch_diagnostics", {})).get(
+                        "neighbor_reuse_ratio_weighted", 0.0
+                    )
+                    or 0.0
+                )
+            ),
+        ),
+        _row(
+            "wave_batch_candidate_union_to_target_ratio",
+            lambda case: f"{float(dict(dict(rows_by_case[case].get('breakdown', {}) or {}).get('wave_batch_diagnostics', {})).get('candidate_union_to_target_ratio_avg', 0.0) or 0.0):.3f}",
+        ),
         _row("forces_full_calls", lambda case: f"{int(round(_b(case, 'forces_full_calls')))}"),
         _row("forces_full_calls_per_step", lambda case: f"{_b(case, 'forces_full_calls_per_step'):.3f}"),
         _row("target_local_force_calls", lambda case: f"{int(round(_b(case, 'target_local_force_calls')))}"),
@@ -582,6 +624,7 @@ def _build_report(
     for case in col_order:
         row = rows_by_case[case]
         breakdown = dict(row.get("breakdown", {}) or {})
+        wave_diag = dict(breakdown.get("wave_batch_diagnostics", {}) or {})
         lines.append(
             f"- `{case}` ok={bool(row.get('ok', False))} effective=`{row.get('effective_device', '')}` "
             f"eval_scope=`{breakdown.get('many_body_evaluation_scope', '')}` "
@@ -589,6 +632,8 @@ def _build_report(
             f"median={_fmt_time(float(row.get('elapsed_sec_median', 0.0) or 0.0))} "
             f"forces_full_share={_fmt_share(float(breakdown.get('forces_full_share', 0.0) or 0.0))} "
             f"target_local_calls={int(round(float(breakdown.get('target_local_force_calls', 0.0) or 0.0)))} "
+            f"wave_launches_saved_per_step={float(wave_diag.get('launches_saved_per_step', 0.0) or 0.0):.3f} "
+            f"wave_reuse={_fmt_share(float(wave_diag.get('neighbor_reuse_ratio_weighted', 0.0) or 0.0))} "
             f"device_sync_share={_fmt_share(float(breakdown.get('device_sync_share', 0.0) or 0.0))} "
             f"error=`{row.get('error', '')}`"
         )
@@ -720,10 +765,16 @@ def main() -> int:
                 "device_sync_calls",
                 "device_sync_atoms_total",
                 "avg_synced_atoms_per_call",
+                "wave_batch_enabled",
+                "wave_batch_launches_saved_per_step",
+                "wave_batch_avg_successful_wave_size",
+                "wave_batch_neighbor_reuse_ratio",
+                "wave_batch_candidate_union_to_target_ratio",
             ]
         )
         for row in rows:
             breakdown = dict(row.get("breakdown", {}) or {})
+            wave_diag = dict(breakdown.get("wave_batch_diagnostics", {}) or {})
             w.writerow(
                 [
                     row["case"],
@@ -751,6 +802,11 @@ def main() -> int:
                     f"{float(breakdown.get('device_sync_calls', 0.0) or 0.0):.3f}",
                     f"{float(breakdown.get('device_sync_atoms_total', 0.0) or 0.0):.3f}",
                     f"{float(breakdown.get('avg_synced_atoms_per_call', 0.0) or 0.0):.6f}",
+                    int(bool(wave_diag.get("enabled", False))),
+                    f"{float(wave_diag.get('launches_saved_per_step', 0.0) or 0.0):.6f}",
+                    f"{float(wave_diag.get('avg_successful_wave_size', 0.0) or 0.0):.6f}",
+                    f"{float(wave_diag.get('neighbor_reuse_ratio_weighted', 0.0) or 0.0):.6f}",
+                    f"{float(wave_diag.get('candidate_union_to_target_ratio_avg', 0.0) or 0.0):.6f}",
                 ]
             )
 

@@ -50,6 +50,12 @@ def test_eam_decomp_perf_script_writes_artifacts(tmp_path):
         "time_cpu",
         "time_gpu",
     ]
+    time_wave = dict(dict(data.get("by_case", {})).get("time_gpu", {})).get(
+        "wave_batch_diagnostics", {}
+    )
+    assert str(dict(time_wave).get("version", "")) == "pr_sw05_v1"
+    assert "launches_saved_per_step" in dict(time_wave)
+    assert "neighbor_reuse_ratio_weighted" in dict(time_wave)
 
     report = out_md.read_text(encoding="utf-8")
     assert "EAM Alloy Decomposition Benchmark" in report
@@ -100,6 +106,14 @@ def test_eam_decomp_perf_script_supports_gpu_only_case_selection(tmp_path):
     assert int(data.get("total", 0)) == 2
     assert list(data.get("selected_cases", [])) == ["space_gpu", "time_gpu"]
     assert sorted(dict(data.get("by_case", {})).keys()) == ["space_gpu", "time_gpu"]
+    assert (
+        str(
+            dict(dict(data.get("by_case", {})).get("time_gpu", {}))
+            .get("wave_batch_diagnostics", {})
+            .get("version", "")
+        )
+        == "pr_sw05_v1"
+    )
 
     report = out_md.read_text(encoding="utf-8")
     assert "| metric | space_gpu | time_gpu |" in report

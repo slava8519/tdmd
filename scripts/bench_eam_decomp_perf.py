@@ -12,7 +12,11 @@ import numpy as np
 
 from tdmd.backend import resolve_backend
 from tdmd.potentials import make_potential
-from tdmd.td_local import run_td_local
+from tdmd.td_local import (
+    aggregate_td_local_wave_batch_diagnostics,
+    get_last_td_local_wave_batch_diagnostics,
+    run_td_local,
+)
 
 
 def _fcc_points(*, n_cells: int, lattice_a: float) -> np.ndarray:
@@ -100,9 +104,10 @@ def _run_case(
     effective_device = str(getattr(backend, "device", "cpu"))
     fallback_from_cuda = bool(str(requested_device) == "cuda" and effective_device != "cuda")
     times: list[float] = []
+    wave_batch_runs: list[dict[str, object]] = []
     error = ""
 
-    def _run_once() -> float:
+    def _run_once() -> tuple[float, dict[str, object]]:
         r = np.asarray(r0, dtype=np.float64).copy()
         v = np.asarray(v0, dtype=np.float64).copy()
         t0 = time.perf_counter()
@@ -135,13 +140,18 @@ def _run_case(
             ensemble_kind="nve",
             device=str(requested_device),
         )
-        return float(time.perf_counter() - t0)
+        return (
+            float(time.perf_counter() - t0),
+            get_last_td_local_wave_batch_diagnostics().as_dict(),
+        )
 
     try:
         for _ in range(max(0, int(warmup))):
             _run_once()
         for _ in range(max(1, int(repeats))):
-            times.append(_run_once())
+            elapsed, wave_batch_diag = _run_once()
+            times.append(float(elapsed))
+            wave_batch_runs.append(dict(wave_batch_diag))
     except Exception as exc:
         error = str(exc)
 
@@ -150,6 +160,7 @@ def _run_case(
     mean_sec = float(np.mean(times)) if times else 0.0
     min_sec = float(np.min(times)) if times else 0.0
     max_sec = float(np.max(times)) if times else 0.0
+    wave_batch_diagnostics = aggregate_td_local_wave_batch_diagnostics(wave_batch_runs)
     return {
         "case": str(label),
         "ok": bool(ok),
@@ -165,6 +176,7 @@ def _run_case(
         "elapsed_sec_min": min_sec,
         "elapsed_sec_max": max_sec,
         "steps_per_sec_median": (float(steps) / median_sec) if median_sec > 0.0 else 0.0,
+        "wave_batch_diagnostics": wave_batch_diagnostics,
         "error": error,
     }
 

@@ -24,6 +24,7 @@ from tdmd.forces_gpu import reset_device_state_cache
 from tdmd.io import TelemetryWriter, load_task, task_to_arrays, validate_task_for_run
 from tdmd.potentials import make_potential
 from tdmd.td_local import run_td_local
+from tdmd.wavefront_1d import describe_wavefront_1d_layout
 from tdmd.zones import ZoneLayout1DCells
 
 
@@ -107,7 +108,9 @@ def _load_json(path: Path) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _load_last_telemetry(telemetry_path: Path) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+def _load_last_telemetry(
+    telemetry_path: Path,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     summary = _load_json(Path(f"{telemetry_path}.summary.json"))
     if summary is not None:
         last = summary.get("last_record", {})
@@ -116,7 +119,9 @@ def _load_last_telemetry(telemetry_path: Path) -> tuple[dict[str, object] | None
     if not telemetry_path.exists():
         return summary, None
     try:
-        lines = [line for line in telemetry_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        lines = [
+            line for line in telemetry_path.read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
         if not lines:
             return summary, None
         payload = json.loads(lines[-1])
@@ -125,7 +130,9 @@ def _load_last_telemetry(telemetry_path: Path) -> tuple[dict[str, object] | None
         return summary, None
 
 
-def _speedup(space_row: dict[str, object] | None, time_row: dict[str, object] | None) -> float | None:
+def _speedup(
+    space_row: dict[str, object] | None, time_row: dict[str, object] | None
+) -> float | None:
     if not space_row or not time_row:
         return None
     t_space = float(space_row.get("elapsed_sec", 0.0) or 0.0)
@@ -135,7 +142,9 @@ def _speedup(space_row: dict[str, object] | None, time_row: dict[str, object] | 
     return float(t_space / t_time)
 
 
-def _run_requested_td_preflight(*, box: float, cutoff: float, cell_size: float, zones_total: int) -> dict[str, object]:
+def _run_requested_td_preflight(
+    *, box: float, cutoff: float, cell_size: float, zones_total: int
+) -> dict[str, object]:
     out = {
         "case": f"time_z{int(zones_total)}",
         "ok": False,
@@ -198,7 +207,9 @@ def _run_worker(args) -> int:
         },
     )
 
-    def _write_result_and_exit(*, ok: bool, error: str, elapsed_sec: float | None, exit_code: int) -> int:
+    def _write_result_and_exit(
+        *, ok: bool, error: str, elapsed_sec: float | None, exit_code: int
+    ) -> int:
         last = telemetry.close(completed=bool(ok)) or {}
         payload = {
             "case": str(args.label),
@@ -245,7 +256,9 @@ def _run_worker(args) -> int:
 
     try:
         if str(args.decomposition) == "1d":
-            _td_preflight(float(task.box.x), float(task.cutoff), float(args.cell_size), int(args.zones_total))
+            _td_preflight(
+                float(task.box.x), float(task.cutoff), float(args.cell_size), int(args.zones_total)
+            )
         r = np.asarray(arr.r, dtype=np.float64).copy()
         v = np.asarray(arr.v, dtype=np.float64).copy()
         reset_device_state_cache()
@@ -441,7 +454,9 @@ def _build_markdown_report(
     max_valid_td_zones: int,
     requested_space_layout: tuple[int, int, int],
     requested_td_preflight: dict[str, object],
+    requested_td_wavefront: dict[str, object],
     compare_zones: int,
+    compare_td_wavefront: dict[str, object],
     rows: list[dict[str, object]],
     exact_speedup: float | None,
     common_speedup: float | None,
@@ -466,9 +481,32 @@ def _build_markdown_report(
         "## Exact Request Preflight",
         "",
         f"- `time_z{int(requested_zones)}` preflight_ok=`{bool(requested_td_preflight.get('preflight_ok', False))}`",
+        f"- `time_z{int(requested_zones)}` wavefront_first_wave=`{int(requested_td_wavefront.get('first_wave_size', 0) or 0)}`",
+        f"- `time_z{int(requested_zones)}` wavefront_deferred=`{int(requested_td_wavefront.get('deferred_zones_total', 0) or 0)}`",
+        f"- `time_z{int(requested_zones)}` wavefront_fallback=`{','.join(requested_td_wavefront.get('fallback_to_sequential_reasons', []) or [])}`",
     ]
     if requested_td_preflight.get("error"):
         lines.append(f"- `time_z{int(requested_zones)}` error=`{requested_td_preflight['error']}`")
+    if not bool(requested_td_wavefront.get("layout_valid", True)) and requested_td_wavefront.get(
+        "layout_error"
+    ):
+        lines.append(
+            f"- `time_z{int(requested_zones)}` wavefront_error=`{requested_td_wavefront['layout_error']}`"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Strict-Valid Wavefront Contract",
+            "",
+            f"- common_zones_total: `{int(compare_zones)}`",
+            f"- first_wave_size: `{int(compare_td_wavefront.get('first_wave_size', 0) or 0)}`",
+            f"- deferred_zones_total: `{int(compare_td_wavefront.get('deferred_zones_total', 0) or 0)}`",
+            f"- wave_count: `{int(compare_td_wavefront.get('wave_count', 0) or 0)}`",
+            f"- wave_size_max: `{int(compare_td_wavefront.get('wave_size_max', 0) or 0)}`",
+            f"- fallback_to_sequential_reasons: `{','.join(compare_td_wavefront.get('fallback_to_sequential_reasons', []) or [])}`",
+        ]
+    )
 
     lines.extend(
         [
@@ -496,7 +534,11 @@ def _build_markdown_report(
             + " | "
             + _fmt_rate(row.get("steps_per_sec"))
             + " | "
-            + ("n/a" if row.get("last_step_observed") is None else str(int(row.get("last_step_observed", 0))))
+            + (
+                "n/a"
+                if row.get("last_step_observed") is None
+                else str(int(row.get("last_step_observed", 0)))
+            )
             + " | "
             + str(int(bool(row.get("worker_timed_out", False))))
             + " | "
@@ -528,7 +570,9 @@ def _build_markdown_report(
 
 
 def _main_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Benchmark a pure-Al microcrack task under TD vs space decomposition")
+    ap = argparse.ArgumentParser(
+        description="Benchmark a pure-Al microcrack task under TD vs space decomposition"
+    )
     ap.add_argument("--task", default="")
     ap.add_argument("--task-out", default="")
     ap.add_argument("--out", default="results/al_crack_100k_compare_gpu.csv")
@@ -580,7 +624,9 @@ def main() -> int:
     out_json.parent.mkdir(parents=True, exist_ok=True)
 
     telemetry_dir = str(
-        Path(args.telemetry_dir) if args.telemetry_dir else out_json.parent / f"{out_json.stem}_telemetry"
+        Path(args.telemetry_dir)
+        if args.telemetry_dir
+        else out_json.parent / f"{out_json.stem}_telemetry"
     )
     Path(telemetry_dir).mkdir(parents=True, exist_ok=True)
 
@@ -591,16 +637,16 @@ def main() -> int:
         available_after_crack = None
     else:
         task_out = (
-            Path(args.task_out)
-            if args.task_out
-            else out_json.parent / f"{out_json.stem}.task.yaml"
+            Path(args.task_out) if args.task_out else out_json.parent / f"{out_json.stem}.task.yaml"
         )
-        positions, types, masses, velocities, crack_lo, crack_hi, available_after_crack = build_al_crack_state(
-            target_atoms=int(args.target_atoms),
-            box=float(args.box),
-            lattice_a=float(args.lattice_a),
-            seed=int(args.seed),
-            velocity_std=float(args.velocity_std),
+        positions, types, masses, velocities, crack_lo, crack_hi, available_after_crack = (
+            build_al_crack_state(
+                target_atoms=int(args.target_atoms),
+                box=float(args.box),
+                lattice_a=float(args.lattice_a),
+                seed=int(args.seed),
+                velocity_std=float(args.velocity_std),
+            )
         )
         write_al_crack_task_yaml(
             out_path=task_out,
@@ -635,9 +681,25 @@ def main() -> int:
         cell_size=float(args.cell_size),
         zones_total=requested_zones,
     )
+    requested_td_wavefront = describe_wavefront_1d_layout(
+        box=box,
+        cutoff=cutoff,
+        cell_size=float(args.cell_size),
+        zones_total=requested_zones,
+        zone_cells_w=1,
+        zone_cells_s=1,
+    )
     compare_zones = min(
         requested_zones,
         _max_valid_td_zones(box=box, cutoff=cutoff, cell_size=float(args.cell_size)),
+    )
+    compare_td_wavefront = describe_wavefront_1d_layout(
+        box=box,
+        cutoff=cutoff,
+        cell_size=float(args.cell_size),
+        zones_total=compare_zones,
+        zone_cells_w=1,
+        zone_cells_s=1,
     )
     compare_space_layout = _best_space_layout(compare_zones, box, cutoff)
 
@@ -756,7 +818,9 @@ def main() -> int:
         max_valid_td_zones=compare_zones,
         requested_space_layout=requested_space_layout,
         requested_td_preflight=requested_td,
+        requested_td_wavefront=requested_td_wavefront,
         compare_zones=compare_zones,
+        compare_td_wavefront=compare_td_wavefront,
         rows=rows,
         exact_speedup=exact_speedup,
         common_speedup=common_speedup,
@@ -765,7 +829,9 @@ def main() -> int:
 
     ok_all = all(bool(row.get("ok", False)) for row in rows)
     if bool(args.require_effective_cuda):
-        ok_all = bool(ok_all and all(str(row.get("effective_device", "cpu")) == "cuda" for row in rows))
+        ok_all = bool(
+            ok_all and all(str(row.get("effective_device", "cpu")) == "cuda" for row in rows)
+        )
 
     summary = {
         "n": len(rows),
@@ -790,6 +856,7 @@ def main() -> int:
             },
         },
         "requested_td_preflight": requested_td,
+        "requested_td_wavefront": requested_td_wavefront,
         "max_valid_td_zones_total": int(compare_zones),
         "strict_valid_common_zones_total": int(compare_zones),
         "strict_valid_common_space_layout": {
@@ -797,6 +864,8 @@ def main() -> int:
             "ny": int(compare_space_layout[1]),
             "nz": int(compare_space_layout[2]),
         },
+        "strict_valid_common_td_wavefront": compare_td_wavefront,
+        "wavefront_contract_version": str(compare_td_wavefront.get("contract_version", "")),
         "cell_size": float(args.cell_size),
         "rows": rows,
         "by_case": {str(row["case"]): dict(row) for row in rows},
@@ -870,10 +939,18 @@ def main() -> int:
                     int(row.get("zones_total", 0) or 0),
                     row["space_layout"],
                     "" if row.get("elapsed_sec") is None else f"{float(row['elapsed_sec']):.6f}",
-                    "" if row.get("steps_per_sec") is None else f"{float(row['steps_per_sec']):.6f}",
+                    (
+                        ""
+                        if row.get("steps_per_sec") is None
+                        else f"{float(row['steps_per_sec']):.6f}"
+                    ),
                     "" if row.get("last_step_observed") is None else int(row["last_step_observed"]),
                     int(bool(row.get("worker_timed_out", False))),
-                    "" if row.get("last_wall_sec") is None else f"{float(row['last_wall_sec']):.6f}",
+                    (
+                        ""
+                        if row.get("last_wall_sec") is None
+                        else f"{float(row['last_wall_sec']):.6f}"
+                    ),
                     "" if row.get("last_rss_mb") is None else f"{float(row['last_rss_mb']):.6f}",
                     (
                         ""

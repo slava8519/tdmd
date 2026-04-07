@@ -212,7 +212,11 @@ For each row in `metrics.csv`:
   multi-minute run budget rather than PR CI timing.
 - `eam_decomp_zone_sweep_gpu`: manual GPU-only zone sweep for `10K`-atom `EAM/eam-alloy`.
   It compares `space_gpu` vs `time_gpu` across several valid zone layouts and emits a best-observed
-  layout summary. This is observability-only and is not a PR gate.
+  layout summary. Current `PR-SW01` artifacts also expose passive `1D` slab wavefront contract
+  fields (`wavefront_contract_version`, first-wave size, deferred zones, fallback reasons).
+  `PR-SW05` additionally exposes realized runtime wave-batch cost fields from `pr_sw05_v1`
+  (`time_gpu_wave_batch_launches_saved_per_step`, neighbor-reuse ratio, candidate-union pressure).
+  This is observability-only and is not a PR gate.
 - `eam_td_breakdown_gpu`: manual GPU-only `10K`-atom `EAM/eam-alloy` breakdown for the current
   best observed `2-zone` layout. It compares `space_gpu` vs `time_gpu` and attributes runtime to
   `forces_full`, `target_local_force`, nested device sync, cell-list build, candidate enumeration,
@@ -221,18 +225,55 @@ For each row in `metrics.csv`:
   `baseline_reference_version=pr_mb01_v1`, so current runs can be measured against the frozen
   pre-locality ceiling. After `PR-MB03`, current GPU runs should report `target_local` scope with
   reduced or eliminated `forces_full` share relative to that baseline. Use it to distinguish TD
-  algorithmic headroom from backend/runtime overhead before changing zoning policy.
+  algorithmic headroom from backend/runtime overhead before changing zoning policy. `PR-SW05`
+  adds aggregated `wave_batch_diagnostics` (`pr_sw05_v1`) so the same artifact now reports
+  realized wave occupancy, pre-force launch reduction, neighbor reuse, and union-candidate
+  pressure for the current CUDA `1D` path.
 - `td_autozoning_advisor_gpu`: manual resource-aware GPU-only TD zoning advisor for `EAM/eam-alloy`.
   It detects visible CPU/GPU/MPI resources, enumerates strict-valid layout candidates, benchmarks
   paired `space_gpu` vs `time_gpu` rows, and emits a recommendation-only zoning plan. When
   breakdown is enabled, it also attaches `pr_za01_v1` force-scope evidence for the recommended
-  layout using `baseline_reference_version=pr_mb03_v1`. This is observability/operator guidance,
-  not a runtime policy switch.
+  layout using `baseline_reference_version=pr_mb03_v1`. Current `PR-SW01` artifacts also expose
+  passive wavefront contract fields for every candidate layout and for the recommendation.
+  `PR-SW05` additionally feeds realized runtime wave-batch cost fields from `pr_sw05_v1`
+  into per-layout/advisory artifacts as a passive ranking/tie-break signal.
+  This is observability/operator guidance, not a runtime policy switch.
 - `al_crack_100k_compare_gpu`: manual operator benchmark for a pure-Al `100K` microcrack task with
   `eam/alloy`, requested `1000` zones, and GPU-only execution. It emits an exact-request
   `space_gpu_z1000` row, explicit TD preflight evidence for the requested `1000`-zone time
   decomposition, and, when needed, a strict-valid common-zone fallback comparison with per-case
-  telemetry sidecars. Use it for realistic long-run GPU/operator comparison rather than PR CI.
+  telemetry sidecars. Current `PR-SW01` summaries also include exact-request and strict-valid
+  wavefront contract preflight blocks. Use it for realistic long-run GPU/operator comparison
+  rather than PR CI.
+- `slab_wavefront_evidence_gpu`: manual operator evidence pack for the wavefront track.
+  It combines:
+  - `al_crack_100k_compare_gpu`,
+  - crack `z=1..12` TD-vs-space sweep,
+  - `EAM/eam-alloy` control sweep,
+  - one control breakdown separating force-kernel share from orchestration overhead.
+  - `PR-SW05` runtime wave-batch cost views (`launches_saved_per_step`, neighbor reuse, and
+    candidate-union pressure) for the control sweep/breakdown.
+  - its exact-crack section is considered complete when the requested-layout preflight evidence
+    and the strict-valid common-zone comparison are both present; the intentionally over-requested
+    `space_gpu_z1000` row may still time out and remain part of the evidence.
+  - the crack equal-`z` control now uses the same `420s` space budget as the strict-valid
+    common-zone comparison; earlier `90s` budgets clipped valid `100K` `space` controls starting
+    around `z=4` and were treated as policy artifacts, not negative evidence.
+  - the small `10K` `EAM/eam-alloy` control sweep is intentionally limited to common-valid
+    `z=1..8`; above that range the current control box no longer admits a strict-valid `1D` TD
+    slab width, so only the crack benchmark continues to `z=12`.
+  It is observability-only and is not a PR gate.
+- `wavefront_reference_smoke`: strict CPU/reference proof harness for `PR-SW03`.
+  It runs pair and dense `EAM/eam-alloy` representative cases, requires at least one admissible
+  multi-zone `1D` slab wave unless explicitly relaxed, and proves grouped-wave equivalence
+  against the current sequential CPU slab semantics. Current many-body reference scope is
+  `sequential_1d_many_body_target_local`; this preset is verification-only and does not alter
+  runtime order.
+- `PR-SW04` runtime refinement has no dedicated VerifyLab preset yet:
+  the existing `gpu_smoke`, `gpu_interop_smoke`, and `gpu_metal_smoke` lanes cover the new CUDA
+  async `td_local` path, while focused runtime batching regressions live in
+  `tests/test_td_local_wave_batch.py`. Performance/value acceptance for the new path remains
+  explicitly in `PR-SW05`, which also adds the passive runtime diagnostics contract `pr_sw05_v1`.
 - `scripts/profile_gpu_backend.py`: consolidated CUDA-cycle profiling helper for operator use.
   It combines verify-preset timing ratios, `gpu_perf_smoke`, `EAM/alloy` decomposition benchmarking,
   and optional `Phase E` comparison into one markdown/json report.
@@ -281,14 +322,38 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `results/<run_id>/eam_decomp_zone_sweep_gpu.csv`,
   - `results/<run_id>/eam_decomp_zone_sweep_gpu.md`,
   - `results/<run_id>/eam_decomp_zone_sweep_gpu.summary.json`.
+  - summaries include passive `PR-SW01` wavefront fields per `zones_total`,
+  - summaries now also include `PR-SW05` runtime wave-batch cost fields for `time_gpu`.
 - `eam_td_breakdown_gpu` additionally persists:
   - `results/<run_id>/eam_td_breakdown_gpu.csv`,
   - `results/<run_id>/eam_td_breakdown_gpu.md`,
   - `results/<run_id>/eam_td_breakdown_gpu.summary.json`.
+  - breakdown rows include aggregated `wave_batch_diagnostics` (`pr_sw05_v1`).
 - `td_autozoning_advisor_gpu` additionally persists:
   - `results/<run_id>/td_autozoning_advisor_gpu.csv`,
   - `results/<run_id>/td_autozoning_advisor_gpu.md`,
   - `results/<run_id>/td_autozoning_advisor_gpu.summary.json`.
+  - summaries include passive `PR-SW01` wavefront fields per layout and in the recommendation,
+  - summaries now also include `PR-SW05` runtime wave-batch cost fields per layout and in the
+    recommendation/breakdown sections.
+- `slab_wavefront_evidence_gpu` additionally persists:
+  - `results/<run_id>/slab_wavefront_evidence_gpu.csv`,
+  - `results/<run_id>/slab_wavefront_evidence_gpu.md`,
+  - `results/<run_id>/slab_wavefront_evidence_gpu.summary.json`.
+  - nested artifacts include exact crack compare, crack sweep, control sweep, and control
+    breakdown subdirectories under the evidence-pack base dir.
+  - exact-crack summaries expose both `benchmark_ok_all` (raw child benchmark status) and
+    evidence-pack `ok_all` (section-level completeness status).
+  - control-sweep summaries now record `skipped_invalid_space_zone_totals` instead of aborting
+    when the small `EAM/eam-alloy` control box cannot admit a strict-valid `space` layout for a
+    requested `zones_total`.
+  - evidence views now include `control_wave_batch_cost_model` from `pr_sw05_v1`.
+- `wavefront_reference_smoke` additionally persists:
+  - `results/<run_id>/wavefront_reference_equivalence.csv`,
+  - `results/<run_id>/wavefront_reference_equivalence.md`,
+  - `results/<run_id>/wavefront_reference_equivalence.summary.json`.
+  - summaries expose `reference_force_kind`, `shadow_force_kind`, `max_wave_size`, and
+    per-step force/position/velocity drift against the current sequential CPU slab baseline.
 - `ml_reference_parity_smoke` additionally persists:
   - `results/<run_id>/ml_reference_parity.summary.json`.
 - `scripts/profile_gpu_backend.py` additionally persists:
@@ -300,6 +365,10 @@ Visualization governance and PR plan are defined in `docs/VISUALIZATION.md`.
   - `<telemetry>.manifest.json`,
   - `<telemetry>.summary.json`,
   when `--telemetry` is enabled.
+- `al_crack_100k_compare_gpu` summary additionally includes:
+  - `requested_td_wavefront`,
+  - `strict_valid_common_td_wavefront`,
+  - `wavefront_contract_version`.
 - MPI overlap presets additionally persist per-rank overlap artifacts:
   - `results/<run_id>/mpi_overlap_n2.csv`,
   - `results/<run_id>/mpi_overlap_n2.md`,

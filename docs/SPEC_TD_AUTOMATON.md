@@ -67,6 +67,17 @@ Code: `_deps_table_ok`, `_deps_owner_ok`, `_lag_ok` in `td_automaton.py`.
 - Strict guardrail enforcement (`strict_min_zone_width=True` under `--strict` VerifyLab runs) is input/geometry validation policy and does not alter automaton transitions.
 - Cluster validation scripts (`bench_cluster_scale.py`, `bench_cluster_stability.py`, `bench_mpi_transport_matrix.py`) are profile-driven verification policy only and do not introduce new automaton events/transitions.
 - Materials parity suite v2 / property-level gates (`materials_parity_suite_v2`, `materials_property_gate.py`) are acceptance policy only and do not alter F/D/P/W/S semantics.
+- Single-GPU slab-wavefront contract preflight (`tdmd/wavefront_1d.py`, contract version
+  `pr_sw01_v1`) is observability-only in the current phase: it computes admissible `1D` slab
+  candidate waves but does not add automaton states, events, or concurrent execution semantics.
+- Wave-batch proof harness (`tdmd/wavefront_reference.py`, contract version `pr_sw03_v1`) is
+  verification-only in the current phase: it consumes the existing sequential CPU slab semantics
+  as reference evidence and does not add automaton states, events, or concurrent execution
+  semantics.
+- CUDA wave-batch runtime refinement (`tdmd/td_local.py`, contract version `pr_sw04_v1`) is
+  still outside the automaton layer: it may batch admissible pre-force evaluation for several
+  `1D` slab zones on CUDA, but `START_COMPUTE/FINISH_COMPUTE` and zone `W` ownership remain
+  one-zone-at-a-time.
 
 ## Mode-Specific Messaging
 **Ring-transfer (core):**

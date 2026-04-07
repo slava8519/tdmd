@@ -52,6 +52,11 @@ def test_eam_td_breakdown_gpu_script_writes_artifacts(tmp_path):
     assert time_breakdown["many_body_consumption_scope"] == "target_ids"
     assert int(time_breakdown["many_body_target_local_available"]) == 1
     assert int(time_breakdown["target_local_force_calls"]) > 0
+    assert (
+        str(dict(time_breakdown.get("wave_batch_diagnostics", {})).get("version", ""))
+        == "pr_sw05_v1"
+    )
+    assert "launches_saved_per_step" in dict(time_breakdown.get("wave_batch_diagnostics", {}))
 
     report = out_md.read_text(encoding="utf-8")
     assert "EAM TD GPU Breakdown" in report
@@ -60,4 +65,5 @@ def test_eam_td_breakdown_gpu_script_writes_artifacts(tmp_path):
     assert "forces_full_total_sec" in report
     assert "device_sync_sec" in report
     assert "zone_assign_sec" in report
+    assert "wave_batch_launches_saved_per_step" in report
     assert "EAM TD GPU Breakdown" in proc.stdout

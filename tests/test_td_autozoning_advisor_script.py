@@ -41,18 +41,53 @@ def test_td_autozoning_advisor_script_writes_artifacts(tmp_path):
     assert "resources" in data
     assert "recommendation" in data
     assert "breakdown" in data
-    assert dict(data.get("recommendation", {})).get("recommended_td_layout", {}).get("zones_total") == 2
-    assert dict(data.get("breakdown", {})).get("force_scope_contract", {}).get("version") == "pr_za01_v1"
-    assert int(
-        dict(dict(data.get("breakdown", {})).get("by_case", {}).get("time_gpu", {}))
-        .get("breakdown", {})
-        .get("target_local_force_calls", 0)
-    ) > 0
+    assert str(data.get("wavefront_contract_version", "")) == "pr_sw01_v1"
+    assert (
+        dict(data.get("recommendation", {})).get("recommended_td_layout", {}).get("zones_total")
+        == 2
+    )
+    assert (
+        dict(data.get("recommendation", {}))
+        .get("recommended_td_layout", {})
+        .get("wavefront_first_wave_size", -1)
+        >= 1
+    )
+    assert (
+        dict(data.get("breakdown", {})).get("force_scope_contract", {}).get("version")
+        == "pr_za01_v1"
+    )
+    assert (
+        float(
+            dict(dict(data.get("recommendation", {})).get("recommended_td_layout", {})).get(
+                "time_gpu_wave_batch_launches_saved_per_step", -1.0
+            )
+            or 0.0
+        )
+        >= 0.0
+    )
+    assert (
+        str(dict(data.get("rows", [{}])[0]).get("time_gpu_wave_batch_diagnostics_version", ""))
+        == "pr_sw05_v1"
+    )
+    assert (
+        int(
+            dict(dict(data.get("breakdown", {})).get("by_case", {}).get("time_gpu", {}))
+            .get("breakdown", {})
+            .get("target_local_force_calls", 0)
+        )
+        > 0
+    )
+    assert (
+        dict(data.get("wavefront_by_zones_total", {})).get("2", {}).get("contract_version")
+        == "pr_sw01_v1"
+    )
 
     report = out_md.read_text(encoding="utf-8")
     assert "TD Auto-Zoning Advisor" in report
     assert "Resource Snapshot" in report
     assert "Candidate Layouts" in report
     assert "Recommendation" in report
+    assert "recommended_wavefront_first_wave" in report
+    assert "recommended_wave_batch_launches_saved_per_step" in report
     assert "Breakdown Evidence" in report
     assert "TD Auto-Zoning Advisor" in proc.stdout

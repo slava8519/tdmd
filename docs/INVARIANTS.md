@@ -21,6 +21,9 @@ MPI overlap strict presets and benchmark parsing of `hG/hV/violW/lagV` provide a
 Strict VerifyLab guardrails (`strict_min_zone_width` enabled under `--strict`) enforce geometry preconditions and do not redefine invariant predicates/counters.
 Cluster profile-driven validation lanes (`cluster_scale_smoke`, `cluster_stability_smoke`, `mpi_transport_matrix_smoke`) consume existing counters/artifacts only and do not redefine invariant predicates/counters.
 Materials parity suite v2 and property-level strict gates (`materials_property_gate.py`) consume existing observables/drift metrics only and do not redefine invariant predicates/counters.
+Single-GPU slab-wavefront contract preflight (`tdmd/wavefront_1d.py`, `pr_sw01_v1`) constrains only future admissible grouped `1D` slab execution; current runtime remains sequential and existing invariant predicates/counters stay intact.
+Wave-batch reference proof (`tdmd/wavefront_reference.py`, `pr_sw03_v1`) is verification-only; it consumes the existing `I8` admissibility contract and current CPU slab force scopes without redefining F/D/P/W/S or `W<=1`.
+CUDA wave-batch runtime refinement (`tdmd/td_local.py`, `pr_sw04_v1`) fuses only admissible pre-force `1D` slab work on CUDA; it keeps zone state progression sequential-per-zone and does not redefine F/D/P/W/S or `W<=1`.
 
 ## I0. Formal core: at most one W per rank
 - **Meaning**: a rank cannot compute two zones simultaneously.
@@ -61,3 +64,30 @@ Materials parity suite v2 and property-level strict gates (`materials_property_g
 - **Meaning**: buffer covers drift implied by `max_step_lag`.
 - **Check**: `viol_buffer` counter.
 - **Code**: `tdmd/td_full_mpi.py::update_buffers`, `tdmd/zones.py::compute_zone_buffer_skin`.
+
+## I8. `1D` slab wavefront admissibility (preflight)
+- **Meaning**: two `1D` slab zones may share a candidate GPU wave only if their cutoff-expanded
+  support intervals are disjoint, so neither zone appears in the other's support/dependency set.
+- **Check**: passive preflight summary records `candidate_waves`, `deferred_reason_counts`, and
+  `fallback_to_sequential_reasons`.
+- **Code**: `tdmd/wavefront_1d.py`.
+
+## I9. `1D` slab wave-batch reference equivalence (verification-only)
+- **Meaning**: regrouping `I8`-admissible `1D` slab zones into deterministic waves must preserve
+  the current sequential CPU slab trajectory.
+- **Reference scopes**:
+  - pair baseline: `sync_1d_pair_sequential`,
+  - many-body baseline: `sequential_1d_many_body_target_local`.
+- **Check**: `tests/test_wavefront_reference.py`,
+  `scripts/bench_wavefront_reference_equivalence.py`,
+  `scripts/run_verifylab_matrix.py --preset wavefront_reference_smoke --strict`.
+- **Code**: `tdmd/wavefront_reference.py`, `scripts/bench_wavefront_reference_equivalence.py`.
+
+## I10. CUDA `1D` slab wave-batch state serialization
+- **Meaning**: CUDA wave batching may fuse admissible pre-force evaluation across several slab
+  zones, but only the currently consumed zone may enter `W`; `START_COMPUTE/FINISH_COMPUTE`
+  ordering remains sequential-per-zone.
+- **Check**: `tests/test_td_local_wave_batch.py` validates reduced batched GPU launches together
+  with a trace-level single-zone-in-flight assertion.
+- **Code**: `tdmd/td_local.py::_run_async_1d`,
+  `tdmd/td_local.py::describe_td_local_wave_batch_contract`.

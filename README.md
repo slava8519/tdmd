@@ -12,6 +12,18 @@ Active cycle:
 - CUDA execution cycle (`PR-C01..PR-C08`) is complete.
 - Current maintenance focus: post-CUDA single-GPU TD scaling for large runs via
   `1D` slab-wavefront execution planning (`docs/CUDA_EXECUTION_PLAN.md`).
+- `PR-SW01` contract/observability, `PR-SW02` representative evidence pack, and `PR-SW03`
+  CPU/reference wave-batch proof harness are implemented.
+- `PR-SW04` CUDA wave-batch runtime refinement is implemented under contract `pr_sw04_v1`:
+  admissible `1D` slab waves now fuse the CUDA pre-force half-step while zone state progression
+  remains sequential and `W<=1` stays intact.
+- `PR-SW05` is complete:
+  representative operator evidence confirms that the current slab-wavefront path is a real
+  single-GPU scaling win on the tracked workloads.
+- Current representative evidence:
+  exact/common crack compare at strict-valid `z=18` shows `4.47x` TD-vs-space speedup,
+  crack equal-`z` sweep stays above `1.0x` for `z=1..12`, and the `10K` `EAM/eam-alloy`
+  control case peaks at `2.23x` (`z=8`) with control-breakdown speedup `2.22x`.
 
 Versioning:
 - GitHub releases/tags + `RELEASE_NOTES.md` (README is intentionally not a changelog).

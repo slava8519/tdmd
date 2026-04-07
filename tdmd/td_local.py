@@ -13,7 +13,7 @@ The public ``run_td_local()`` signature is preserved for backward compatibility.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Union
 
 import numpy as np
@@ -35,6 +35,7 @@ from .integrator import vv_finish_velocities, vv_update_positions
 from .many_body_scope import ManyBodyForceScope, td_local_many_body_force_scope
 from .observer import emit_observer, observer_accepts_box
 from .run_configs import TDLocalRunConfig
+from .wavefront_1d import WAVEFRONT_1D_CONTRACT_VERSION, describe_wavefront_1d_zones
 from .zone_bins_localz import PersistentZoneLocalZBinsCache
 from .zones import (
     ZoneLayout1DCells,
@@ -46,6 +47,284 @@ from .zones import (
     zones_overlapping_aabb_pbc,
     zones_overlapping_range_pbc,
 )
+
+TD_LOCAL_WAVE_BATCH_CONTRACT_VERSION = "pr_sw04_v1"
+TD_LOCAL_WAVE_BATCH_DIAGNOSTICS_VERSION = "pr_sw05_v1"
+
+
+@dataclass(frozen=True)
+class TDLocalWaveBatchDiagnostics:
+    version: str = TD_LOCAL_WAVE_BATCH_DIAGNOSTICS_VERSION
+    runtime_contract_version: str = TD_LOCAL_WAVE_BATCH_CONTRACT_VERSION
+    effective_device: str = "cpu"
+    decomposition: str = "1d"
+    sync_mode: bool = False
+    eligible: bool = False
+    enabled: bool = False
+    many_body: bool = False
+    pair_gpu: bool = False
+    steps_total: int = 0
+    candidate_multi_zone_waves_total: int = 0
+    candidate_multi_zone_slots_total: int = 0
+    attempted_wave_batches: int = 0
+    successful_wave_batches: int = 0
+    successful_batched_zones_total: int = 0
+    cached_pre_force_hits: int = 0
+    estimated_pre_force_launches_saved_total: int = 0
+    avg_successful_wave_size: float = 0.0
+    max_successful_wave_size: int = 0
+    candidate_ids_naive_total: int = 0
+    candidate_ids_union_total: int = 0
+    candidate_ids_union_max: int = 0
+    target_ids_union_total: int = 0
+    target_ids_union_max: int = 0
+    neighbor_reuse_atoms_total: int = 0
+    neighbor_reuse_ratio_weighted: float = 0.0
+    candidate_union_to_target_ratio_avg: float = 0.0
+    candidate_union_to_target_ratio_max: float = 0.0
+    launches_saved_per_step: float = 0.0
+    attempted_wave_batches_per_step: float = 0.0
+    successful_wave_batches_per_step: float = 0.0
+    fallback_reason_counts: dict[str, int] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "version": str(self.version),
+            "runtime_contract_version": str(self.runtime_contract_version),
+            "effective_device": str(self.effective_device),
+            "decomposition": str(self.decomposition),
+            "sync_mode": bool(self.sync_mode),
+            "eligible": bool(self.eligible),
+            "enabled": bool(self.enabled),
+            "many_body": bool(self.many_body),
+            "pair_gpu": bool(self.pair_gpu),
+            "steps_total": int(self.steps_total),
+            "candidate_multi_zone_waves_total": int(self.candidate_multi_zone_waves_total),
+            "candidate_multi_zone_slots_total": int(self.candidate_multi_zone_slots_total),
+            "attempted_wave_batches": int(self.attempted_wave_batches),
+            "successful_wave_batches": int(self.successful_wave_batches),
+            "successful_batched_zones_total": int(self.successful_batched_zones_total),
+            "cached_pre_force_hits": int(self.cached_pre_force_hits),
+            "estimated_pre_force_launches_saved_total": int(
+                self.estimated_pre_force_launches_saved_total
+            ),
+            "avg_successful_wave_size": float(self.avg_successful_wave_size),
+            "max_successful_wave_size": int(self.max_successful_wave_size),
+            "candidate_ids_naive_total": int(self.candidate_ids_naive_total),
+            "candidate_ids_union_total": int(self.candidate_ids_union_total),
+            "candidate_ids_union_max": int(self.candidate_ids_union_max),
+            "target_ids_union_total": int(self.target_ids_union_total),
+            "target_ids_union_max": int(self.target_ids_union_max),
+            "neighbor_reuse_atoms_total": int(self.neighbor_reuse_atoms_total),
+            "neighbor_reuse_ratio_weighted": float(self.neighbor_reuse_ratio_weighted),
+            "candidate_union_to_target_ratio_avg": float(
+                self.candidate_union_to_target_ratio_avg
+            ),
+            "candidate_union_to_target_ratio_max": float(
+                self.candidate_union_to_target_ratio_max
+            ),
+            "launches_saved_per_step": float(self.launches_saved_per_step),
+            "attempted_wave_batches_per_step": float(self.attempted_wave_batches_per_step),
+            "successful_wave_batches_per_step": float(self.successful_wave_batches_per_step),
+            "fallback_reason_counts": {
+                str(key): int(value) for key, value in sorted(self.fallback_reason_counts.items())
+            },
+        }
+
+
+@dataclass
+class _WaveBatchDiagnosticsAccumulator:
+    effective_device: str = "cpu"
+    decomposition: str = "1d"
+    sync_mode: bool = False
+    eligible: bool = False
+    enabled: bool = False
+    many_body: bool = False
+    pair_gpu: bool = False
+    steps_total: int = 0
+    candidate_multi_zone_waves_total: int = 0
+    candidate_multi_zone_slots_total: int = 0
+    attempted_wave_batches: int = 0
+    successful_wave_batches: int = 0
+    successful_batched_zones_total: int = 0
+    cached_pre_force_hits: int = 0
+    estimated_pre_force_launches_saved_total: int = 0
+    successful_wave_size_total: int = 0
+    max_successful_wave_size: int = 0
+    candidate_ids_naive_total: int = 0
+    candidate_ids_union_total: int = 0
+    candidate_ids_union_max: int = 0
+    target_ids_union_total: int = 0
+    target_ids_union_max: int = 0
+    neighbor_reuse_atoms_total: int = 0
+    candidate_union_to_target_ratio_total: float = 0.0
+    candidate_union_to_target_ratio_max: float = 0.0
+    fallback_reason_counts: dict[str, int] = field(default_factory=dict)
+
+    def note_fallback(self, reason: str) -> None:
+        key = str(reason).strip()
+        if not key:
+            return
+        self.fallback_reason_counts[key] = int(self.fallback_reason_counts.get(key, 0)) + 1
+
+    def finalize(self) -> TDLocalWaveBatchDiagnostics:
+        avg_wave_size = (
+            float(self.successful_wave_size_total) / float(self.successful_wave_batches)
+            if int(self.successful_wave_batches) > 0
+            else 0.0
+        )
+        neighbor_reuse_ratio_weighted = (
+            float(self.neighbor_reuse_atoms_total) / float(self.candidate_ids_naive_total)
+            if int(self.candidate_ids_naive_total) > 0
+            else 0.0
+        )
+        candidate_union_to_target_ratio_avg = (
+            float(self.candidate_union_to_target_ratio_total) / float(self.successful_wave_batches)
+            if int(self.successful_wave_batches) > 0
+            else 0.0
+        )
+        launches_saved_per_step = (
+            float(self.estimated_pre_force_launches_saved_total) / float(self.steps_total)
+            if int(self.steps_total) > 0
+            else 0.0
+        )
+        attempted_wave_batches_per_step = (
+            float(self.attempted_wave_batches) / float(self.steps_total)
+            if int(self.steps_total) > 0
+            else 0.0
+        )
+        successful_wave_batches_per_step = (
+            float(self.successful_wave_batches) / float(self.steps_total)
+            if int(self.steps_total) > 0
+            else 0.0
+        )
+        return TDLocalWaveBatchDiagnostics(
+            effective_device=str(self.effective_device),
+            decomposition=str(self.decomposition),
+            sync_mode=bool(self.sync_mode),
+            eligible=bool(self.eligible),
+            enabled=bool(self.enabled),
+            many_body=bool(self.many_body),
+            pair_gpu=bool(self.pair_gpu),
+            steps_total=int(self.steps_total),
+            candidate_multi_zone_waves_total=int(self.candidate_multi_zone_waves_total),
+            candidate_multi_zone_slots_total=int(self.candidate_multi_zone_slots_total),
+            attempted_wave_batches=int(self.attempted_wave_batches),
+            successful_wave_batches=int(self.successful_wave_batches),
+            successful_batched_zones_total=int(self.successful_batched_zones_total),
+            cached_pre_force_hits=int(self.cached_pre_force_hits),
+            estimated_pre_force_launches_saved_total=int(
+                self.estimated_pre_force_launches_saved_total
+            ),
+            avg_successful_wave_size=float(avg_wave_size),
+            max_successful_wave_size=int(self.max_successful_wave_size),
+            candidate_ids_naive_total=int(self.candidate_ids_naive_total),
+            candidate_ids_union_total=int(self.candidate_ids_union_total),
+            candidate_ids_union_max=int(self.candidate_ids_union_max),
+            target_ids_union_total=int(self.target_ids_union_total),
+            target_ids_union_max=int(self.target_ids_union_max),
+            neighbor_reuse_atoms_total=int(self.neighbor_reuse_atoms_total),
+            neighbor_reuse_ratio_weighted=float(neighbor_reuse_ratio_weighted),
+            candidate_union_to_target_ratio_avg=float(candidate_union_to_target_ratio_avg),
+            candidate_union_to_target_ratio_max=float(self.candidate_union_to_target_ratio_max),
+            launches_saved_per_step=float(launches_saved_per_step),
+            attempted_wave_batches_per_step=float(attempted_wave_batches_per_step),
+            successful_wave_batches_per_step=float(successful_wave_batches_per_step),
+            fallback_reason_counts={
+                str(key): int(value) for key, value in sorted(self.fallback_reason_counts.items())
+            },
+        )
+
+
+_LAST_TD_LOCAL_WAVE_BATCH_DIAGNOSTICS = TDLocalWaveBatchDiagnostics()
+
+
+def _set_last_td_local_wave_batch_diagnostics(diag: TDLocalWaveBatchDiagnostics) -> None:
+    global _LAST_TD_LOCAL_WAVE_BATCH_DIAGNOSTICS
+    _LAST_TD_LOCAL_WAVE_BATCH_DIAGNOSTICS = diag
+
+
+def get_last_td_local_wave_batch_diagnostics() -> TDLocalWaveBatchDiagnostics:
+    return _LAST_TD_LOCAL_WAVE_BATCH_DIAGNOSTICS
+
+
+def reset_td_local_wave_batch_diagnostics() -> None:
+    _set_last_td_local_wave_batch_diagnostics(TDLocalWaveBatchDiagnostics())
+
+
+def aggregate_td_local_wave_batch_diagnostics(
+    runs: list[TDLocalWaveBatchDiagnostics | dict[str, object]],
+) -> dict[str, object]:
+    if not runs:
+        return TDLocalWaveBatchDiagnostics().as_dict()
+    normalized: list[dict[str, object]] = []
+    for item in runs:
+        if isinstance(item, TDLocalWaveBatchDiagnostics):
+            normalized.append(item.as_dict())
+        else:
+            normalized.append(dict(item))
+    last = normalized[-1]
+    count_keys = [
+        "steps_total",
+        "candidate_multi_zone_waves_total",
+        "candidate_multi_zone_slots_total",
+        "attempted_wave_batches",
+        "successful_wave_batches",
+        "successful_batched_zones_total",
+        "cached_pre_force_hits",
+        "estimated_pre_force_launches_saved_total",
+        "candidate_ids_naive_total",
+        "candidate_ids_union_total",
+        "target_ids_union_total",
+        "neighbor_reuse_atoms_total",
+    ]
+    max_keys = [
+        "max_successful_wave_size",
+        "candidate_ids_union_max",
+        "target_ids_union_max",
+        "candidate_union_to_target_ratio_max",
+    ]
+    float_avg_keys = [
+        "avg_successful_wave_size",
+        "neighbor_reuse_ratio_weighted",
+        "candidate_union_to_target_ratio_avg",
+        "launches_saved_per_step",
+        "attempted_wave_batches_per_step",
+        "successful_wave_batches_per_step",
+    ]
+    out = {
+        "version": str(last.get("version", TD_LOCAL_WAVE_BATCH_DIAGNOSTICS_VERSION)),
+        "runtime_contract_version": str(
+            last.get("runtime_contract_version", TD_LOCAL_WAVE_BATCH_CONTRACT_VERSION)
+        ),
+        "effective_device": str(last.get("effective_device", "cpu")),
+        "decomposition": str(last.get("decomposition", "1d")),
+        "sync_mode": bool(last.get("sync_mode", False)),
+        "eligible": bool(last.get("eligible", False)),
+        "enabled": bool(last.get("enabled", False)),
+        "many_body": bool(last.get("many_body", False)),
+        "pair_gpu": bool(last.get("pair_gpu", False)),
+        "fallback_reason_counts": {},
+    }
+    for key in count_keys:
+        values = [float(item.get(key, 0.0) or 0.0) for item in normalized]
+        out[key] = int(round(sum(values) / float(len(values)))) if values else 0
+    for key in max_keys:
+        values = [float(item.get(key, 0.0) or 0.0) for item in normalized]
+        max_value = max(values, default=0.0)
+        out[key] = int(round(max_value)) if key != "candidate_union_to_target_ratio_max" else float(max_value)
+    for key in float_avg_keys:
+        values = [float(item.get(key, 0.0) or 0.0) for item in normalized]
+        out[key] = (sum(values) / float(len(values))) if values else 0.0
+    fallback_counts: dict[str, int] = {}
+    for item in normalized:
+        for key, value in dict(item.get("fallback_reason_counts", {}) or {}).items():
+            fallback_counts[str(key)] = int(fallback_counts.get(str(key), 0)) + int(value)
+    out["fallback_reason_counts"] = {
+        str(key): int(value) for key, value in sorted(fallback_counts.items())
+    }
+    return out
+
 
 # ---------------------------------------------------------------------------
 # Internal context: resolved runtime state shared by all execution paths
@@ -77,6 +356,7 @@ class _TDLocalCtx:
     many_body: bool
     many_body_force_scope: ManyBodyForceScope | None
     rc_full: float
+    wave_batch_diagnostics: _WaveBatchDiagnosticsAccumulator | None
 
     # observer
     observer: Any
@@ -175,6 +455,26 @@ class _TDLocalCtx:
         return forces_on_targets_celllist_compact(
             rr, self.box, self.potential, self.cutoff, ids_all, cell, atom_types=self.atom_types
         )
+
+
+@dataclass
+class _WaveBatchStepState:
+    contract_version: str
+    wavefront: dict[str, Any]
+    wave_index_by_zid: dict[int, int]
+    wave_zone_ids_by_zid: dict[int, tuple[int, ...]]
+    attempted_wave_indices: set[int]
+    pre_force_cache: dict[int, np.ndarray]
+    pre_force_target_ids: dict[int, np.ndarray]
+
+
+@dataclass(frozen=True)
+class _WaveBatchComputeResult:
+    forces_by_group: list[np.ndarray] | None
+    union_targets_size: int = 0
+    union_candidates_size: int = 0
+    naive_candidate_size: int = 0
+    fallback_reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +795,7 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
             z.skin = skin
             skin_global = max(skin_global, skin)
         rc = ctx.cutoff + skin_global
+        wave_batch = _build_async_1d_wave_batch_state(ctx=ctx, zones=zones, order=order)
 
         for zid in order:
             z = zones[zid]
@@ -531,7 +832,17 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
 
                 if candidate_ids.size or ctx.many_body:
                     # ---- position update (VV half-step 1) ----
-                    if ctx.many_body:
+                    cached_pre = _pop_wave_batch_pre_force(
+                        wave_batch=wave_batch,
+                        ctx=ctx,
+                        zones=zones,
+                        zid=int(zid),
+                        processed=processed,
+                        rc=float(rc),
+                    )
+                    if cached_pre is not None:
+                        f = cached_pre
+                    elif ctx.many_body:
                         f = _forces_many_body_targets(ctx, ids0, candidate_ids, rc)
                     else:
                         f = _forces_on_zone_1d_async(
@@ -582,6 +893,276 @@ def _run_async_1d(ctx: _TDLocalCtx) -> None:
 
         if ctx.observer is not None and ctx.observer_every and (step % ctx.observer_every == 0):
             ctx.emit_observer(step)
+
+
+# ---------------------------------------------------------------------------
+# Async 1D wave-batch helpers (GPU refinement only)
+# ---------------------------------------------------------------------------
+
+
+def _wave_batch_runtime_enabled(ctx: _TDLocalCtx) -> bool:
+    return bool(ctx.backend.device == "cuda" and (ctx.use_gpu_pair or ctx.many_body))
+
+
+def _build_async_1d_wave_batch_state(
+    *,
+    ctx: _TDLocalCtx,
+    zones: list[Any],
+    order: list[int],
+) -> _WaveBatchStepState | None:
+    if not _wave_batch_runtime_enabled(ctx):
+        return None
+    wavefront = describe_wavefront_1d_zones(
+        zones=zones,
+        box=float(ctx.box),
+        cutoff=float(ctx.cutoff),
+        traversal_order=list(order),
+    )
+    candidate_waves = list(wavefront.get("candidate_waves", []) or [])
+    diag = ctx.wave_batch_diagnostics
+    multi_zone_waves = [
+        tuple(int(v) for v in list(dict(wave).get("zone_ids", [])))
+        for wave in candidate_waves
+        if len(list(dict(wave).get("zone_ids", []))) > 1
+    ]
+    if diag is not None:
+        diag.enabled = bool(multi_zone_waves)
+        diag.candidate_multi_zone_waves_total += int(len(multi_zone_waves))
+        diag.candidate_multi_zone_slots_total += int(sum(len(zone_ids) for zone_ids in multi_zone_waves))
+    if not candidate_waves:
+        return None
+    wave_index_by_zid: dict[int, int] = {}
+    wave_zone_ids_by_zid: dict[int, tuple[int, ...]] = {}
+    for wave in candidate_waves:
+        wave_index = int(dict(wave).get("wave_index", 0) or 0)
+        zone_ids = tuple(int(v) for v in list(dict(wave).get("zone_ids", [])))
+        if len(zone_ids) <= 1:
+            continue
+        for zid in zone_ids:
+            wave_index_by_zid[int(zid)] = int(wave_index)
+            wave_zone_ids_by_zid[int(zid)] = tuple(zone_ids)
+    if not wave_zone_ids_by_zid:
+        return None
+    return _WaveBatchStepState(
+        contract_version=TD_LOCAL_WAVE_BATCH_CONTRACT_VERSION,
+        wavefront=dict(wavefront),
+        wave_index_by_zid=wave_index_by_zid,
+        wave_zone_ids_by_zid=wave_zone_ids_by_zid,
+        attempted_wave_indices=set(),
+        pre_force_cache={},
+        pre_force_target_ids={},
+    )
+
+
+def _candidate_ids_for_zone_1d(
+    *,
+    ctx: _TDLocalCtx,
+    zones: list[Any],
+    zid: int,
+) -> tuple[np.ndarray, list[int]]:
+    z = zones[int(zid)]
+    z0p = float(z.z0) - float(ctx.cutoff)
+    z1p = float(z.z1) + float(ctx.cutoff)
+    pzids = zones_overlapping_range_pbc(z0p, z1p, ctx.box, zones)
+    cand: list[np.ndarray] = []
+    for nzid in pzids:
+        nz = zones[int(nzid)]
+        if nz.atom_ids.size:
+            cand.append(np.asarray(nz.atom_ids, dtype=np.int32))
+    if cand:
+        return np.concatenate(cand).astype(np.int32, copy=False), [int(v) for v in pzids]
+    return np.empty((0,), dtype=np.int32), [int(v) for v in pzids]
+
+
+def _compute_wave_batched_pre_forces(
+    *,
+    ctx: _TDLocalCtx,
+    target_groups: list[np.ndarray],
+    candidate_groups: list[np.ndarray],
+    rc: float,
+) -> _WaveBatchComputeResult:
+    if not target_groups:
+        return _WaveBatchComputeResult([])
+    union_targets = np.unique(np.concatenate(target_groups).astype(np.int32))
+    naive_candidate_size = int(sum(int(np.asarray(group, dtype=np.int32).size) for group in candidate_groups))
+    if int(union_targets.size) != sum(int(group.size) for group in target_groups):
+        return _WaveBatchComputeResult(
+            None,
+            union_targets_size=int(union_targets.size),
+            fallback_reason="target_overlap",
+        )
+    candidate_arrays = [group for group in candidate_groups if int(group.size) > 0]
+    union_candidates = (
+        np.unique(np.concatenate(candidate_arrays + [union_targets]).astype(np.int32))
+        if candidate_arrays
+        else np.asarray(union_targets, dtype=np.int32)
+    )
+    if ctx.many_body:
+        f_union = try_gpu_forces_on_targets(
+            r=ctx.r,
+            box=float(ctx.box),
+            cutoff=float(ctx.cutoff),
+            rc=float(rc),
+            potential=ctx.potential,
+            target_ids=union_targets,
+            candidate_ids=union_candidates,
+            atom_types=ctx.atom_types,
+            backend=ctx.backend,
+            prefer_marked_dirty=True,
+        )
+    else:
+        f_union = forces_on_targets_pair_backend(
+            r=ctx.r,
+            box=float(ctx.box),
+            cutoff=float(ctx.cutoff),
+            potential=ctx.potential,
+            target_ids=union_targets,
+            candidate_ids=union_candidates,
+            atom_types=ctx.atom_types,
+            backend=ctx.backend,
+            prefer_marked_dirty=True,
+        )
+    if f_union is None:
+        return _WaveBatchComputeResult(
+            None,
+            union_targets_size=int(union_targets.size),
+            union_candidates_size=int(union_candidates.size),
+            naive_candidate_size=int(naive_candidate_size),
+            fallback_reason="gpu_backend_returned_none",
+        )
+    out_union = np.asarray(f_union, dtype=np.float64)
+    union_pos = {int(gid): int(i) for i, gid in enumerate(union_targets.tolist())}
+    out: list[np.ndarray] = []
+    for group in target_groups:
+        idx = [union_pos[int(gid)] for gid in np.asarray(group, dtype=np.int32).tolist()]
+        out.append(np.asarray(out_union[idx], dtype=np.float64))
+    return _WaveBatchComputeResult(
+        out,
+        union_targets_size=int(union_targets.size),
+        union_candidates_size=int(union_candidates.size),
+        naive_candidate_size=int(naive_candidate_size),
+    )
+
+
+def _prepare_wave_batch_pre_forces(
+    *,
+    wave_batch: _WaveBatchStepState,
+    ctx: _TDLocalCtx,
+    zones: list[Any],
+    processed: np.ndarray,
+    zid: int,
+    rc: float,
+) -> None:
+    diag = ctx.wave_batch_diagnostics
+    wave_index = wave_batch.wave_index_by_zid.get(int(zid))
+    if wave_index is None or int(wave_index) in wave_batch.attempted_wave_indices:
+        return
+    wave_batch.attempted_wave_indices.add(int(wave_index))
+    zone_ids = list(wave_batch.wave_zone_ids_by_zid.get(int(zid), ()))
+    if len(zone_ids) <= 1:
+        return
+    if diag is not None:
+        diag.attempted_wave_batches += 1
+
+    batched_zone_ids: list[int] = []
+    target_groups: list[np.ndarray] = []
+    candidate_groups: list[np.ndarray] = []
+    for wzid in zone_ids:
+        zone = zones[int(wzid)]
+        allowed_state = zone.ztype in (ZoneType.D, ZoneType.P) or (
+            int(wzid) == int(zid) and zone.ztype == ZoneType.W
+        )
+        if not allowed_state or not zone.atom_ids.size:
+            continue
+        target_ids = np.asarray(zone.atom_ids[~processed[zone.atom_ids]], dtype=np.int32)
+        if target_ids.size == 0:
+            continue
+        candidate_ids, _pzids = _candidate_ids_for_zone_1d(ctx=ctx, zones=zones, zid=int(wzid))
+        if target_ids.size == 0 or (candidate_ids.size == 0 and not ctx.many_body):
+            continue
+        batched_zone_ids.append(int(wzid))
+        target_groups.append(np.asarray(target_ids, dtype=np.int32))
+        candidate_groups.append(np.asarray(candidate_ids, dtype=np.int32))
+
+    if len(batched_zone_ids) <= 1:
+        if diag is not None:
+            diag.note_fallback("insufficient_ready_zones")
+        return
+    result = _compute_wave_batched_pre_forces(
+        ctx=ctx,
+        target_groups=target_groups,
+        candidate_groups=candidate_groups,
+        rc=float(rc),
+    )
+    if result.forces_by_group is None:
+        if diag is not None:
+            diag.note_fallback(str(result.fallback_reason))
+        return
+    if diag is not None:
+        wave_size = int(len(batched_zone_ids))
+        diag.successful_wave_batches += 1
+        diag.successful_batched_zones_total += int(wave_size)
+        diag.successful_wave_size_total += int(wave_size)
+        diag.max_successful_wave_size = max(int(diag.max_successful_wave_size), int(wave_size))
+        diag.estimated_pre_force_launches_saved_total += max(0, int(wave_size) - 1)
+        diag.candidate_ids_naive_total += int(result.naive_candidate_size)
+        diag.candidate_ids_union_total += int(result.union_candidates_size)
+        diag.candidate_ids_union_max = max(
+            int(diag.candidate_ids_union_max), int(result.union_candidates_size)
+        )
+        diag.target_ids_union_total += int(result.union_targets_size)
+        diag.target_ids_union_max = max(int(diag.target_ids_union_max), int(result.union_targets_size))
+        diag.neighbor_reuse_atoms_total += max(
+            0, int(result.naive_candidate_size) - int(result.union_candidates_size)
+        )
+        if int(result.union_targets_size) > 0:
+            union_to_target = float(result.union_candidates_size) / float(result.union_targets_size)
+            diag.candidate_union_to_target_ratio_total += float(union_to_target)
+            diag.candidate_union_to_target_ratio_max = max(
+                float(diag.candidate_union_to_target_ratio_max),
+                float(union_to_target),
+            )
+    for wzid, target_ids, forces in zip(batched_zone_ids, target_groups, result.forces_by_group):
+        wave_batch.pre_force_target_ids[int(wzid)] = np.asarray(target_ids, dtype=np.int32).copy()
+        wave_batch.pre_force_cache[int(wzid)] = np.asarray(forces, dtype=np.float64).copy()
+
+
+def _pop_wave_batch_pre_force(
+    *,
+    wave_batch: _WaveBatchStepState | None,
+    ctx: _TDLocalCtx,
+    zones: list[Any],
+    zid: int,
+    processed: np.ndarray,
+    rc: float,
+) -> np.ndarray | None:
+    if wave_batch is None:
+        return None
+    if int(zid) not in wave_batch.pre_force_cache:
+        _prepare_wave_batch_pre_forces(
+            wave_batch=wave_batch,
+            ctx=ctx,
+            zones=zones,
+            processed=processed,
+            zid=int(zid),
+            rc=float(rc),
+        )
+    cached_target_ids = wave_batch.pre_force_target_ids.get(int(zid))
+    if cached_target_ids is None:
+        return None
+    current_target_ids = np.asarray(
+        zones[int(zid)].atom_ids[~processed[zones[int(zid)].atom_ids]], dtype=np.int32
+    )
+    if not np.array_equal(np.asarray(cached_target_ids, dtype=np.int32), current_target_ids):
+        if ctx.wave_batch_diagnostics is not None:
+            ctx.wave_batch_diagnostics.note_fallback("cached_target_ids_changed")
+        wave_batch.pre_force_target_ids.pop(int(zid), None)
+        wave_batch.pre_force_cache.pop(int(zid), None)
+        return None
+    wave_batch.pre_force_target_ids.pop(int(zid), None)
+    if ctx.wave_batch_diagnostics is not None:
+        ctx.wave_batch_diagnostics.cached_pre_force_hits += 1
+    return np.asarray(wave_batch.pre_force_cache.pop(int(zid)), dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -863,6 +1444,21 @@ def _run_td_local_legacy(
         decomposition=str(decomposition),
         device=str(backend.device),
     )
+    wave_batch_diagnostics = _WaveBatchDiagnosticsAccumulator(
+        effective_device=str(backend.device),
+        decomposition=str(decomposition).strip().lower(),
+        sync_mode=bool(sync_mode),
+        eligible=bool(
+            (not bool(sync_mode))
+            and str(decomposition).strip().lower() == "1d"
+            and str(backend.device) == "cuda"
+            and (bool(use_gpu_pair) or bool(many_body))
+        ),
+        many_body=bool(many_body),
+        pair_gpu=bool(use_gpu_pair),
+        steps_total=int(n_steps),
+    )
+    _set_last_td_local_wave_batch_diagnostics(wave_batch_diagnostics.finalize())
 
     ctx = _TDLocalCtx(
         r=r,
@@ -883,6 +1479,7 @@ def _run_td_local_legacy(
         many_body=many_body,
         many_body_force_scope=many_body_force_scope,
         rc_full=max(float(cutoff), GEOM_EPSILON),
+        wave_batch_diagnostics=wave_batch_diagnostics,
         observer=observer,
         observer_every=observer_every,
         accepts_box=observer_accepts_box(observer),
@@ -905,16 +1502,19 @@ def _run_td_local_legacy(
         ensemble_kind=ensemble_kind,
     )
 
-    # Dispatch to the appropriate execution path
-    if sync_mode:
-        if many_body or decomposition.lower() == "3d":
-            _run_sync_global(ctx)
+    try:
+        # Dispatch to the appropriate execution path
+        if sync_mode:
+            if many_body or decomposition.lower() == "3d":
+                _run_sync_global(ctx)
+            else:
+                _run_sync_1d_zones(ctx)
+        elif decomposition.lower() == "3d":
+            _run_async_3d(ctx)
         else:
-            _run_sync_1d_zones(ctx)
-    elif decomposition.lower() == "3d":
-        _run_async_3d(ctx)
-    else:
-        _run_async_1d(ctx)
+            _run_async_1d(ctx)
+    finally:
+        _set_last_td_local_wave_batch_diagnostics(wave_batch_diagnostics.finalize())
 
 
 def describe_many_body_force_scope(
@@ -934,6 +1534,30 @@ def describe_many_body_force_scope(
     if scope is None:
         return None
     return scope.as_dict()
+
+
+def describe_td_local_wave_batch_contract(
+    *,
+    sync_mode: bool = False,
+    decomposition: str = "1d",
+    device: str = "cpu",
+) -> dict[str, object] | None:
+    if bool(sync_mode):
+        return None
+    if str(decomposition).strip().lower() != "1d":
+        return None
+    if str(device).strip().lower() != "cuda":
+        return None
+    return {
+        "version": TD_LOCAL_WAVE_BATCH_CONTRACT_VERSION,
+        "mode": "td_local.async_1d.cuda",
+        "wavefront_contract_version": WAVEFRONT_1D_CONTRACT_VERSION,
+        "diagnostics_contract_version": TD_LOCAL_WAVE_BATCH_DIAGNOSTICS_VERSION,
+        "pre_force_batching": True,
+        "post_force_batching": False,
+        "state_progression": "sequential_per_zone",
+        "formal_core_w_leq_1": True,
+    }
 
 
 def run_td_local(

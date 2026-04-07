@@ -96,6 +96,33 @@ Mode-level guarantees and strict gate mapping are documented in `docs/MODE_CONTR
 - **zone time layer** (`step_id`): `tdmd/td_automaton.py`, `tdmd/td_full_mpi.py`
 - **time-lag safety** (`max_step_lag`): `tdmd/td_automaton.py::_lag_ok`, `tdmd/td_full_mpi.py` (lag gating)
 - **buffer/skin vs lag**: `tdmd/zones.py::compute_zone_buffer_skin`, `tdmd/td_full_mpi.py::update_buffers`
+- **single-GPU `1D` slab wavefront admissibility (preflight only)**:
+  `tdmd/wavefront_1d.py::describe_wavefront_1d_*`
+  - consumed by `scripts/bench_eam_zone_sweep_gpu.py`,
+    `scripts/bench_td_autozoning_advisor.py`, and `scripts/bench_al_crack_compare.py`
+  - contract version `pr_sw01_v1` records candidate waves, deferred zones, and fallback reasons
+    without changing current TD execution order.
+- **wavefront viability evidence pack (`PR-SW02`)**:
+  `scripts/bench_slab_wavefront_evidence_gpu.py`
+  - orchestrates crack compare, crack `z` sweep, control sweep, and control breakdown artifacts
+  - is operator evidence only; it does not change TD/runtime behavior.
+- **wave-batch equivalence proof harness (`PR-SW03`)**:
+  `tdmd/wavefront_reference.py`,
+  `scripts/bench_wavefront_reference_equivalence.py`
+  - proves grouped admissible `1D` slab waves against the current sequential CPU slab semantics
+  - pair reference scope is `sync_1d_pair_sequential`
+  - many-body reference scope is current CPU target-local slab evaluation
+    `sequential_1d_many_body_target_local`
+  - is verification-only; it does not change `td_local` runtime order.
+- **CUDA `1D` slab wave-batch runtime (`PR-SW04`)**:
+  `tdmd/td_local.py::_run_async_1d`,
+  `tdmd/td_local.py::describe_td_local_wave_batch_contract`
+  - runtime contract version `pr_sw04_v1`
+  - batches admissible CUDA wave pre-force evaluation across several `1D` slab zones
+  - keeps `START_COMPUTE/FINISH_COMPUTE` sequential per zone and does not add new automaton
+    states or hidden wave barriers
+  - intentionally leaves post-force evaluation sequential-per-zone to preserve the formal
+    single-`W` core.
 
 ## Geometry / PBC
 - **1D slab ranges**: `tdmd/zones.py::zones_overlapping_range_pbc`

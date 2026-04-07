@@ -11,6 +11,17 @@ Next active CUDA cycle is tracked in `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-
 - CPU path is formal reference semantics.
 - GPU path is refinement only (numerical parity within documented tolerances).
 - Current implementation is CUDA-first via CuPy; active cycle migrates to CuPy RawKernel (real CUDA C kernels) for production performance without semantic drift.
+- `PR-SW01` slab-wavefront contract/observability is passive preflight only:
+  candidate-wave metadata does not change current one-zone-at-a-time execution semantics.
+- `PR-SW03` wave-batch proof harness is verification-only:
+  it proves grouped admissible `1D` slab waves against the current sequential CPU slab semantics
+  and does not change runtime ordering or introduce new barriers.
+- `PR-SW04` CUDA wave batching is a runtime refinement only:
+  admissible `1D` slab waves may fuse the pre-force half-step on CUDA, but zone state progression
+  remains sequential-per-zone and the formal core `W<=1` still applies.
+- `PR-SW05` wave-batch profiling is passive observability only:
+  runtime diagnostics/cost-model fields (`pr_sw05_v1`) may inform operator reports and
+  recommendation-only advice, but they do not auto-apply zoning policy or alter TD scheduling.
 - Visualization/output pipelines are passive observability layers and must not feed back into runtime scheduling/forces.
 - Runtime ensemble support:
   - `serial`: `NVE/NVT/NPT`
@@ -56,6 +67,13 @@ Next active CUDA cycle is tracked in `docs/CUDA_EXECUTION_PLAN.md` (`PR-C01..PR-
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_interop_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_metal_smoke --strict`
   - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset gpu_smoke_hw --strict`
+- Wavefront proof track:
+  - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset wavefront_reference_smoke --strict`
+- Wavefront runtime refinement:
+  - existing `gpu_smoke`, `gpu_interop_smoke`, `gpu_metal_smoke` remain the strict VerifyLab
+    lanes for `pr_sw04_v1`,
+  - `python scripts/run_verifylab_matrix.py examples/td_1d_morse.yaml --preset longrun_envelope_ci --strict`
+    remains required when changing async scheduling/runtime ordering behavior.
 - GPU CUDA cycle:
   - hardware-strict policy remains CUDA-specific (`require_effective_cuda`),
   - mandatory hardware-strict gate: `gpu_smoke_hw`,

@@ -1,3 +1,60 @@
+## 4.5.28
+- Completed `PR-SW05`: representative operator evidence now confirms the slab-wavefront track as
+  a real single-GPU scaling win on the tracked workloads.
+- The first-class evidence pack
+  `results/pr_sw05_slab_wavefront_evidence_gpu_r2/slab_wavefront_evidence_gpu.summary.json`
+  is fully green (`ok_all=true`), with strict-valid crack compare `z=18 = 4.47x`, crack sweep
+  `z=1..12` all above `1.0x`, and `10K` `EAM/eam-alloy` control best `z=8 = 2.23x`.
+- Tightened the evidence-pack operator policy: crack equal-`z` `space` timeout is `420s`,
+  small-control common-valid range is `z=1..8`, and the control breakdown now runs at `z=8`.
+
+## 4.5.27
+- Added `PR-SW05` runtime wave-batch diagnostics contract `pr_sw05_v1` in `tdmd/td_local.py`.
+- `bench_eam_decomp_perf.py`, `bench_eam_zone_sweep_gpu.py`, `bench_eam_td_breakdown_gpu.py`,
+  `bench_td_autozoning_advisor.py`, and `bench_slab_wavefront_evidence_gpu.py` now export
+  realized wave-batch occupancy, launch-reduction, neighbor-reuse, and candidate-union-pressure
+  fields for the CUDA `1D` slab path.
+- The advisor remains recommendation-only: runtime cost-model fields inform operator ranking and
+  reporting but do not auto-apply zoning policy or alter TD semantics.
+
+## 4.5.26
+- Completed `PR-SW04`: CUDA async `td_local` `1D` slab execution now batches admissible wave
+  pre-force evaluations under runtime contract `pr_sw04_v1`.
+- Added `tdmd/td_local.py::describe_td_local_wave_batch_contract` plus regression coverage proving
+  that fused CUDA wave prefetch reduces GPU launch count while keeping zone state progression
+  sequential-per-zone and preserving formal `W<=1`.
+- Kept the post-force half-step sequential by design: this change is a GPU refinement only, not a
+  new TD automaton state or a hidden wave-level barrier.
+
+## 4.5.25
+- Completed `PR-SW03`: added `tdmd/wavefront_reference.py`,
+  `scripts/bench_wavefront_reference_equivalence.py`, and strict VerifyLab preset
+  `wavefront_reference_smoke` as the CPU/reference proof harness for grouped `1D` slab waves.
+- The proof harness now checks wave-batch equivalence against the current sequential CPU slab
+  semantics for both pair forces and current many-body target-local `EAM/eam-alloy` evaluation;
+  it no longer assumes a global sync many-body baseline that `td_local` does not use.
+- Kept runtime semantics unchanged: this is verification-only evidence for `PR-SW04`, not a
+  new batching path and not a hidden barrier.
+
+## 4.5.24
+- Completed `PR-SW02`: added `scripts/bench_slab_wavefront_evidence_gpu.py` and VerifyLab preset
+  `slab_wavefront_evidence_gpu` as the first-class operator evidence pack for the single-GPU
+  slab-wavefront track.
+- The evidence pack keeps `al_crack_100k_compare_gpu`, adds an explicit crack `z=1..12` sweep,
+  reuses an `EAM/eam-alloy` control sweep, and attaches one control breakdown that separates
+  force-kernel share from orchestration/neighbor/sync overhead.
+- Kept runtime semantics unchanged: this is evidence/observability only and does not introduce
+  wave batching or hidden barriers.
+
+## 4.5.23
+- Completed `PR-SW01`: added the passive `1D` slab-wavefront contract helper
+  `tdmd/wavefront_1d.py` with contract version `pr_sw01_v1`.
+- Added operator-side wavefront observability to `eam_decomp_zone_sweep_gpu`,
+  `td_autozoning_advisor_gpu`, and `al_crack_100k_compare_gpu`, including first-wave size,
+  deferred-zone counts, and fallback-to-sequential reasons.
+- Kept runtime semantics unchanged: no new TD states, no hidden global barriers, and no
+  multi-zone execution path yet.
+
 ## 4.5.22
 - Added first-class Al microcrack operator benchmark scripts:
   `scripts/generate_al_crack_task.py` and `scripts/bench_al_crack_compare.py`.

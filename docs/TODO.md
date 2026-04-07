@@ -56,12 +56,15 @@
     validates `examples/interop/ml_reference_suite_v1.json`.
 
 ## Planned Maintenance - Single-GPU TD Wavefront
-- [ ] PR-SW01 Single-GPU wavefront contract for `1D` slabs.
+- [x] PR-SW01 Single-GPU wavefront contract for `1D` slabs.
   - DoD: define the formal notion of a wave of mutually independent slab zones on one GPU,
     including halo/dependency constraints, no-hidden-barrier rules, and observability fields for
     wave size / deferred zones / fallback-to-sequential reasons.
   - Delivery note: this is a contract/invariant step first, not a performance-only shortcut.
-- [ ] PR-SW02 Representative large-run evidence pack for slab-wavefront viability.
+  - Delivery note: passive contract helper `tdmd/wavefront_1d.py` now emits version
+    `pr_sw01_v1` into `eam_decomp_zone_sweep_gpu`, `td_autozoning_advisor_gpu`, and
+    `al_crack_100k_compare_gpu` artifacts without changing sequential runtime behavior.
+- [x] PR-SW02 Representative large-run evidence pack for slab-wavefront viability.
   - DoD: keep `al_crack_100k_compare_gpu` and the `z=1..12` TD sweep as first-class operator
     evidence, plus at least one `EAM/eam-alloy` control benchmark showing where single-GPU TD
     currently loses scaling as `z` grows.
@@ -69,22 +72,42 @@
     - TD vs space at equal `z`,
     - TD absolute runtime vs `z`,
     - orchestration overhead vs force-kernel time.
-- [ ] PR-SW03 CPU/reference wave-batch scheduling proof harness.
+  - Delivery note: `scripts/bench_slab_wavefront_evidence_gpu.py` and VerifyLab preset
+    `slab_wavefront_evidence_gpu` now bundle exact crack compare, crack `z=1..12` sweep,
+    `EAM/eam-alloy` control sweep, and one control breakdown into a single operator evidence pack.
+- [x] PR-SW03 CPU/reference wave-batch scheduling proof harness.
   - DoD: a deterministic shadow scheduler can group formally independent `1D` slabs into waves
     without changing TD-observable results; verification proves equivalence against the current
     sequential slab order on representative CPU cases.
-- [ ] PR-SW04 CUDA fused multi-zone wave execution.
+  - Delivery note: `tdmd/wavefront_reference.py` now emits contract version `pr_sw03_v1`;
+    `scripts/bench_wavefront_reference_equivalence.py` and strict preset
+    `wavefront_reference_smoke` prove equivalence against current sequential CPU slab semantics
+    for pair forces and current many-body target-local `EAM/eam-alloy` evaluation.
+- [x] PR-SW04 CUDA fused multi-zone wave execution.
   - DoD: one GPU wave may contain several independent slabs; pair/table/EAM target-local work is
     issued as a fused batch instead of zone-by-zone launches, with no new implicit global barrier.
   - Focus first on slab-local neighbor reuse and neighbor-only slab exchange, not on generic 3D
     block batching.
-- [ ] PR-SW05 Wavefront profiling, strict acceptance, and zoning-policy integration.
+  - Delivery note: `tdmd/td_local.py` now exposes runtime contract `pr_sw04_v1`; admissible CUDA
+    `1D` slab waves fuse the pre-force half-step across the wave, but zone state progression and
+    velocity-finish ordering remain sequential-per-zone so formal `W<=1` is unchanged.
+- [x] PR-SW05 Wavefront profiling, strict acceptance, and zoning-policy integration.
   - DoD: representative single-GPU large-run artifacts show whether wavefront execution actually
     improves TD absolute runtime vs current sequential `1D` slabs; `td_autozoning_advisor_gpu`
     may consume the corrected wavefront cost model but must remain recommendation-only.
   - Decision rule: if representative wavefront execution does not beat the best current
     sequential-TD wall-clock for at least one large-run workload, close the track as a no-go and
     keep `z ~ G` style guidance instead of forcing higher zone counts.
+  - Delivery note: `tdmd/td_local.py` now exposes passive runtime diagnostics contract
+    `pr_sw05_v1`; `eam_decomp_perf`, `eam_decomp_zone_sweep_gpu`, `eam_td_breakdown_gpu`,
+    `td_autozoning_advisor_gpu`, and `slab_wavefront_evidence_gpu` export realized wave-batch
+    occupancy / launch-reduction / neighbor-reuse / candidate-union-pressure fields without
+    changing TD semantics or auto-applying zoning policy.
+  - Acceptance note: representative evidence pack
+    `results/pr_sw05_slab_wavefront_evidence_gpu_r2/slab_wavefront_evidence_gpu.summary.json`
+    is fully green and confirms a real single-GPU win:
+    strict-valid crack compare `z=18` = `4.47x`, crack sweep `z=1..12` all `>1x`, control best
+    `z=8` = `2.23x`, control breakdown `z=8` = `2.22x`.
 
 ## Mandatory Rules (all PRs)
 - [ ] Preserve TD semantics: no bypass/merge of F/D/P/W/S, no implicit global barriers.

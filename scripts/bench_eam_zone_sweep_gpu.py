@@ -15,6 +15,7 @@ from bench_eam_decomp_perf import (
     _speedup,
 )
 from tdmd.potentials import make_potential
+from tdmd.wavefront_1d import describe_wavefront_1d_layout
 
 
 def _parse_layouts(layouts_arg: str) -> list[tuple[int, int, int, int]]:
@@ -64,8 +65,8 @@ def _build_markdown_report(
         f"- layouts: `{layouts_arg}`",
         "- interpretation: `space_gpu` uses `decomposition=3d`; `time_gpu` uses `decomposition=1d` with the same total zone count.",
         "",
-        "| zones_total | space_layout | space_gpu | time_gpu | td_speedup_vs_space | space_steps_per_sec | time_steps_per_sec |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
+        "| zones_total | space_layout | space_gpu | time_gpu | td_speedup_vs_space | wavefront_first_wave | wavefront_deferred | wave_launches_saved/step | space_steps_per_sec | time_steps_per_sec |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
@@ -79,6 +80,12 @@ def _build_markdown_report(
             + _fmt_time(float(row.get("time_gpu_median_sec", 0.0) or 0.0))
             + " | "
             + _fmt_speedup(row.get("td_speedup_vs_space"))
+            + " | "
+            + str(int(row.get("wavefront_first_wave_size", 0) or 0))
+            + " | "
+            + str(int(row.get("wavefront_deferred_zones_total", 0) or 0))
+            + " | "
+            + f"{float(row.get('time_gpu_wave_batch_launches_saved_per_step', 0.0) or 0.0):.3f}"
             + " | "
             + _fmt_steps_per_sec(float(row.get("space_gpu_steps_per_sec", 0.0) or 0.0))
             + " | "
@@ -108,6 +115,11 @@ def _build_markdown_report(
         lines.append(
             f"- zones_total=`{int(row['zones_total'])}` layout=`{row['space_layout']}` "
             f"ok={bool(row.get('ok', False))} "
+            f"wavefront_first_wave=`{int(row.get('wavefront_first_wave_size', 0) or 0)}` "
+            f"wavefront_deferred=`{int(row.get('wavefront_deferred_zones_total', 0) or 0)}` "
+            f"wave_launches_saved_per_step=`{float(row.get('time_gpu_wave_batch_launches_saved_per_step', 0.0) or 0.0):.3f}` "
+            f"wave_neighbor_reuse=`{100.0 * float(row.get('time_gpu_wave_batch_neighbor_reuse_ratio', 0.0) or 0.0):.2f}%` "
+            f"wavefront_fallback=`{row.get('wavefront_fallback_to_sequential_reasons', '')}` "
             f"space_effective=`{row.get('space_gpu_effective_device', '')}` "
             f"time_effective=`{row.get('time_gpu_effective_device', '')}` "
             f"space_error=`{row.get('space_gpu_error', '')}` "
@@ -165,6 +177,14 @@ def main() -> int:
 
     rows: list[dict[str, object]] = []
     for zones_total, zones_nx, zones_ny, zones_nz in layouts:
+        wavefront = describe_wavefront_1d_layout(
+            box=float(box),
+            cutoff=float(args.cutoff),
+            cell_size=float(args.cell_size),
+            zones_total=int(zones_total),
+            zone_cells_w=int(args.zone_cells_w),
+            zone_cells_s=int(args.zone_cells_s),
+        )
         space_case = _run_case(
             label=f"space_gpu_z{zones_total}",
             requested_device="cuda",
@@ -218,6 +238,7 @@ def main() -> int:
         row_ok = bool(space_case.get("ok", False) and time_case.get("ok", False))
         if bool(args.require_effective_cuda):
             row_ok = bool(row_ok and gpu_effective_ok)
+        wave_batch_diag = dict(time_case.get("wave_batch_diagnostics", {}) or {})
         rows.append(
             {
                 "zones_total": int(zones_total),
@@ -229,9 +250,7 @@ def main() -> int:
                 "space_gpu_steps_per_sec": float(
                     space_case.get("steps_per_sec_median", 0.0) or 0.0
                 ),
-                "time_gpu_steps_per_sec": float(
-                    time_case.get("steps_per_sec_median", 0.0) or 0.0
-                ),
+                "time_gpu_steps_per_sec": float(time_case.get("steps_per_sec_median", 0.0) or 0.0),
                 "td_speedup_vs_space": _speedup(space_case, time_case),
                 "space_gpu_effective_device": str(space_case.get("effective_device", "")),
                 "time_gpu_effective_device": str(time_case.get("effective_device", "")),
@@ -239,6 +258,27 @@ def main() -> int:
                 "time_gpu_fallback_from_cuda": int(time_case.get("fallback_from_cuda", 0) or 0),
                 "space_gpu_error": str(space_case.get("error", "")),
                 "time_gpu_error": str(time_case.get("error", "")),
+                "time_gpu_wave_batch_enabled": bool(wave_batch_diag.get("enabled", False)),
+                "time_gpu_wave_batch_launches_saved_per_step": float(
+                    wave_batch_diag.get("launches_saved_per_step", 0.0) or 0.0
+                ),
+                "time_gpu_wave_batch_neighbor_reuse_ratio": float(
+                    wave_batch_diag.get("neighbor_reuse_ratio_weighted", 0.0) or 0.0
+                ),
+                "time_gpu_wave_batch_candidate_union_to_target_ratio": float(
+                    wave_batch_diag.get("candidate_union_to_target_ratio_avg", 0.0) or 0.0
+                ),
+                "time_gpu_wave_batch": wave_batch_diag,
+                "wavefront_contract_version": str(wavefront.get("contract_version", "")),
+                "wavefront_first_wave_size": int(wavefront.get("first_wave_size", 0) or 0),
+                "wavefront_wave_size_max": int(wavefront.get("wave_size_max", 0) or 0),
+                "wavefront_deferred_zones_total": int(
+                    wavefront.get("deferred_zones_total", 0) or 0
+                ),
+                "wavefront_fallback_to_sequential_reasons": ",".join(
+                    str(item) for item in wavefront.get("fallback_to_sequential_reasons", []) or []
+                ),
+                "wavefront": wavefront,
                 "space_gpu_case": dict(space_case),
                 "time_gpu_case": dict(time_case),
             }
@@ -276,6 +316,15 @@ def main() -> int:
                 "space_gpu_steps_per_sec",
                 "time_gpu_steps_per_sec",
                 "td_speedup_vs_space",
+                "wavefront_contract_version",
+                "wavefront_first_wave_size",
+                "wavefront_wave_size_max",
+                "wavefront_deferred_zones_total",
+                "wavefront_fallback_to_sequential_reasons",
+                "time_gpu_wave_batch_enabled",
+                "time_gpu_wave_batch_launches_saved_per_step",
+                "time_gpu_wave_batch_neighbor_reuse_ratio",
+                "time_gpu_wave_batch_candidate_union_to_target_ratio",
                 "space_gpu_error",
                 "time_gpu_error",
             ]
@@ -298,6 +347,15 @@ def main() -> int:
                         if row["td_speedup_vs_space"] is not None
                         else ""
                     ),
+                    row["wavefront_contract_version"],
+                    int(row["wavefront_first_wave_size"]),
+                    int(row["wavefront_wave_size_max"]),
+                    int(row["wavefront_deferred_zones_total"]),
+                    row["wavefront_fallback_to_sequential_reasons"],
+                    int(bool(row.get("time_gpu_wave_batch_enabled", False))),
+                    f"{float(row.get('time_gpu_wave_batch_launches_saved_per_step', 0.0) or 0.0):.6f}",
+                    f"{float(row.get('time_gpu_wave_batch_neighbor_reuse_ratio', 0.0) or 0.0):.6f}",
+                    f"{float(row.get('time_gpu_wave_batch_candidate_union_to_target_ratio', 0.0) or 0.0):.6f}",
                     row["space_gpu_error"],
                     row["time_gpu_error"],
                 ]
@@ -320,9 +378,9 @@ def main() -> int:
                     ]
                 ),
                 "td_speedup_vs_space": float(
-                    max(ok_rows, key=lambda row: float(row.get("td_speedup_vs_space", 0.0) or 0.0)).get(
-                        "td_speedup_vs_space", 0.0
-                    )
+                    max(
+                        ok_rows, key=lambda row: float(row.get("td_speedup_vs_space", 0.0) or 0.0)
+                    ).get("td_speedup_vs_space", 0.0)
                     or 0.0
                 ),
             }
@@ -332,19 +390,28 @@ def main() -> int:
         "fastest_time_gpu": (
             {
                 "zones_total": int(
-                    min(ok_rows, key=lambda row: float(row.get("time_gpu_median_sec", float("inf")) or float("inf")))[
-                        "zones_total"
-                    ]
+                    min(
+                        ok_rows,
+                        key=lambda row: float(
+                            row.get("time_gpu_median_sec", float("inf")) or float("inf")
+                        ),
+                    )["zones_total"]
                 ),
                 "space_layout": str(
-                    min(ok_rows, key=lambda row: float(row.get("time_gpu_median_sec", float("inf")) or float("inf")))[
-                        "space_layout"
-                    ]
+                    min(
+                        ok_rows,
+                        key=lambda row: float(
+                            row.get("time_gpu_median_sec", float("inf")) or float("inf")
+                        ),
+                    )["space_layout"]
                 ),
                 "time_gpu_median_sec": float(
-                    min(ok_rows, key=lambda row: float(row.get("time_gpu_median_sec", float("inf")) or float("inf"))).get(
-                        "time_gpu_median_sec", 0.0
-                    )
+                    min(
+                        ok_rows,
+                        key=lambda row: float(
+                            row.get("time_gpu_median_sec", float("inf")) or float("inf")
+                        ),
+                    ).get("time_gpu_median_sec", 0.0)
                     or 0.0
                 ),
             }
@@ -383,6 +450,12 @@ def main() -> int:
         "rows": rows,
         "by_layout": {str(row["space_layout"]): dict(row) for row in rows},
         "best_layouts": best_layouts,
+        "wavefront_contract_version": (
+            str(rows[0].get("wavefront_contract_version", "")) if rows else ""
+        ),
+        "wavefront_by_zones_total": {
+            str(int(row["zones_total"])): dict(row.get("wavefront", {}) or {}) for row in rows
+        },
         "report_markdown": report_markdown,
         "effective_cuda_required": bool(args.require_effective_cuda),
         "artifacts": {

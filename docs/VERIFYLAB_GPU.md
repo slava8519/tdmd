@@ -133,6 +133,9 @@ The consolidated profiler keeps the legacy preset timing CSV and adds:
   `10K`-atom `EAM/eam-alloy` comparison between `space_gpu` and `time_gpu`.
 - `eam_decomp_zone_sweep_gpu` extends that benchmark into a manual zone-layout sweep so operators
   can see which valid TD/space zone counts are favorable before any future automation.
+  Current summaries also expose passive `PR-SW01` wavefront contract fields per layout.
+  `PR-SW05` additionally exports realized runtime wave-batch cost fields from `pr_sw05_v1`
+  (launches saved, neighbor reuse, and candidate-union pressure) for the `time_gpu` rows.
 - `eam_td_breakdown_gpu` profiles the current best observed `10K`-atom layout and splits the GPU
   runtime into `forces_full`, `target_local_force`, nested device sync, cell-list build,
   candidate enumeration, and zone bookkeeping. It also records the current many-body force-scope
@@ -141,16 +144,49 @@ The consolidated profiler keeps the legacy preset timing CSV and adds:
   CUDA runs can be compared against the frozen pre-locality ceiling. After `PR-MB03`, current GPU
   runs should report `target_local` scope and reduced `forces_full` share. Use it when TD speedup
   looks smaller than theory suggests and you need to separate backend overhead from true TD
-  headroom.
+  headroom. `PR-SW05` adds aggregated `wave_batch_diagnostics` so the same artifact now reports
+  realized occupancy/launch-reduction/reuse signals for CUDA `1D` slab batching.
 - `td_autozoning_advisor_gpu` turns that corrected locality evidence into a recommendation-only
   zoning report. It detects visible CPU/GPU/MPI resources, benchmarks strict-valid candidate
   layouts, and emits markdown/json/csv artifacts with a recommended TD layout and optional
-  `pr_za01_v1` breakdown evidence. It does not auto-apply runtime zoning policy.
+  `pr_za01_v1` breakdown evidence. Current summaries also expose passive `PR-SW01` wavefront
+  contract fields per layout and for the recommendation. `PR-SW05` additionally feeds runtime
+  `pr_sw05_v1` wave-batch cost fields into the per-layout and recommendation artifacts.
+  It does not auto-apply runtime policy.
 - `al_crack_100k_compare_gpu` is the first-class operator benchmark for a pure-Al `100K`
   microcrack on GPU. It preserves an exact-request `space_gpu_z1000` row, records whether the
   requested `time_gpu_z1000` TD layout is geometrically valid, falls back to a strict-valid common
   zone count when needed, and persists per-case telemetry sidecars so timeout runs still report the
-  last observed step, RSS, and CUDA memory.
+  last observed step, RSS, and CUDA memory. Current summaries also include exact-request and
+  strict-valid passive `PR-SW01` wavefront preflight blocks.
+- `slab_wavefront_evidence_gpu` is the first-class operator evidence pack for `PR-SW02`.
+  It keeps `al_crack_100k_compare_gpu`, adds the crack `z=1..12` sweep, reuses an
+  `EAM/eam-alloy` control sweep, and attaches one control breakdown so the output distinguishes:
+  - TD vs space at equal `z`,
+  - TD absolute runtime vs `z`,
+  - orchestration vs force-kernel share.
+  `PR-SW05` extends the same evidence pack with runtime wave-batch cost views for the control
+  sweep/breakdown (`launches_saved_per_step`, neighbor reuse, candidate-union pressure).
+  The exact-crack section is accepted on evidence completeness, not on raw child-benchmark
+  `ok_all`: the over-requested `space_gpu_z1000` case may still time out as long as the
+  requested-layout preflight and strict-valid common-zone comparison are both recorded.
+  Equal-`z` crack-sweep `space` controls now use a `420s` budget as well; the earlier `90s`
+  setting truncated valid `100K` `space` runs from `z≈4` upward and was treated as an operator
+  budget issue rather than a wavefront verdict.
+  For the small `10K` alloy control case, the preset now keeps only common-valid `z=1..8` for
+  `space` vs `1D` TD comparison and uses `z=8` for the control breakdown.
+  The small `10K` control sweep now records `skipped_invalid_space_zone_totals` for requested
+  `zones_total` values that have no strict-valid `3D` `space` layout instead of aborting the
+  evidence pack.
+- `wavefront_reference_smoke` is the strict CPU/reference proof gate for `PR-SW03`.
+  It remains CPU-only, proves grouped admissible slab waves against the current sequential CPU
+  slab semantics, and freezes the many-body baseline as current target-local
+  `sequential_1d_many_body_target_local` before `PR-SW04` introduces any CUDA batching path.
+- `PR-SW04` now provides the CUDA runtime contract `pr_sw04_v1`:
+  admissible `1D` slab waves fuse the pre-force half-step on CUDA while zone state progression
+  remains sequential-per-zone. Existing `gpu_*` strict lanes cover this runtime path; the
+  operator-side performance decision still belongs to `PR-SW05`, which adds the passive runtime
+  diagnostics contract `pr_sw05_v1`.
 - Current decision policy:
   stay on `CuPy RawKernel` unless representative profiling stops beating both CPU reference and
   the archived `Phase E` baseline.

@@ -87,7 +87,12 @@ def test_bench_al_crack_compare_script_writes_artifacts(tmp_path):
     assert bool(data.get("ok_all")) is True
     assert bool(data.get("generated_task")) is True
     assert bool(data.get("requested_td_preflight", {}).get("preflight_ok")) is True
+    assert str(data.get("wavefront_contract_version", "")) == "pr_sw01_v1"
+    assert bool(dict(data.get("requested_td_wavefront", {})).get("layout_valid")) is True
     assert int(data.get("strict_valid_common_zones_total", 0)) == 2
+    assert (
+        int(dict(data.get("strict_valid_common_td_wavefront", {})).get("first_wave_size", 0)) >= 1
+    )
     assert len(list(data.get("rows", []))) == 2
     for row in data.get("rows", []):
         assert row["effective_device"] == "cpu"
@@ -97,6 +102,7 @@ def test_bench_al_crack_compare_script_writes_artifacts(tmp_path):
 
     report = out_md.read_text(encoding="utf-8")
     assert "Al Crack Decomposition Benchmark" in report
+    assert "Strict-Valid Wavefront Contract" in report
     assert "strict_valid_td_speedup_vs_space" in report
     assert "max_valid_td_zones_total" in report
     assert "Al Crack Decomposition Benchmark" in proc.stdout
